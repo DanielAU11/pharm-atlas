@@ -1,0 +1,27 @@
+/* Custom spacing for the 98 look */
+.med-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px;
+    border-bottom: 1px solid #dfdfdf;
+}
+
+.med-item-row:last-child {
+    border-bottom: none;
+}
+
+.tree-view {
+    background: white;
+    padding: 0;
+}
+
+fieldset {
+    margin-bottom: 15px;
+}
+
+/* Ensure the red text for low stock stands out */
+.low-stock-text {
+    color: #ff0000;
+    font-weight: bold;
+}
