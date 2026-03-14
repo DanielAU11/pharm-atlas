@@ -1,4 +1,4 @@
-let db = { family: [], inventory: [], schedules: [], history: [], recipes: [] };
+let db = { family: [], inventory: [], schedules: [], history: []};
 let currentEditingMedId = null;
 let currentEditingMemberId = null;
 
@@ -19,7 +19,7 @@ const toBase64 = file => new Promise((resolve, reject) => {
 });
 
 window.switchTab = function(tabName) {
-    const tabs = ['dashboard', 'schedules', 'inventory', 'family', 'druginfo', 'compounding'];
+    const tabs = ['dashboard', 'schedules', 'inventory', 'family', 'druginfo'];
     tabs.forEach(t => {
         const tabElement = document.getElementById(`tab-${t}`);
         const panelElement = document.getElementById(`panel-${t}`);
@@ -305,31 +305,32 @@ window.updateSchedStrength = function() {
 };
 
 //Scheduler checks every minute to see if any meds are due and sends a notification
-function checkSchedules() {
+async function checkSchedules() {
     const now = new Date();
-    // Force HH:MM format (e.g., "08:30")
-    const currentHours = now.getHours().toString().padStart(2, '0');
-    const currentMinutes = now.getMinutes().toString().padStart(2, '0');
-    const currentTime = `${currentHours}:${currentMinutes}`;
-    
-    console.log("Checking schedules for time:", currentTime); // Debugging line
+    const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
     db.schedules.forEach(s => {
-        // Only notify if the time matches EXACTLY
         if (s.times.includes(currentTime)) {
             const med = db.inventory.find(m => m.id === s.medId);
             const member = db.family.find(f => f.id === s.memberId);
             
             if (med && member) {
-                console.log("Match found! Sending notification for:", med.name);
-                window.api.notify(
-                    "Medication Due!", 
-                    `${member.firstName} needs ${s.doseQty} ${med.formulation} of ${med.name}${med.strength ? ` (${med.strength}${med.units})` : ''} now!`
-                );
+                // 1. Desktop Notification
+                window.api.notify("Medication Due!", `${member.firstName} needs ${med.name}`);
+
+                // 2. Email Notification (If member has an email)
+                if (member.email) {
+                    window.api.sendEmail({
+                        to: member.email,
+                        subject: `PharmAtlas: Medication Reminder for ${member.firstName}`,
+                        body: `Hello, this is a reminder to take ${s.doseQty} ${med.formulation} of ${med.name} (${med.strength}${med.units}).\nInstructions: ${s.instructions || 'None'}`
+                    });
+                }
             }
         }
     });
 }
+
 setInterval(checkSchedules, 60 * 1000); // Check every minute
 checkSchedules(); // Initial check on load  
 
@@ -449,40 +450,6 @@ window.saveRecipe = async function() {
     await sync();
     alert("Recipe saved to Master Formulary!");
 };
-
-window.prepareCompoundBatch = function() {
-    const recipeId = document.getElementById('prepare-select').value;
-    const multiplier = parseFloat(document.getElementById('prepare-multiplier').value) || 1;
-    const recipe = db.recipes.find(r => r.id === recipeId);
-    
-    const container = document.getElementById('prep-checklist');
-    container.innerHTML = `<h4>Batch Size: ${recipe.totalVol * multiplier} mL</h4>`;
-    
-    recipe.ingredients.forEach(ing => {
-        const row = document.createElement('div');
-        row.className = 'field-row';
-        row.innerHTML = `
-            <input type="checkbox" onchange="this.parentElement.style.background = this.checked ? '#e0ffe0' : ''">
-            <label>${ing.name}: ${(ing.amount * multiplier).toFixed(2)} ${ing.unit}</label>
-        `;
-        container.appendChild(row);
-    });
-    
-    document.getElementById('prep-modal').style.display = 'flex';
-};
-
-window.finishBatch = async function() {
-    const recipeId = document.getElementById('prepare-select').value;
-    const multiplier = parseFloat(document.getElementById('prepare-multiplier').value) || 1;
-    const recipe = db.recipes.find(r => r.id === recipeId);
-    
-    const invItem = db.inventory.find(i => i.id === 'comp_' + recipe.id);
-    invItem.stock += (recipe.totalVol * multiplier);
-    
-    await sync();
-    document.getElementById('prep-modal').style.display = 'none';
-};
-
 
 
 // --- RENDERING ---

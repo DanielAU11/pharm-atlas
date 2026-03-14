@@ -19,6 +19,7 @@
     "make": "electron-forge make"
   },
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.1"
+    "electron-squirrel-startup": "^1.0.1",
+    "nodemailer": "^8.0.2"
   }
 }
