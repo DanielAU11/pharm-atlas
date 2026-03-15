@@ -124,6 +124,7 @@ window.openOrderModifier = function(scheduleId) {
     document.getElementById('mod-start').value = sched.startDate;
     document.getElementById('mod-end').value = sched.endDate === "Ongoing" ? '' : sched.endDate;
     document.getElementById('mod-freq').value = sched.freq;
+    document.getElementById('mod-time').value = sched.times[0] || '';
     document.getElementById('mod-instr').value = sched.instructions || "";
     
     document.getElementById('order-modifier-modal').style.display = 'flex';
@@ -136,6 +137,7 @@ window.saveOrderModification = async function() {
         sched.startDate = document.getElementById('mod-start').value;
         sched.endDate = document.getElementById('mod-end').value || "Ongoing";
         sched.freq = document.getElementById('mod-freq').value;
+        sched.times = [document.getElementById('mod-time').value];
         sched.instructions = document.getElementById('mod-instr').value;
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
