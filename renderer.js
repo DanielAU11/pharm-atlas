@@ -219,7 +219,7 @@ window.takeDose = async function(medId) {
     const med = db.inventory.find(m => m.id === medId);
     if (med && med.stock > 0) {
         med.stock -= 1;
-        db.history.unshift({ id: Date.now().toString(), timestamp: new Date().toLocaleString(), medName: med.name, details: "Manual dose" });
+        db.history.unshift({ id: Date.now().toString(), timestamp: new Date().toLocaleString(), medName: med.name, details: "Manual dose override" });
         await sync();
     }
 };
@@ -261,15 +261,38 @@ window.openMedProfile = function(id) {
 window.saveMedProfile = async function() {
     const med = db.inventory.find(m => m.id === currentEditingMedId);
     if (med) {
+        // 1. Update text fields
         med.stock = parseInt(document.getElementById('modal-stock').value);
         med.notes = document.getElementById('modal-notes').value;
         med.storage = document.getElementById('modal-storage').value;
         med.controlLevel = document.getElementById('modal-control-level').value;
         med.expiry = document.getElementById('modal-expiry').value;
+
+        // 2. Handle Image Upload
+        const imageInput = document.getElementById('modal-image-input');
+        if (imageInput && imageInput.files[0]) {
+            try {
+                const base64 = await toBase64(imageInput.files[0]);
+                const fileName = `img_${Date.now()}_${imageInput.files[0].name.replace(/\s/g, '_')}`;
+                // Save the image to the PharmAtlasData folder
+                const newImagePath = await window.api.saveImage(fileName, base64);
+                med.imagePath = newImagePath; // Update the DB with the new path
+            } catch (e) {
+                console.error("Error saving updated image:", e);
+                alert("Failed to save image.");
+            }
+        }
+
+        // 3. Sync and Close
         await sync();
+        
+        // Clear the file input for next time
+        if (imageInput) imageInput.value = ''; 
+        
         closeMedModal();
     }
 };
+
 
 window.closeMedModal = () => document.getElementById('med-modal').style.display = 'none';
 
