@@ -186,6 +186,23 @@ window.addInventory = async function() {
     const isLiquid = units.includes('/');
     const expiry = document.getElementById('med-expiry').value;
     if (!name || isNaN(qty)) return alert("Name and Qty required.");
+    
+    // --- NEW COMBINATION LOGIC ---
+    const isCombo = document.getElementById('is-combination').checked;
+    let components = [];
+    let finalStrength = document.getElementById('med-strength').value;
+
+    if (isCombo) {
+        const rows = document.querySelectorAll('#ingredient-list .combo-row');
+        rows.forEach(row => {
+            components.push({
+                name: row.querySelector('.ing-name').value,
+                strength: parseFloat(row.querySelector('.ing-strength').value) || 0
+            });
+        });
+        // Set strength display to "5/325" format
+        finalStrength = components.map(c => c.strength).join('/');
+    }
 
     let imagePath = null;
     if (imageInput.files[0]) {
@@ -199,13 +216,15 @@ window.addInventory = async function() {
     db.inventory.push({ 
         id: Date.now().toString(), 
         name, 
-        strength, 
+        strength: finalStrength,
         units, 
         formulation, // 'Tablets', 'mL', 'Capsules', etc.
         stock: qty, 
         maxCapacity: qty,
         expiry: expiry,
         isLiquid: document.getElementById('med-formulation').value === 'mL',
+        isCombination: isCombo,
+        components: components, // Only for combinations    
         minThreshold: parseInt(document.getElementById('med-threshold').value) || 5,
         imagePath: imagePath 
     });
@@ -213,6 +232,9 @@ window.addInventory = async function() {
     document.getElementById('med-name').value = '';
     document.getElementById('med-strength').value = '';
     document.getElementById('med-qty').value = '';
+    document.getElementById('ingredient-list').innerHTML = '';
+    document.getElementById('is-combination').checked = false;
+    document.getElementById('combination-fields').style.display = 'none';
     imageInput.value = '';
     await sync();
 };
@@ -546,7 +568,7 @@ function renderCalendar() {
             if (med && mem) {
                 cell.innerHTML += `
                     <div style="border-bottom:1px dotted #808080; padding: 1px 0; color: #000;"; cursor: pointer;" onclick="openOrderModifier('${mem.id}')">
-                        <i style="color: blue;">${s.specificTime}</i> - <b>${mem.firstName}</b>: ${med.name} ${med.strength}${med.units}
+                        <i style="color: blue;">${s.specificTime}</i> - <b>${mem.firstName}</b>: ${med.name} ${med.strength}${med.units} ${s.doseQty} ${med.formulation} 
                          
                     </div>`;  
             }
@@ -555,6 +577,28 @@ function renderCalendar() {
         grid.appendChild(cell);
     }
 }
+
+window.toggleComboFields = function() {
+    const isCombo = document.getElementById('is-combination').checked;
+    document.getElementById('combination-fields').style.display = isCombo ? 'block' : 'none';
+    if (isCombo && document.getElementById('ingredient-list').children.length === 0) {
+        addIngredientRow(); // Add first row by default
+    }
+};
+
+window.addIngredientRow = function() {
+    const container = document.getElementById('ingredient-list');
+    const div = document.createElement('div');
+    div.className = 'field-row combo-row';
+    div.style.marginBottom = '5px';
+    div.innerHTML = `
+        <input class="ing-name" type="text" placeholder="Name (e.g. APAP)" style="width:100px;">
+        <input class="ing-strength" type="number" placeholder="Str" style="width:50px;">
+        <span class="ing-unit-label">mg</span>
+        <button onclick="this.parentElement.remove()">X</button>
+    `;
+    container.appendChild(div);
+};
 
 
 function renderAll() {
@@ -582,6 +626,12 @@ function renderAll() {
     if (tableBody) tableBody.innerHTML = '';
     if (medDataList) medDataList.innerHTML = '';
 db.inventory.forEach(med => {
+    let displayStrength = med.strength;
+
+// If it's a combination product and has components, join their strengths (e.g., 5/325)
+    if (med.isCombination && med.components && med.components.length > 0) {
+    displayStrength = med.components.map(c => c.strength).join('/');
+    }
     if (tableBody) {
         const row = document.createElement('tr');
 
@@ -604,13 +654,14 @@ db.inventory.forEach(med => {
             row.style.color = "red";
             row.style.fontWeight = "bold";
         }
+       
 
         row.innerHTML = `
             <td style="display:flex; align-items:center; gap:5px;">
                 ${med.imagePath ? `<img src="file://${med.imagePath}" style="width:20px; height:20px; object-fit:cover;">` : '💊'}
                 <span style="cursor:pointer; text-decoration:underline;" onclick="openMedProfile('${med.id}')">${med.name}</span>
             </td>
-            <td>${med.strength}</td>
+            <td>${displayStrength}</td> 
             <td>${med.units}</td>
             <td>${med.stock}</td>
             <td>${med.minThreshold}</td>
@@ -663,8 +714,16 @@ window.calculateLiveDose = function() {
     unitsLabel.innerText = med.formulation;
 
     let totalDose = 0;
-    let doseUnit = "";
+    let doseUnit = med.units.includes('/') ? med.units.split('/')[0] : med.units;
 
+    if (med.isCombination && med.components && med.components.length > 0) {
+        const results = med.components.map(c => {
+            const total = (c.strength * qty).toFixed(2);
+            return `${total}${doseUnit}`;
+        });
+        calcDisplay.value = results.join(' / ');
+        return; // Exit early as we've handled the display
+    }
     if (med.isLiquid) {
         // Example: 100mg/5mL -> concentration is 20mg per 1mL
         // User enters 10 in "Give Qty" (mL)

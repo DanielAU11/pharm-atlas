@@ -131,6 +131,20 @@
                             <label>Photo:</label>
                             <input id="med-image-input" type="file" accept="image/*" />
                         </div>
+                        <!-- Inside panel-inventory fieldset -->
+                        <div id="combination-fields" style="display:none; margin-top:10px; border:1px dashed gray; padding:10px; background:#f0f0f0;">
+                            <strong>Active Ingredients:</strong>
+                            <div id="ingredient-list">
+                                <!-- Dynamic ingredient rows go here -->
+                            </div>
+                            <button type="button" onclick="addIngredientRow()">+ Add Ingredient</button>
+                        </div>
+
+                        <div class="field-row" style="margin-top:10px;">
+                            <input type="checkbox" id="is-combination" onchange="toggleComboFields()">
+                            <label for="is-combination">Combination Product?</label>
+                        </div>
+
                         <div class="field-row" style="margin-top: 8px;">
                             <label for="med-strength">Strength:</label>
                             <input id="med-strength" type="text" style="width: 60px;" />
