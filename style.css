@@ -25,3 +25,46 @@ fieldset {
     color: #ff0000;
     font-weight: bold;
 }
+
+@media print {
+    @page {
+        size: 2.25in 1.25in;
+        margin: 0 !important; /* Forces the printer to ignore its own margins */
+    }
+    * {
+        -webkit-print-color-adjust: exact;
+        box-sizing: border-box;
+    }
+    html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 2.25in !important;
+        height: 1.25in !important; /* Force the document to be exactly one label tall */
+        overflow: hidden !important;
+    }
+    body * { visibility: hidden; }
+    #print-area, #print-area * { visibility: visible; }
+    #print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 2.25in !important;
+        height: 1.25in !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        display: block !important;
+    }
+    .label-page {
+        width: 2.25in !important;
+        height: 1.25in !important;
+        display: block !important;
+        position: relative;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0.05in !important;
+        page-break-after: avoid !important;
+        page-break-before: avoid !important;
+    }
+    .label-date { font-weight: bold; border-bottom: 1px solid black; font-size: 8pt; margin-bottom: 1px; }
+    .label-med-row { font-size: 9pt; margin-bottom: 1px; word-wrap: break-word; line-height: 0.9; }
+}

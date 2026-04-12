@@ -52,6 +52,7 @@ window.openMemberModal = function(id = null) {
     const modal = document.getElementById('member-modal');
     const title = document.getElementById('member-modal-title');
     
+
     // Helper function to set value only if element exists
     const safeSet = (elId, value) => {
         const el = document.getElementById(elId);
@@ -68,12 +69,14 @@ window.openMemberModal = function(id = null) {
     
     const activeMedsContainer = document.getElementById('member-active-meds-list');
     if (activeMedsContainer) activeMedsContainer.innerHTML = '';
-
+    
     if (id) {
         const m = db.family.find(member => member.id === id);
         if (m) {
-            if (title) title.innerText = `Edit: ${m.firstName} ${m.lastName}`;
-            
+            if (title) {
+                title.innerHTML = `Edit: ${m.firstName} ${m.lastName} 
+                <button onclick="event.stopPropagation(); printWeeklyLabels('${m.id}')" style="margin-left:10px; font-size:11px; cursor:pointer;">🖨️ Print Week</button>`;
+            }
             // 2. Fill fields safely
             safeSet('m-first', m.firstName);
             safeSet('m-middle', m.middleName);
@@ -99,6 +102,7 @@ window.openMemberModal = function(id = null) {
                     <strong>${med ? med.name : 'Unknown'} ${med ? med.strength : ''}${med ? med.units : ''}</strong> - ${s.doseQty} ${med ? med.formulation : ''}<br>
                     <small>${s.freq} | ${s.times.join(', ')}</small>
                     <div style="text-align:right; margin-top:5px;">
+                        <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">🖨️ Label</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">💊 Administer</button>
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
                     </div>
@@ -431,29 +435,66 @@ window.administerDose = async function(medId, scheduleId) {
     const med = db.inventory.find(m => m.id === medId);
     const sched = db.schedules.find(s => s.id === scheduleId);
     
-    // doseQty is the number of units (e.g., 2 tablets or 10 mL)
-    const qtyToSubtract = parseFloat(sched.doseQty) || 0;
+    if (!med || !sched) return;
 
-    if (med && med.stock >= qtyToSubtract) {
-        med.stock -= qtyToSubtract;
-        
-        // As a pharmacist, you'll appreciate the detailed log:
-        const logDetail = med.isLiquid ? `${qtyToSubtract} mL` : `${qtyToSubtract} ${med.formulation}`;
-        
-        db.history.unshift({ 
-            id: Date.now().toString(), 
-            timestamp: new Date().toLocaleString(), 
-            medName: med.name, 
-            details: `Administered ${logDetail} via Schedule` 
-        });
-        if (sched.isOneTime) {
-            db.schedules = db.schedules.filter(s => s.id !== scheduleId);
+    // 1. Define "Special" formulations (Topical, Ophthalmic, Otic)
+    const specialFormulations = ['Cream', 'Ointment', 'Gel', 'Patch', 'Drops', 'Solution', 'Spray'];
+    const isSpecial = specialFormulations.some(f => med.formulation.includes(f));
+    
+    let qtyToSubtract = 0;
+    let logDetail = "";
+
+    // 2. Determine Inventory Logic
+    if (isSpecial) {
+        // Pop-up for special meds
+        const choice = confirm(
+            `ADMINISTRATION: ${med.name} (${med.formulation})\n\n` +
+            `Click OK: Log dose ONLY (Stock remains ${med.stock})\n` +
+            `Click CANCEL: Log dose AND remove 1 container from stock.`
+        );
+
+        if (choice) {
+            // User clicked OK - just log it
+            qtyToSubtract = 0;
+            logDetail = `Dose applied (${med.formulation})`;
+        } else {
+            // User clicked Cancel - remove 1 whole unit (tube/bottle)
+            if (med.stock >= 1) {
+                qtyToSubtract = 1;
+                logDetail = `Dose applied & 1 container removed from stock`;
+            } else {
+                return alert("Insufficient stock to remove a container!");
+            }
         }
-        await sync();
-    } else { 
-        alert(`Insufficient stock! You need ${qtyToSubtract}, but only have ${med ? med.stock : 0} left.`); 
+    } else {
+        // Standard Logic for Tablets/Liquids
+        qtyToSubtract = parseFloat(sched.doseQty) || 0;
+        if (med.stock >= qtyToSubtract) {
+            logDetail = med.isLiquid ? `${qtyToSubtract} mL` : `${qtyToSubtract} ${med.formulation}`;
+        } else {
+            return alert(`Insufficient stock! You need ${qtyToSubtract}, but only have ${med.stock} left.`);
+        }
     }
+
+    // 3. Update Database
+    med.stock -= qtyToSubtract;
+    
+    db.history.unshift({ 
+        id: Date.now().toString(), 
+        timestamp: new Date().toLocaleString(), 
+        medName: med.name, 
+        details: `Administered ${logDetail} via Schedule` 
+    });
+
+    // 4. Handle One-Time Orders
+    if (sched.isOneTime) {
+        db.schedules = db.schedules.filter(s => s.id !== scheduleId);
+    }
+
+    await sync();
 };
+
+
 
 
 window.deleteSchedule = async function(id) {
@@ -668,7 +709,6 @@ db.inventory.forEach(med => {
             <td>${med.expiry || 'N/A'}</td> <!-- NEW EXPIRATION COLUMN -->
             <td>
                 <button onclick="takeDose('${med.id}')">Take</button>
-                <button onclick="refillMed('${med.id}')">Refill</button>
                 <button onclick="deleteMed('${med.id}')">Delete</button>
             </td>`;
         tableBody.appendChild(row);
@@ -751,3 +791,82 @@ window.addEventListener('DOMContentLoaded', async () => {
     db = await window.api.load();
     renderAll();
 });
+
+window.printSingleLabel = function(scheduleId) {
+    const s = db.schedules.find(x => x.id === scheduleId);
+    const med = db.inventory.find(m => m.id === s.medId);
+    const mem = db.family.find(f => f.id === s.memberId);
+    
+    if (!s || !med) return;
+
+    const printArea = document.getElementById('print-area');
+    printArea.innerHTML = ''; 
+    printArea.style.display = 'block';
+    
+    let calcStr = med.isCombination ? 
+        med.components.map(c => (parseFloat(c.strength) * parseFloat(s.doseQty)).toFixed(1) + "mg").join('/') : 
+        (parseFloat(med.strength) * parseFloat(s.doseQty)).toFixed(1) + med.units.split('/')[0];
+
+    // We use a single DIV with NO trailing spaces or line breaks in the code
+    printArea.innerHTML = `<div class="label-page"><div class="label-date">${new Date().toLocaleDateString()} | ${s.times[0] || 'PRN'}</div><div style="font-size: 10pt; font-weight: bold; line-height:1.0; margin-top:2px;">${med.name}</div><div style="font-size: 8pt; line-height:1.1; margin-top:2px;">Str: ${med.strength}${med.units} (${calcStr})<br><b>Qty: ${s.doseQty} ${med.formulation}</b><br>Member: ${mem.firstName}</div></div>`;
+
+    window.print();
+    // Delay hiding the print area slightly to ensure the spooler is done
+    setTimeout(() => { printArea.style.display = 'none'; }, 500);
+};
+
+
+
+
+
+window.printWeeklyLabels = function(memberId) {
+    const mem = db.family.find(f => f.id === memberId);
+    const memberSchedules = db.schedules.filter(s => s.memberId === memberId);
+    const printArea = document.getElementById('print-area');
+    printArea.innerHTML = '';
+    printArea.style.display = 'block';
+
+    const today = new Date();
+    let labelCount = 0;
+
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        const yyyymmdd = d.toISOString().split('T')[0];
+
+        const medsDueToday = memberSchedules.filter(s => {
+            const isActive = yyyymmdd >= s.startDate && (s.endDate === "Ongoing" || yyyymmdd <= s.endDate);
+            if (!isActive) return false;
+            if (s.freq === 'Monthly') return d.getDate() === new Date(s.startDate).getDate();
+            if (s.freq === 'QOD' && s.qodStart) {
+                const qStart = new Date(s.qodStart + "T00:00:00");
+                const diff = Math.floor((d - qStart) / (1000 * 60 * 60 * 24));
+                return diff >= 0 && diff % 2 === 0;
+            }
+            return true;
+        });
+
+        if (medsDueToday.length > 0) {
+            labelCount++;
+            const fontSize = medsDueToday.length > 3 ? '8pt' : '9pt';
+            let medRowsHtml = medsDueToday.map(s => {
+                const med = db.inventory.find(m => m.id === s.medId);
+                return `<div class="label-med-row" style="font-size:${fontSize}">
+                • ${s.times[0] || 'PRN'}: ${med.name} ${med.strength}${med.units} (${s.doseQty} ${med.formulation})</div>`;
+            }).join('');
+
+            printArea.innerHTML += `
+                <div class="label-page">
+                    <div class="label-date">${d.toLocaleDateString()} - ${mem.firstName}</div>
+                    ${medRowsHtml}
+                </div>`;
+        }
+    }
+
+    // Add the "Ghost" div at the end of the strip
+    if (labelCount > 0) {
+        printArea.innerHTML += `<div class="print-stop"></div>`;
+        window.print();
+    }
+    printArea.style.display = 'none';
+};
