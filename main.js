@@ -90,6 +90,34 @@ ipcMain.handle('save-image', (event, fileName, base64Data) => {
     return imagePath;
 });
 
+ipcMain.handle('save-pdf-report', async (event, { html, fileName }) => {
+    const safeName = String(fileName || `PharmAtlas_Report_${Date.now()}.pdf`)
+        .replace(/[<>:"/\\|?*]+/g, '_');
+    const finalName = safeName.toLowerCase().endsWith('.pdf') ? safeName : `${safeName}.pdf`;
+    const pdfPath = path.join(dataDir, finalName);
+    const reportWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+
+    try {
+        await reportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        const pdfData = await reportWindow.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'Letter',
+            margins: { marginType: 'default' }
+        });
+        fs.writeFileSync(pdfPath, pdfData);
+        return pdfPath;
+    } finally {
+        reportWindow.destroy();
+    }
+});
+
 ipcMain.handle('notify', (event, title, body) => {
     new Notification({ title, body }).show();
 });

@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>PharmAtlas</title>
+    <!-- Link to the Windows 98 CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/98.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body style="background-color: #aca22293; padding: 20px;"> 
+
+    <div class="window" style="width: auto; margin: 0 auto;">
+        <div class="title-bar">
+            <div class="title-bar-text">PharmAtlas</div>
+            <div class="title-bar-controls">
+                <button aria-label="Minimize"></button>
+                <button aria-label="Maximize"></button>
+                <button aria-label="Close"></button>
+            </div>
+        </div>
+
+        <div class="window-body">
+            <div class="tabs">
+            <menu role="tablist">
+                <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')">Dashboard</a></li>
+                <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')">Schedule Medications</a></li>
+                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Order Sets</a></li>
+                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Vitals</a></li>
+                <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')">Inventory</a></li>
+                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')">Drug/Vaccine Information</a></li>
+                <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')">Members</a></li>
+            </menu>
+
+        <!-- Tab Content Container -->
+        <div class="window" role="tabpanel">
+            <div class="window-body">
+                
+                <!-- 1. DASHBOARD -->
+                <div id="panel-dashboard">
+                    <fieldset>
+                        <legend>Medication Calendar (Next 7 Days)</legend>
+                        <div id="calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: #808080; border: 2px inset white; padding: 2px;">
+                            <!-- Calendar headers and days will be injected here -->
+                        </div>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
+                        <legend>Recent Activity Log</legend>
+                        <div id="history-log" class="tree-view" style="height: 120px; overflow-y: scroll; background: white;"></div>
+                        <button onclick="clearHistory()" style="margin-top:5px;">Clear Log</button>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
+                        <legend>Inventory Status</legend>
+                        <div id="inventory-status"></div>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
+                        <legend>PDF Reports</legend>
+                        <div class="field-row">
+                            <button onclick="generateInventoryPdfReport()">Current Inventory PDF</button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
+                        <legend>Vitals Trends</legend>
+                        <div id="vitals-dashboard"></div>
+                    </fieldset>
+        
+                </div>
+
+
+                <!-- 2. SCHEDULES -->
+                <div id="panel-schedules" style="display: none;">
+                    <fieldset>
+                        <legend>Prescription Entry</legend>
+                        <div class="field-row">
+                            <label>Who:</label>
+                            <select id="select-member"></select>
+                            <label>Medication:</label>
+                            <input list="med-options" id="med-search-input" oninput="updateSchedStrength()" style="width:120px;" placeholder="Search...">
+                            <datalist id="med-options"></datalist>
+                        </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Med Strength:</label>
+                            <select id="sched-strength-display" onchange="calculateLiveDose()" style="width:100px;"></select>
+                            
+                            <label>Give Qty:</label>
+                            <input id="sched-dose-qty" type="number" step="0.1" style="width:50px;"  oninput="calculateLiveDose()">
+                            <span id="sched-units-display"></span>
+                        </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Calculated Dose:</label>
+                            <input id="sched-calculated-dose" type="text" disabled style="width:150px; background: #c0c0c0; font-weight: bold;">
+                        </div>
+
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Frequency:</label>
+                            <select id="sched-freq" onchange="renderFrequencyControls('sched')">
+                                <option value="ONCE">One Time Dose</option>
+                                <option value="QD">QD (Daily)</option>
+                                <option value="BID">BID (Twice Daily)</option>
+                                <option value="TID">TID (Thrice Daily)</option>
+                                <option value="QID">QID (Four Times)</option>
+                                <option value="QOD">QOD (Every Other Day)</option>
+                                <option value="QW">Once Weekly</option>
+                                <option value="QXH">Every X Hours</option>
+                                <option value="PRN">PRN (As Needed)</option>
+                                <option value="Monthly">Once Monthly</option>
+                            </select>
+                            <div id="qod-start-container" style="display:none;">
+                                <label>Start Day:</label><input id="qod-start-date" type="date">
+                            </div>
+                            <div id="sched-interval-container" style="display:none;">
+                                <label>Every:</label><input id="sched-interval-hours" type="number" min="1" max="24" step="1" value="8" style="width:45px;"> <span>hrs</span>
+                            </div>
+                        </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Start:</label><input id="sched-start" type="date">
+                            <label>End:</label><input id="sched-end" type="date">
+                        </div>
+                        <div class="field-row-stacked" style="margin-top:8px;">
+                            <label>Administration Time(s):</label>
+                            <div id="sched-time-fields"></div>
+                        </div>
+                        <div class="field-row-stacked" style="margin-top:8px;">
+                            <label>Additional Instructions:</label>
+                            <textarea id="sched-instructions" rows="2" style="width:100%; resize:none;"></textarea>
+                        </div>
+                        <div class="field-row" style="justify-content: flex-end; margin-top:10px;">
+                            <button onclick="addSchedule()">💾 Save to MAR</button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Active Medication Schedules</legend>
+                        <div id="schedule-list" class="sunken-panel" style="height: 150px; overflow-y: scroll; background: white;"></div>
+                    </fieldset>
+                </div>
+
+                <!-- 3. ORDER SETS -->
+                <div id="panel-order-sets" style="display: none;">
+                    <fieldset>
+                        <legend>Order Set Builder</legend>
+                        <input type="hidden" id="order-set-edit-id">
+                        <div class="field-row">
+                            <label>Who:</label><select id="order-set-member"></select>
+                            <label>Name:</label><input id="order-set-name" type="text" style="width:180px;" placeholder="e.g. Hypertension">
+                            <label>Start:</label><input id="order-set-start" type="date">
+                            <label>End:</label><input id="order-set-end" type="date">
+                        </div>
+                        <div id="order-set-med-list" style="margin-top:8px;"></div>
+                        <div class="field-row" style="justify-content:space-between; margin-top:8px;">
+                            <button onclick="addOrderSetMedicationRow()">+ Add Medication</button>
+                            <span>
+                                <button onclick="saveOrderSet()">Save Order Set</button>
+                                <button onclick="clearOrderSetBuilder()">Clear</button>
+                            </span>
+                        </div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>Saved Order Sets</legend>
+                        <div id="order-set-list" class="sunken-panel" style="height:180px; overflow-y:auto; background:white;"></div>
+                    </fieldset>
+                </div>
+
+                <!-- 3. VITALS -->
+                <div id="panel-vitals" style="display: none;">
+                    <fieldset>
+                        <legend>Log Reading</legend>
+                        <div class="field-row">
+                            <label>Who:</label>
+                            <select id="vital-member-select"></select>
+                            <label>Type:</label>
+                            <select id="vital-type" onchange="renderVitalInputs()">
+                                <option value="bp">BP / Heart Rate</option>
+                                <option value="weight">Weight</option>
+                                <option value="glucose">Blood Glucose</option>
+                            </select>
+                            <label>Date:</label><input id="vital-date" type="date">
+                            <label>Time:</label><input id="vital-time" type="time">
+                        </div>
+                        <div id="vital-input-fields" class="field-row" style="margin-top:8px;"></div>
+                        <div class="field-row-stacked" style="margin-top:8px;">
+                            <label>Notes:</label>
+                            <textarea id="vital-notes" rows="2" style="width:100%; resize:none;" placeholder="Optional notes"></textarea>
+                        </div>
+                        <div class="field-row" style="justify-content:flex-end; margin-top:10px;">
+                            <button onclick="saveVitalReading()">Save Reading</button>
+                        </div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>Recent Vitals</legend>
+                        <div class="sunken-panel" style="height:180px; overflow-y:auto;">
+                            <table class="interactive" style="width:100%;">
+                                <thead><tr><th>Member</th><th>Date/Time</th><th>Type</th><th>Reading</th><th>Notes</th><th>Actions</th></tr></thead>
+                                <tbody id="vital-table-body"></tbody>
+                            </table>
+                        </div>
+                    </fieldset>
+                </div>
+
+
+                                <!-- 4. INVENTORY -->
+                <div id="panel-inventory" style="display: none;">
+                    <fieldset>
+                        <legend>Register New Medication</legend>
+                        <div class="field-row-stacked">
+                            <label for="med-name">Name:</label>
+                            <input id="med-name" type="text" />
+                        </div>
+                        <div class="field-row">
+                            <label>Photo:</label>
+                            <input id="med-image-input" type="file" accept="image/*" />
+                        </div>
+                        <!-- Inside panel-inventory fieldset -->
+                        <div id="combination-fields" style="display:none; margin-top:10px; border:1px dashed gray; padding:10px; background:#f0f0f0;">
+                            <strong>Active Ingredients:</strong>
+                            <div id="ingredient-list">
+                                <!-- Dynamic ingredient rows go here -->
+                            </div>
+                            <button type="button" onclick="addIngredientRow()">+ Add Ingredient</button>
+                        </div>
+
+                        <div class="field-row" style="margin-top:10px;">
+                            <input type="checkbox" id="is-combination" onchange="toggleComboFields()">
+                            <label for="is-combination">Combination Product?</label>
+                        </div>
+
+                        <div class="field-row" style="margin-top: 8px;">
+                            <label for="med-strength">Strength:</label>
+                            <input id="med-strength" type="text" style="width: 60px;" />
+                        
+                            <label for="med-units">Units:</label>
+                            <select id="med-units">
+                                <option value="mg">mg</option>
+                                <option value="mL">ml</option>
+                                <option value="mg/mL">mg/mL</option>
+                                <option value="meq">mEq</option>
+                                <option value="IU">IU</option>
+                                <option value="mcg">mcg</option>
+                                <option value="g">g</option>
+                                <option value="%">%</option>
+                                <option value="units">Units</option>
+                                <option value="U/mL">Units/mL</option>
+                                <option value="CFU">CFU</option>
+                            </select>
+                        
+                            <label for="med-qty">Qty:</label>
+                            <input id="med-qty" type="number" style="width: 50px;" />
+                            <label>Expiry:</label>
+                            <input id="med-expiry" type="date" />
+                            <label for="med-threshold">Alert at:</label>
+                            <input id="med-threshold" type="number" style="width: 50px;" />
+                            <label>Formulation:</label>
+                            <select id="med-formulation">
+                                <option value="Tablets">Tablets</option>
+                                <option value="Capsules">Capsules</option>
+                                <option value="mL">Liquid (mL)</option>
+                                <option value="Granules">Granules</option>
+                                <option value="Packet">Packet</option>
+                                <option value="Inhalations">Inhalations</option>
+                                <option value="Sprays">Sprays</option>
+                                <option value="Suppository">Suppository</option>
+                                <option value="Cream">Cream</option>
+                                <option value="Ointment">Ointment</option>
+                                <option value="Gel">Gel</option>
+                                <option value="Patch">Patch</option>
+                                <option value="Drops">Drops</option>
+                                <option value="Other">Unit Dose</option>
+                                    
+                            </select>
+                            <button onclick="addInventory()">Add to Stock</button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Inventory</legend>
+                        <div class="sunken-panel" style="height: 200px; width: 100%; overflow-y: scroll;">
+                            <table class="interactive" style="width: 100%;">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Strength</th>
+                                        <th>Units</th>
+                                        <th>Qty</th>
+                                        <th>Alert</th>
+                                        <th>Exp Date</th>
+                                        <th>Actions</th>
+                                        
+                                    </tr>
+                                </thead>
+                                <tbody id="inventory-table-body"></tbody>
+                            </table>
+                        </div>
+                    </fieldset>
+                </div> <!-- Correctly closes panel-inventory -->
+
+                <!-- 5. DRUG / VACCINE INFORMATION -->
+                <div id="panel-drug-info" style="display: none;">
+                    <fieldset>
+                        <legend>Drug References</legend>
+                        <div class="field-row">
+                            <button onclick="window.open('https://medlineplus.gov/druginformation.html', '_blank')">MedlinePlus Drugs</button>
+                            <button onclick="window.open('https://dailymed.nlm.nih.gov/dailymed/', '_blank')">DailyMed.gov</button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Current Vaccine Schedule</legend>
+                        <div class="sunken-panel drug-info-frame">
+                            <iframe src="https://www.cdc.gov/vaccines/imz-schedules/index.html" title="CDC vaccine schedules"></iframe>
+                        </div>
+                        <div class="field-row" style="justify-content:flex-end; margin-top:6px;">
+                            <button onclick="window.open('https://www.cdc.gov/vaccines/imz-schedules/index.html', '_blank')">Open CDC Schedule</button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Vaccine Information Statements (VIS)</legend>
+                        <ul class="tree-view vaccine-tree">
+                            <li><details><summary>Routine Vaccines</summary>
+                                <ul>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/covid-19.html', '_blank')">COVID-19</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/dtap.html', '_blank')">DTaP</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/hepatitis-a.html', '_blank')">Hepatitis A</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/hepatitis-b.html', '_blank')">Hepatitis B</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/hib.html', '_blank')">Hib</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/hpv.html', '_blank')">HPV</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/influenza-live.html', '_blank')">Influenza Live</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/influenza-inactivated.html', '_blank')">Influenza Inactivated</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/mmr.html', '_blank')">MMR</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/mmrv.html', '_blank')">MMRV</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/meningococcal-acwy.html', '_blank')">Meningococcal ACWY</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/meningococcal-b.html', '_blank')">Meningococcal B</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/pneumococcal-conjugate.html', '_blank')">Pneumococcal Conjugate</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/pneumococcal-polysaccharide.html', '_blank')">Pneumococcal Polysaccharide</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/polio.html', '_blank')">Polio</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/rotavirus.html', '_blank')">Rotavirus</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/rsv.html', '_blank')">RSV</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/tdap.html', '_blank')">Tdap</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/td.html', '_blank')">Td</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/varicella.html', '_blank')">Varicella</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/zoster.html', '_blank')">Zoster / Shingles</button></li>
+                                </ul>
+                            </details></li>
+                            <li><details><summary>Non-Routine Vaccines</summary>
+                                <ul>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/adenovirus.html', '_blank')">Adenovirus</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/anthrax.html', '_blank')">Anthrax</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/cholera.html', '_blank')">Cholera</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/ebola.html', '_blank')">Ebola</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/japanese-encephalitis.html', '_blank')">Japanese Encephalitis</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/rabies.html', '_blank')">Rabies</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/smallpox-monkeypox.html', '_blank')">Smallpox / Mpox</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/tick-borne-encephalitis.html', '_blank')">Tick-borne Encephalitis</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/typhoid.html', '_blank')">Typhoid</button></li>
+                                    <li><button onclick="window.open('https://www.cdc.gov/vaccines/hcp/current-vis/yellow-fever.html', '_blank')">Yellow Fever</button></li>
+                                </ul>
+                            </details></li>
+                        </ul>
+                    </fieldset>
+                </div>
+
+                <!-- 4. FAMILY -->
+                <div id="panel-family" style="display: none;">
+                     <fieldset>
+                         <legend>Family Registry</legend>
+                         <div class="field-row">
+                            <button onclick="openMemberModal()">+ Add New Person</button>
+                        </div>
+                        <ul id="family-list" class="tree-view" style="margin-top:10px; height: 200px; overflow-y: scroll;"></ul>
+                    </fieldset>
+                </div>
+
+                
+
+            </div> <!-- Closes window-body -->
+        </div> <!-- Closes tabpanel window -->
+    </div> <!-- Closes tabs div -->
+    <!-- Medication Profile Modal -->
+<div id="med-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+    <div class="window" style="width: 400px;">
+        <div class="title-bar">
+            <div class="title-bar-text" id="modal-title">Medication Profile</div>
+            <div class="title-bar-controls">
+                <button aria-label="Close" onclick="closeMedModal()"></button>
+            </div>
+        </div>
+        <div class="window-body">
+            <div style="display: flex; gap: 10px;">
+                <div id="modal-image-container" class="sunken-panel" style="width: 120px; height: 120px; display:flex; align-items:center; justify-content:center; background: #c0c0c0;">
+                    <span style="font-size: 10px; color: #808080;">No Photo</span>
+                </div>
+                <div style="flex: 1;">
+                    <div class="field-row">
+                        <label>Control Level:</label>
+                        <select id="modal-control-level">
+                            <option value="N/A">N/A</option>
+                            <option value="C-II">C-II</option>
+                            <option value="C-III">C-III</option>
+                            <option value="C-IV">C-IV</option>
+                            <option value="C-V">C-V</option>
+                        </select>
+                    </div>
+                <div style="flex: 1;">
+                    <div class="field-row">
+                        <label>Storage Conditions</label>
+                        <select id="modal-storage">
+                            <option value="Room Temp">Room Temp</option>
+                            <option value="Refrigerated">Refrigerated</option>
+                            <option value="Frozen">Frozen</option>
+                        </select>
+                    </div>
+                    <label>Expiry:</label>
+                        <input id="modal-expiry" type="date" />
+                    <div class="field-row">
+                        <label>Stock:</label>
+                        <input id="modal-stock" type="number" style="width: 60px;" />
+                    </div>
+                </div>
+            </div>
+            
+            </div>
+            <div class="field-row">
+                <label>Update Photo:</label>
+                <input id="modal-image-input" type="file" accept="image/*" />
+            </div>
+            
+
+
+            <!--<div class="field-row-stacked" style="margin-top: 10px;"> 
+                <label>Storage Conditions:</label>
+                <input id="modal-storage" type="text" placeholder="e.g. Room Temp" />
+            </div>// --> 
+
+            <div class="field-row-stacked" style="margin-top: 10px;">
+                <label>Notes:</label>
+                <textarea id="modal-notes" rows="5" style="width: 100%; resize: none;"></textarea>
+            </div>
+
+            <section class="field-row" style="justify-content: flex-end; margin-top: 10px;">
+                <button onclick="saveMedProfile()">Save Changes</button>
+                <button onclick="closeMedModal()">Cancel</button>
+            </section>
+        </div>
+    </div>
+</div>
+<!-- Member Profile Modal -->
+<div id="member-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
+    <div class="window member-profile-window">
+        <div class="title-bar">
+            <div class="title-bar-text" id="member-modal-title">Add New Member</div>
+            <div class="title-bar-controls">
+                <button aria-label="Close" onclick="closeMemberModal()"></button>
+            </div>
+        </div>
+        <div class="window-body member-profile-body">
+            <div style="display:flex; gap:10px;">
+                <div class="field-row-stacked"><label>First Name</label><input id="m-first" type="text"></div>
+                <div class="field-row-stacked"><label>Middle</label><input id="m-middle" type="text" style="width:50px;"></div>
+                <div class="field-row-stacked"><label>Last Name</label><input id="m-last" type="text"></div>
+            </div>
+
+            <div class="field-row" style="margin-top:10px;">
+                <label>Sex:</label>
+                <select id="m-sex">
+                    <option value="Male">Male (Blue)</option>
+                    <option value="Female">Female (Pink)</option>
+                </select>
+                <label>Age:</label><input id="m-age" type="number" style="width:50px;">
+                <label>DOB:</label><input id="m-dob" type="date">
+            </div>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Contact & Medical</legend>
+                <div class="field-row"><label>Providers:</label><input id="m-providers" type="text" style="width:100%;"></div>
+                <div class="field-row"><label>Diagnoses:</label><input id="m-diag" type="text" style="width:100%;"></div>
+                <div class="field-row"><label>Address:</label><input id="m-addr" type="text" style="width:100%;"></div>
+                <div style="display:flex; gap:5px; margin-top:5px;">
+                    <div class="field-row-stacked"><label>Phone</label><input id="m-phone" type="text"></div>
+                    <div class="field-row-stacked"><label>Email</label><input id="m-email" type="text"></div>
+                </div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Vitals Goals</legend>
+                <div class="field-row">
+                    <label>Glucose Goals:</label>
+                    <select id="m-glucose-preset" onchange="applyGlucosePreset()">
+                        <option value="diabetic">ADA Diabetes</option>
+                        <option value="nondiabetic">Non-Diabetic</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                    <label>Low:</label><input id="m-glucose-low" type="number" style="width:55px;">
+                    <label>High:</label><input id="m-glucose-high" type="number" style="width:55px;">
+                    <span>mg/dL</span>
+                </div>
+                <div class="field-row" style="margin-top:6px;">
+                    <label>BP Goals:</label>
+                    <label>Sys Min:</label><input id="m-bp-sys-low" type="number" style="width:55px;">
+                    <label>Sys Max:</label><input id="m-bp-sys-high" type="number" style="width:55px;">
+                    <label>Dia Min:</label><input id="m-bp-dia-low" type="number" style="width:55px;">
+                    <label>Dia Max:</label><input id="m-bp-dia-high" type="number" style="width:55px;">
+                </div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Active Medication Orders</legend>
+                <div id="member-active-meds-list" style="max-height:150px; overflow-y:auto;"></div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Administration Log</legend>
+                <div id="member-admin-log" class="sunken-panel" style="height:130px; overflow-y:auto; background:white;"></div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Vitals Trends</legend>
+                <div id="member-vitals-trends"></div>
+                <div class="field-row" style="justify-content:flex-end; margin-top:8px;">
+                    <button onclick="generateMemberVitalsPdfReport()">Monitored Vitals PDF</button>
+                </div>
+            </fieldset>
+
+            <section class="field-row" style="justify-content: flex-end; margin-top:10px;">
+                <button onclick="saveMember()">Save Member</button>
+                <button onclick="closeMemberModal()">Cancel</button>
+            </section>
+        </div>
+    </div>
+</div>
+<!--Order Modifier Modal-->
+<div id="order-modifier-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:20000; align-items:center; justify-content:center;">
+    <div class="window" style="width:420px;">
+        <div class="title-bar"><div class="title-bar-text" id="mod-title">Modify Order</div></div>
+        <div class="window-body">
+            <input type="hidden" id="mod-sched-id">
+            <div class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date"></div>
+            <div class="field-row-stacked"><label>End Date</label><input id="mod-end" type="date"></div>
+            <div class="field-row-stacked"><label>Dose Quantity</label><input id="mod-dose-qty" type="number" step="0.1"></div>
+            <div class="field-row-stacked"><label>Frequency</label>
+                <select id="mod-freq" onchange="renderFrequencyControls('mod')">
+                    <option value="ONCE">One Time Dose</option>
+                    <option value="QD">QD</option>
+                    <option value="BID">BID</option>
+                    <option value="TID">TID</option>
+                    <option value="QID">QID</option>
+                    <option value="QOD">QOD</option>
+                    <option value="QW">Once Weekly</option>
+                    <option value="QXH">Every X Hours</option>
+                    <option value="PRN">PRN</option>
+                    <option value="Monthly">Once Monthly</option>
+                </select>
+            </div>
+            <div id="mod-qod-start-container" class="field-row-stacked" style="display:none;"><label>Every Other Day Start</label><input id="mod-qod-start-date" type="date"></div>
+            <div id="mod-interval-container" class="field-row" style="display:none;"><label>Every:</label><input id="mod-interval-hours" type="number" min="1" max="24" step="1" value="8" style="width:45px;"><span>hrs</span></div>
+            <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
+            <div class="field-row-stacked"><label>Instructions</label><textarea id="mod-instr" rows="3"></textarea></div>
+            <div style="text-align:right; margin-top:10px;">
+                <button onclick="saveOrderModification()">Update Order</button>
+                <button onclick="document.getElementById('order-modifier-modal').style.display='none'">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+    <div id="print-area"></div>
+    <div id="label-preview-modal" class="modal-overlay" style="display:none;">
+        <div class="window label-preview-window">
+            <div class="title-bar">
+                <div class="title-bar-text">Label Preview</div>
+                <div class="title-bar-controls">
+                    <button aria-label="Close" onclick="closeLabelPreview()"></button>
+                </div>
+            </div>
+            <div class="window-body">
+                <div id="label-preview-content" class="sunken-panel"></div>
+                <div class="field-row" style="justify-content:flex-end; margin-top:8px;">
+                    <button onclick="printPreviewedLabel()">Print</button>
+                    <button onclick="closeLabelPreview()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="mobile-api.js"></script>
+    <script src="renderer.js"></script>
+</body>
+</html>
