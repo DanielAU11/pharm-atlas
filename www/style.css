@@ -206,34 +206,39 @@ fieldset {
     html {
         -webkit-text-size-adjust: 100%;
         min-height: 100%;
-        background-color: #aca22293;
+        background-color: #c0c0c0;
         overflow-x: hidden;
     }
 
     body {
         box-sizing: border-box;
         min-height: 100vh;
+        width: 100vw;
         margin: 0 !important;
-        padding-top: max(88px, calc(env(safe-area-inset-top) + 62px)) !important;
-        padding-right: max(12px, env(safe-area-inset-right)) !important;
-        padding-bottom: max(24px, env(safe-area-inset-bottom)) !important;
-        padding-left: max(12px, env(safe-area-inset-left)) !important;
-        font-size: 12px;
+        padding-top: max(46px, calc(env(safe-area-inset-top) + 8px)) !important;
+        padding-right: env(safe-area-inset-right) !important;
+        padding-bottom: env(safe-area-inset-bottom) !important;
+        padding-left: env(safe-area-inset-left) !important;
+        background-color: #c0c0c0 !important;
+        font-size: 13px;
         overflow-x: hidden;
     }
 
     body > .window {
-        width: calc(100vw - max(24px, calc(env(safe-area-inset-left) + env(safe-area-inset-right) + 24px))) !important;
-        max-width: 430px;
+        width: 100% !important;
+        max-width: none;
+        min-height: calc(100vh - max(46px, calc(env(safe-area-inset-top) + 8px)) - env(safe-area-inset-bottom));
         margin: 0 auto !important;
         overflow: hidden;
+        border-left: 0;
+        border-right: 0;
     }
 
     .window-body {
         width: 100%;
         min-width: 0;
         padding: 8px;
-        font-size: 12px;
+        font-size: 13px;
         overflow-x: hidden;
     }
 
@@ -272,7 +277,7 @@ fieldset {
     menu[role="tablist"] a {
         display: inline-block;
         padding: 5px 7px;
-        font-size: 12px;
+        font-size: 13px;
     }
 
     .title-bar {
@@ -280,7 +285,7 @@ fieldset {
     }
 
     .title-bar-text {
-        font-size: 13px;
+        font-size: 14px;
     }
 
     .field-row {
@@ -296,11 +301,16 @@ fieldset {
 
     input,
     select,
-    textarea,
+    textarea {
+        max-width: 100%;
+        font-size: 16px;
+        min-height: 28px;
+    }
+
     button {
         max-width: 100%;
-        font-size: 13px;
-        min-height: 28px;
+        font-size: 14px;
+        min-height: 30px;
     }
 
     button {
