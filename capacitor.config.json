@@ -1,0 +1,8 @@
+{
+  "appId": "com.pharmatlas.app",
+  "appName": "PharmAtlas",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

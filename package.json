@@ -1,0 +1,33 @@
+{
+  "name": "pharm-atlas",
+  "version": "1.0.0",
+  "main": "main.js",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.1",
+    "@electron-forge/maker-deb": "^7.11.1",
+    "@electron-forge/maker-rpm": "^7.11.1",
+    "@electron-forge/maker-squirrel": "^7.11.1",
+    "@electron-forge/maker-zip": "^7.11.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
+    "@electron-forge/plugin-fuses": "^7.11.1",
+    "@electron/fuses": "^1.8.0",
+    "electron": "^40.6.1"
+  },
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "mobile:build": "node scripts/build-mobile.js",
+    "cap:sync": "npm run mobile:build && cap sync",
+    "cap:add:ios": "npm run mobile:build && cap add ios",
+    "cap:open:ios": "cap open ios",
+    "cap:run:ios": "cap run ios"
+  },
+  "dependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "electron-squirrel-startup": "^1.0.1",
+    "nodemailer": "^8.0.2"
+  }
+}

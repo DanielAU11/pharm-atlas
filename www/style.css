@@ -1,0 +1,252 @@
+/* Custom spacing for the 98 look */
+.med-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px;
+    border-bottom: 1px solid #dfdfdf;
+}
+
+.med-item-row:last-child {
+    border-bottom: none;
+}
+
+.tree-view {
+    background: white;
+    padding: 0;
+}
+
+fieldset {
+    margin-bottom: 15px;
+}
+
+.vital-chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 8px;
+}
+
+.vital-chart {
+    display: block;
+    max-width: 100%;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.vital-chart-panel {
+    margin-top: 6px;
+}
+
+.vital-chart-meta,
+.vital-legend {
+    font-size: 10px;
+}
+
+.legend-swatch {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin: 0 3px 0 6px;
+    border: 1px solid #000000;
+    vertical-align: middle;
+}
+
+.inventory-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px;
+}
+
+.inventory-status-box {
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 6px;
+    min-height: 78px;
+    font-size: 11px;
+}
+
+.inventory-status-box ul {
+    margin: 4px 0 0 16px;
+    padding: 0;
+}
+
+.status-ok {
+    margin-top: 4px;
+    color: #008000;
+}
+
+.drug-info-frame {
+    height: 300px;
+    background: #ffffff;
+}
+
+.drug-info-frame iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #ffffff;
+}
+
+.vaccine-tree {
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 6px 18px;
+}
+
+.vaccine-tree button {
+    margin: 3px 0;
+}
+
+.member-profile-window {
+    width: min(900px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+}
+
+.member-profile-body {
+    overflow-y: auto;
+    max-height: calc(100vh - 82px);
+    padding-right: 10px;
+}
+
+#member-active-meds-list {
+    max-height: 120px !important;
+}
+
+#member-admin-log {
+    height: 95px !important;
+}
+
+#member-vitals-trends {
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 30000;
+    background: rgba(0, 0, 0, 0.5);
+    align-items: center;
+    justify-content: center;
+}
+
+.label-preview-window {
+    width: 420px;
+}
+
+#label-preview-content {
+    max-height: 65vh;
+    overflow: auto;
+    background: #808080;
+    padding: 12px;
+}
+
+#label-preview-content .label-page {
+    width: 2.25in;
+    min-height: 1.25in;
+    background: #ffffff;
+    color: #000000;
+    padding: 0.05in;
+    margin: 0 auto 10px;
+    overflow: hidden;
+    border: 1px solid #000000;
+    box-sizing: border-box;
+}
+
+#label-preview-content .label-date {
+    font-weight: bold;
+    border-bottom: 1px solid black;
+    font-size: 8pt;
+    margin-bottom: 1px;
+}
+
+#label-preview-content .label-title {
+    font-size: 11pt;
+    font-weight: bold;
+    line-height: 1;
+    margin-top: 2px;
+}
+
+#label-preview-content .label-small,
+#label-preview-content .label-med-row {
+    font-size: 9pt;
+    line-height: 1.05;
+    margin-top: 1px;
+    word-wrap: break-word;
+}
+
+#label-preview-content .label-compact .label-title { font-size: 10pt; }
+#label-preview-content .label-compact .label-small,
+#label-preview-content .label-compact .label-med-row { font-size: 8pt; line-height: 1; }
+#label-preview-content .label-dense .label-date { font-size: 7.5pt; }
+#label-preview-content .label-dense .label-title { font-size: 9pt; }
+#label-preview-content .label-dense .label-small,
+#label-preview-content .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+
+/* Ensure the red text for low stock stands out */
+.low-stock-text {
+    color: #ff0000;
+    font-weight: bold;
+}
+
+#print-area {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 2.25in;
+}
+
+@media print {
+    @page {
+        size: 2.25in 1.25in;
+        margin: 0 !important; /* Forces the printer to ignore its own margins */
+    }
+    * {
+        -webkit-print-color-adjust: exact;
+        box-sizing: border-box;
+    }
+    html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 2.25in !important;
+        min-height: 1.25in !important;
+        overflow: visible !important;
+    }
+    body > *:not(#print-area) { display: none !important; }
+    #print-area, #print-area * { visibility: visible !important; }
+    #print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 2.25in !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        display: block !important;
+    }
+    .label-page {
+        width: 2.25in !important;
+        height: 1.25in !important;
+        display: block !important;
+        position: relative;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0.05in !important;
+        page-break-after: always !important;
+        page-break-before: avoid !important;
+    }
+    #print-area .label-page:last-of-type { page-break-after: avoid !important; }
+    .label-date { font-weight: bold; border-bottom: 1px solid black; font-size: 8pt; margin-bottom: 1px; }
+    .label-title { font-size: 11pt; font-weight: bold; line-height: 1.0; margin-top: 2px; }
+    .label-small { font-size: 9pt; line-height: 1.05; margin-top: 1px; word-wrap: break-word; }
+    .label-med-row { font-size: 9pt; margin-bottom: 1px; word-wrap: break-word; line-height: 0.9; }
+    .label-compact .label-title { font-size: 10pt; }
+    .label-compact .label-small,
+    .label-compact .label-med-row { font-size: 8pt; line-height: 1.0; }
+    .label-dense .label-date { font-size: 7.5pt; }
+    .label-dense .label-title { font-size: 9pt; }
+    .label-dense .label-small,
+    .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+}
