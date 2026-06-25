@@ -198,6 +198,99 @@ fieldset {
     width: 2.25in;
 }
 
+@media screen and (max-width: 760px) {
+    html {
+        -webkit-text-size-adjust: 115%;
+        min-height: 100%;
+        background-color: #aca22293;
+    }
+
+    body {
+        box-sizing: border-box;
+        min-height: 100vh;
+        margin: 0 !important;
+        padding-top: max(72px, calc(env(safe-area-inset-top) + 54px)) !important;
+        padding-right: max(12px, env(safe-area-inset-right)) !important;
+        padding-bottom: max(24px, env(safe-area-inset-bottom)) !important;
+        padding-left: max(12px, env(safe-area-inset-left)) !important;
+        font-size: 14px;
+    }
+
+    body > .window {
+        width: 100% !important;
+        max-width: 480px;
+        margin: 0 auto !important;
+    }
+
+    .window-body {
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    menu[role="tablist"] {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+        padding-left: 4px;
+        margin-top: 4px;
+    }
+
+    menu[role="tablist"] li[role="tab"] {
+        min-height: 30px;
+    }
+
+    menu[role="tablist"] a {
+        display: inline-block;
+        padding: 7px 8px;
+        font-size: 13px;
+    }
+
+    .field-row {
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+        font-size: 14px;
+        min-height: 28px;
+    }
+
+    fieldset {
+        margin-bottom: 14px;
+        padding: 10px;
+    }
+
+    #calendar-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 4px !important;
+    }
+
+    #history-log {
+        height: 150px !important;
+    }
+
+    .inventory-status-grid,
+    .vital-chart-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .drug-info-frame {
+        height: 420px;
+    }
+
+    .member-profile-window {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 28px);
+    }
+
+    .member-profile-body {
+        max-height: calc(100vh - 80px);
+    }
+}
+
 @media print {
     @page {
         size: 2.25in 1.25in;
