@@ -353,6 +353,114 @@ function formatDoseDateTime(schedule) {
     return `${displayDate} | ${times.length > 0 ? times.join(', ') : nextDose.time}`;
 }
 
+function scheduleInstanceKey(scheduleId, date, time) {
+    return `${scheduleId}|${date}|${time || 'PRN'}`;
+}
+
+function isScheduleInstanceDocumented(scheduleId, date, time) {
+    const key = scheduleInstanceKey(scheduleId, date, time);
+    return db.history.some(entry => entry.scheduleInstanceKey === key);
+}
+
+function getScheduleInstancesForDate(schedule, dateStr) {
+    if (!schedule || !isScheduleDueOnDate(schedule, dateStr)) return [];
+    const times = getScheduleTimes(schedule);
+    if (times.length === 0) {
+        return [{ date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }];
+    }
+    return times
+        .slice()
+        .sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
+        .map(time => ({ date: dateStr, time, key: scheduleInstanceKey(schedule.id, dateStr, time) }));
+}
+
+function getAvailableScheduleInstancesForDate(schedule, dateStr) {
+    return getScheduleInstancesForDate(schedule, dateStr)
+        .filter(instance => !isScheduleInstanceDocumented(schedule.id, instance.date, instance.time));
+}
+
+function getScheduleInstancesInRange(schedule, startDate, endDate) {
+    const start = parseLocal(startDate);
+    const end = parseLocal(endDate);
+    if (!schedule || !start || !end || end < start) return [];
+
+    const instances = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+        instances.push(...getScheduleInstancesForDate(schedule, localDateKey(cursor)));
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return instances;
+}
+
+function collectMemberScheduleDoseRows(memberId, startDate, endDate) {
+    const start = parseLocal(startDate);
+    const end = parseLocal(endDate);
+    if (!memberId || !start || !end || end < start) return [];
+
+    const memberSchedules = db.schedules.filter(schedule => schedule.memberId === memberId);
+    const rows = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+        const dateKey = localDateKey(cursor);
+        memberSchedules.forEach(schedule => {
+            const med = db.inventory.find(item => item.id === schedule.medId);
+            if (!med) return;
+            getScheduleInstancesForDate(schedule, dateKey).forEach(instance => {
+                rows.push({ schedule, med, instance });
+            });
+        });
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return rows.sort((a, b) => {
+        if (a.instance.date !== b.instance.date) return a.instance.date.localeCompare(b.instance.date);
+        const byTime = timeToMinutes(a.instance.time) - timeToMinutes(b.instance.time);
+        if (byTime !== 0) return byTime;
+        return (a.med.name || '').localeCompare(b.med.name || '', undefined, { sensitivity: 'base' });
+    });
+}
+
+function getInstanceSelectionRange(schedule) {
+    const today = localDateKey();
+    const lookback = new Date();
+    lookback.setDate(lookback.getDate() - 30);
+    const lookbackKey = localDateKey(lookback);
+    const start = schedule.startDate && schedule.startDate > lookbackKey ? schedule.startDate : lookbackKey;
+    if (schedule.endDate && schedule.endDate !== 'Ongoing') return { start, end: schedule.endDate };
+    const end = new Date();
+    end.setDate(end.getDate() + 30);
+    return { start, end: localDateKey(end) };
+}
+
+function getNextAvailableScheduleInstance(schedule, fromDate = new Date()) {
+    const currentDateKey = localDateKey(fromDate);
+    const currentTime = `${fromDate.getHours().toString().padStart(2, '0')}:${fromDate.getMinutes().toString().padStart(2, '0')}`;
+
+    for (let i = 0; i < 366; i++) {
+        const candidate = new Date(fromDate);
+        candidate.setHours(0, 0, 0, 0);
+        candidate.setDate(candidate.getDate() + i);
+        const dateKey = localDateKey(candidate);
+        const instances = getAvailableScheduleInstancesForDate(schedule, dateKey);
+        const next = i === 0
+            ? instances.find(instance => instance.time === 'PRN' || instance.time >= currentTime)
+            : instances[0];
+        if (next) return next;
+    }
+    return null;
+}
+
+function doseStatusLabel(status) {
+    return {
+        given: 'Given as scheduled',
+        late: 'Given late',
+        early: 'Given early',
+        skipped: 'Skipped',
+        missed: 'Missed / forgotten'
+    }[status] || 'Given as scheduled';
+}
+
 function getLabelClass(parts, lineCount = 0) {
     const length = parts.filter(Boolean).join(' ').length;
     if (length > 170 || lineCount > 6) return 'label-page label-dense';
@@ -498,6 +606,69 @@ async function requestActualAdministration(title, extraHtml = '', confirmText = 
     return result;
 }
 
+async function requestScheduledDoseDocumentation(schedule, title) {
+    const defaults = defaultActualDateTime();
+    const range = getInstanceSelectionRange(schedule);
+    const instances = getScheduleInstancesInRange(schedule, range.start, range.end);
+    const availableInstances = instances.filter(instance => !isScheduleInstanceDocumented(schedule.id, instance.date, instance.time));
+    if (instances.length === 0) {
+        await appAlert("No scheduled dose instances were found for this medication.");
+        return null;
+    }
+    if (availableInstances.length === 0) {
+        await appAlert("All scheduled dose instances in the selectable range have already been documented.");
+        return null;
+    }
+    const nextInstance = getNextAvailableScheduleInstance(schedule);
+    const options = instances.map(instance => {
+        const documented = isScheduleInstanceDocumented(schedule.id, instance.date, instance.time);
+        const selected = nextInstance && nextInstance.date === instance.date && nextInstance.time === instance.time ? 'selected' : '';
+        return `<option value="${escapeHtml(`${instance.date}|${instance.time}`)}" ${selected} ${documented ? 'disabled' : ''}>${escapeHtml(instance.date)} ${escapeHtml(instance.time)}${documented ? ' - already documented' : ''}</option>`;
+    }).join('');
+
+    const result = await showActionModal(title, `
+        <div class="field-row">
+            <label>Scheduled dose:</label>
+            <select name="scheduledInstance" style="width:220px;">${options || '<option value="">No scheduled doses</option>'}</select>
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Status:</label>
+            <select name="doseStatus">
+                <option value="given">Given as scheduled</option>
+                <option value="late">Given late</option>
+                <option value="early">Given early</option>
+                <option value="skipped">Skipped</option>
+                <option value="missed">Missed / forgotten</option>
+            </select>
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Date documented/taken:</label><input name="actualDate" type="date" value="${defaults.date}">
+            <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Note:</label>
+            <textarea name="doseNote" rows="2" style="width:100%; resize:none;" placeholder="Optional note"></textarea>
+        </div>
+    `, 'Save');
+    if (!result) return null;
+    const [scheduledDate, scheduledTime] = String(result.scheduledInstance || '').split('|');
+    result.scheduledDate = scheduledDate;
+    result.scheduledTime = scheduledTime;
+    if (!result.scheduledDate || !result.scheduledTime || !result.actualDate || !result.actualTime) {
+        await appAlert("Scheduled date/time and documented date/time are required.");
+        return null;
+    }
+    if (!isScheduleDueOnDate(schedule, result.scheduledDate) || !getScheduleInstancesForDate(schedule, result.scheduledDate).some(instance => instance.time === result.scheduledTime)) {
+        await appAlert("That medication is not scheduled for the selected date and time.");
+        return null;
+    }
+    if (isScheduleInstanceDocumented(schedule.id, result.scheduledDate, result.scheduledTime)) {
+        await appAlert("That scheduled dose instance has already been documented.");
+        return null;
+    }
+    return result;
+}
+
 function formatActualTimestamp(actual) {
     return `${actual.actualDate} ${actual.actualTime}`;
 }
@@ -627,11 +798,19 @@ window.openMemberModal = function(id = null) {
                     event.stopPropagation();
                     window.printDateRangeLabels(m.id, startInput.value, endInput.value);
                 });
+                const schedulePdfButton = document.createElement('button');
+                schedulePdfButton.type = 'button';
+                schedulePdfButton.innerText = 'Schedule PDF';
+                schedulePdfButton.addEventListener('click', event => {
+                    event.stopPropagation();
+                    window.generateMemberSchedulePdfReport(m.id, startInput.value, endInput.value);
+                });
                 printControls.appendChild(startLabel);
                 printControls.appendChild(startInput);
                 printControls.appendChild(endLabel);
                 printControls.appendChild(endInput);
                 printControls.appendChild(printButton);
+                printControls.appendChild(schedulePdfButton);
                 activeMedsContainer.appendChild(printControls);
             }
             const memberOrderSets = db.orderSets.filter(set => set.memberId === id);
@@ -1732,6 +1911,8 @@ function reportStyles() {
         .swatch { display: inline-block; width: 9px; height: 9px; border: 1px solid #000; margin: 0 3px 0 8px; vertical-align: middle; }
         .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
         .status-box { border: 1px solid #000; padding: 6px; min-height: 70px; }
+        .paper-check { font-size: 16px; line-height: 1; text-align: center; }
+        .comment-cell { min-width: 140px; height: 28px; }
         ul { margin: 4px 0 0 16px; padding: 0; }
     `;
 }
@@ -1807,6 +1988,77 @@ window.generateInventoryPdfReport = async function() {
             <tbody>${rows || '<tr><td colspan="8">No inventory entered.</td></tr>'}</tbody>
         </table>`;
     await saveReportPdf('PharmAtlas Current Inventory Report', body, 'PharmAtlas_Inventory');
+};
+
+function memberScheduleReportBody(member, startDate, endDate) {
+    const doseRows = collectMemberScheduleDoseRows(member.id, startDate, endDate);
+    if (doseRows.length === 0) {
+        return `
+            <h2>${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</h2>
+            <div class="muted">Date range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
+            <h2>Medication Schedule</h2>
+            <div>No scheduled medication doses found for this date range.</div>`;
+    }
+
+    let currentDate = '';
+    const sections = [];
+    let rows = [];
+    const flush = () => {
+        if (!currentDate) return;
+        sections.push(`
+            <h2>${escapeHtml(currentDate)}</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width:42px;">Given</th>
+                        <th style="width:60px;">Time</th>
+                        <th>Medication</th>
+                        <th>Strength</th>
+                        <th>Qty</th>
+                        <th>Instructions</th>
+                        <th>Comments</th>
+                    </tr>
+                </thead>
+                <tbody>${rows.join('')}</tbody>
+            </table>`);
+        rows = [];
+    };
+
+    doseRows.forEach(({ schedule, med, instance }) => {
+        if (instance.date !== currentDate) {
+            flush();
+            currentDate = instance.date;
+        }
+        rows.push(`
+            <tr>
+                <td class="paper-check">&#9744;</td>
+                <td>${escapeHtml(instance.time)}</td>
+                <td>${escapeHtml(med.name)}</td>
+                <td>${escapeHtml(formatMedStrength(med))}</td>
+                <td>${escapeHtml(formatQtyForSchedule(schedule, med))}</td>
+                <td>${escapeHtml(schedule.instructions || '')}</td>
+                <td class="comment-cell"></td>
+            </tr>`);
+    });
+    flush();
+
+    return `
+        <h2>${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</h2>
+        <div class="muted">Date range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
+        <div class="muted">Use the checkbox to mark administered doses and write late, early, skipped, missed, or other details in Comments.</div>
+        ${sections.join('')}`;
+}
+
+window.generateMemberSchedulePdfReport = async function(memberId = currentEditingMemberId, startDate = localDateKey(), endDate = localDateKey()) {
+    const member = db.family.find(m => m.id === memberId);
+    if (!member) return alert("Open a saved member profile before generating a schedule PDF.");
+    if (!startDate || !endDate || endDate < startDate) return alert("Enter a valid schedule date range.");
+
+    await saveReportPdf(
+        `PharmAtlas Medication Schedule - ${member.firstName} ${member.lastName}`,
+        memberScheduleReportBody(member, startDate, endDate),
+        `PharmAtlas_Schedule_${member.lastName}_${member.firstName}`
+    );
 };
 
 function vitalChartReportHtml(member, chart, readings) {
@@ -2029,18 +2281,39 @@ async function getAdministrationStockPlan(med, sched) {
 async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule') {
     const med = db.inventory.find(m => m.id === sched.medId);
     if (!med || !sched) return false;
+    const status = actual.doseStatus || 'given';
+    const isGivenDose = !['skipped', 'missed'].includes(status);
+    const instanceKey = actual.scheduledDate && actual.scheduledTime
+        ? scheduleInstanceKey(sched.id, actual.scheduledDate, actual.scheduledTime)
+        : '';
 
-    const stockPlan = await getAdministrationStockPlan(med, sched);
+    if (instanceKey && isScheduleInstanceDocumented(sched.id, actual.scheduledDate, actual.scheduledTime)) {
+        await appAlert("That scheduled dose instance has already been documented.");
+        return false;
+    }
+
+    const stockPlan = isGivenDose
+        ? await getAdministrationStockPlan(med, sched)
+        : { qtyToSubtract: 0, logDetail: 'No dose administered' };
     if (!stockPlan) return false;
 
     med.stock = parseAmount(med.stock) - stockPlan.qtyToSubtract;
+    const scheduledText = actual.scheduledDate && actual.scheduledTime
+        ? `scheduled ${actual.scheduledDate} ${actual.scheduledTime}; `
+        : '';
+    const noteText = actual.doseNote ? `; Note: ${actual.doseNote}` : '';
     db.history.unshift({
         id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
         timestamp: formatActualTimestamp(actual),
         memberId: sched.memberId,
         memberName: memberDisplayName(db.family.find(member => member.id === sched.memberId)),
         medName: med.name,
-        details: `Administered ${stockPlan.logDetail} via ${sourceLabel}`
+        scheduleId: sched.id,
+        scheduledDate: actual.scheduledDate || '',
+        scheduledTime: actual.scheduledTime || '',
+        scheduleInstanceKey: instanceKey,
+        doseStatus: status,
+        details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${noteText}`
     });
 
     if (sched.isOneTime) {
@@ -2054,7 +2327,23 @@ window.administerDose = async function(medId, scheduleId) {
     const sched = db.schedules.find(s => s.id === scheduleId);
     if (!med || !sched) return;
 
-    const actual = await requestActualAdministration(`Administer: ${med.name}`);
+    const actual = sched.freq === 'PRN'
+        ? await requestActualAdministration(`Administer: ${med.name}`, `
+            <div class="field-row" style="margin-top:8px;">
+                <label>Status:</label>
+                <select name="doseStatus">
+                    <option value="given">Given</option>
+                    <option value="late">Given late</option>
+                    <option value="early">Given early</option>
+                    <option value="skipped">Skipped</option>
+                    <option value="missed">Missed / forgotten</option>
+                </select>
+            </div>
+            <div class="field-row-stacked" style="margin-top:8px;">
+                <label>Note:</label><textarea name="doseNote" rows="2" style="width:100%; resize:none;"></textarea>
+            </div>
+        `)
+        : await requestScheduledDoseDocumentation(sched, `Document Dose: ${med.name}`);
     if (!actual) return;
 
     const administered = await administerScheduleRecord(sched, actual, sched.orderSetName ? `Order Set (${sched.orderSetName})` : 'Schedule');
@@ -2101,13 +2390,30 @@ window.administerOrderSet = async function(orderSetId) {
         return;
     }
 
-    const actual = await requestActualAdministration(`Date/Time Administered: ${set.name}`);
-    if (!actual) return;
-
     let administeredCount = 0;
     for (const scheduleId of selectedIds) {
         const schedule = db.schedules.find(s => s.id === scheduleId);
-        if (schedule && await administerScheduleRecord(schedule, actual, `Order Set (${set.name})`)) {
+        const med = schedule ? db.inventory.find(m => m.id === schedule.medId) : null;
+        if (!schedule || !med) continue;
+        const actual = schedule.freq === 'PRN'
+            ? await requestActualAdministration(`Document Dose: ${med.name}`, `
+                <div class="field-row" style="margin-top:8px;">
+                    <label>Status:</label>
+                    <select name="doseStatus">
+                        <option value="given">Given</option>
+                        <option value="late">Given late</option>
+                        <option value="early">Given early</option>
+                        <option value="skipped">Skipped</option>
+                        <option value="missed">Missed / forgotten</option>
+                    </select>
+                </div>
+                <div class="field-row-stacked" style="margin-top:8px;">
+                    <label>Note:</label><textarea name="doseNote" rows="2" style="width:100%; resize:none;"></textarea>
+                </div>
+            `)
+            : await requestScheduledDoseDocumentation(schedule, `Document Dose: ${med.name}`);
+        if (!actual) continue;
+        if (await administerScheduleRecord(schedule, actual, `Order Set (${set.name})`)) {
             administeredCount++;
         }
     }
@@ -2484,35 +2790,80 @@ window.clearHistory = async function() {
     }
 };
 
-window.printSingleLabel = function(scheduleId) {
+function getLabelSelectionRange(schedule) {
+    const start = schedule.startDate || localDateKey();
+    if (schedule.endDate && schedule.endDate !== 'Ongoing') return { start, end: schedule.endDate };
+    const end = new Date();
+    end.setDate(end.getDate() + 30);
+    return { start, end: localDateKey(end) };
+}
+
+function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
+    const times = doseTimes.length > 0 ? doseTimes.join(', ') : 'PRN';
+    const instructionLine = schedule.instructions
+        ? `<div class="label-small"><b>Instructions:</b> ${escapeHtml(schedule.instructions)}</div>`
+        : '';
+    const labelClass = getLabelClass([
+        med.name,
+        formatMedStrength(med),
+        formatPrescribedDose(med, schedule.doseQty),
+        formatQtyForSchedule(schedule, med),
+        `${member.firstName} ${member.lastName}`,
+        schedule.instructions
+    ], schedule.instructions ? 6 : 5);
+
+    return `
+        <div class="${labelClass}">
+            <div class="label-date">${escapeHtml(doseDate)} | ${escapeHtml(times)}</div>
+            <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</div>
+            <div class="label-small">Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
+            <div class="label-small"><b>Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}</b></div>
+            <div class="label-small">Member: ${escapeHtml(`${member.firstName} ${member.lastName}`)}</div>
+            ${instructionLine}
+        </div>`;
+}
+
+window.printSingleLabel = async function(scheduleId) {
     const s = db.schedules.find(x => x.id === scheduleId);
     if (!s) return;
     const med = db.inventory.find(m => m.id === s.medId);
     const mem = db.family.find(f => f.id === s.memberId);
     if (!med || !mem) return;
 
-    const instructionLine = s.instructions
-        ? `<div class="label-small"><b>Instr:</b> ${escapeHtml(s.instructions)}</div>`
-        : '';
-    const labelClass = getLabelClass([
-        med.name,
-        formatMedStrength(med),
-        formatPrescribedDose(med, s.doseQty),
-        formatQtyForSchedule(s, med),
-        `${mem.firstName} ${mem.lastName}`,
-        s.instructions
-    ], s.instructions ? 6 : 5);
+    const range = getLabelSelectionRange(s);
+    const instances = getScheduleInstancesInRange(s, range.start, range.end);
+    if (instances.length === 0) {
+        await appAlert("No scheduled doses were found for this order date range.");
+        return;
+    }
 
-    previewLabelHtml(`
-        <div class="${labelClass}">
-            <div class="label-date">${escapeHtml(formatDoseDateTime(s))}</div>
-            <div class="label-title">${escapeHtml(med.name)}</div>
-            <div class="label-small">Str: ${escapeHtml(formatMedStrength(med))}</div>
-            <div class="label-small">Dose: ${escapeHtml(formatPrescribedDose(med, s.doseQty))}</div>
-            <div class="label-small"><b>Qty: ${escapeHtml(formatQtyForSchedule(s, med))}</b></div>
-            <div class="label-small">Member: ${escapeHtml(`${mem.firstName} ${mem.lastName}`)}</div>
-            ${instructionLine}
-        </div>`);
+    const byDate = instances.reduce((acc, instance) => {
+        if (!acc[instance.date]) acc[instance.date] = [];
+        acc[instance.date].push(instance.time);
+        return acc;
+    }, {});
+    const options = Object.entries(byDate).map(([date, times]) => {
+        const sortedTimes = times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+        const allOption = sortedTimes.length > 1
+            ? `<option value="${escapeHtml(`${date}|ALL`)}">${escapeHtml(date)} - all doses (${escapeHtml(sortedTimes.join(', '))})</option>`
+            : '';
+        const timeOptions = sortedTimes.map(time => `<option value="${escapeHtml(`${date}|${time}`)}">${escapeHtml(date)} ${escapeHtml(time)}</option>`).join('');
+        return allOption + timeOptions;
+    }).join('');
+
+    const result = await showActionModal(`Print Label: ${med.name}`, `
+        <div class="field-row">
+            <label>Dose:</label>
+            <select name="labelDose" style="width:260px;">${options}</select>
+        </div>
+    `, 'Preview Label');
+    if (!result?.labelDose) return;
+
+    const [doseDate, doseTime] = result.labelDose.split('|');
+    const doseTimes = doseTime === 'ALL'
+        ? byDate[doseDate].slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
+        : [doseTime];
+    previewLabelHtml(medicationLabelHtml(s, med, mem, doseDate, doseTimes));
 };
 
 window.printInventoryLabel = function(medId) {
@@ -2533,8 +2884,7 @@ window.printInventoryLabel = function(medId) {
 
     previewLabelHtml(`
         <div class="${labelClass}">
-            <div class="label-title">${escapeHtml(med.name)}</div>
-            <div class="label-small">Str: ${escapeHtml(formatMedStrength(med))}</div>
+            <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</div>
             <div class="label-small">On hand: ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(med.formulation || 'unit(s)')}</div>
             <div class="label-small">Storage: ${escapeHtml(med.storage || 'N/A')}</div>
             <div class="label-small">Exp: ${escapeHtml(med.expiry || 'N/A')} | Ctrl: ${escapeHtml(med.controlLevel || 'N/A')}</div>
@@ -2549,7 +2899,6 @@ window.printInventoryLabel = function(medId) {
 window.printDateRangeLabels = function(memberId, startDate, endDate) {
     const mem = db.family.find(f => f.id === memberId);
     if (!mem) return;
-    const memberSchedules = db.schedules.filter(s => s.memberId === memberId);
 
     const start = parseLocal(startDate);
     const end = parseLocal(endDate);
@@ -2562,24 +2911,17 @@ window.printDateRangeLabels = function(memberId, startDate, endDate) {
     while (cursor <= end) {
         const yyyymmdd = localDateKey(cursor);
 
-        const medsDueToday = memberSchedules.filter(s => {
-            return isScheduleDueOnDate(s, yyyymmdd);
-        });
+        const doseRows = collectMemberScheduleDoseRows(memberId, yyyymmdd, yyyymmdd);
 
         labelCount++;
         const labelClass = getLabelClass(
-            medsDueToday.map(s => {
-                const med = db.inventory.find(m => m.id === s.medId);
-                return med ? `${med.name} ${formatMedStrength(med)} ${formatQtyForSchedule(s, med)}` : '';
-            }),
-            medsDueToday.length + 1
+            doseRows.map(row => `${row.instance.time} ${row.med.name} ${formatMedStrength(row.med)} ${formatQtyForSchedule(row.schedule, row.med)}`),
+            doseRows.length + 1
         );
-        const medRowsHtml = medsDueToday.length > 0
-            ? medsDueToday.map(s => {
-                const med = db.inventory.find(m => m.id === s.medId);
-                if (!med) return '';
+        const medRowsHtml = doseRows.length > 0
+            ? doseRows.map(row => {
                 return `<div class="label-med-row">
-                * ${getScheduleTimes(s).join(', ') || 'PRN'}: ${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} (${escapeHtml(formatQtyForSchedule(s, med))})</div>`;
+                <b>${escapeHtml(row.instance.time)}</b>: ${escapeHtml(row.med.name)} ${escapeHtml(formatMedStrength(row.med))} (${escapeHtml(formatQtyForSchedule(row.schedule, row.med))})</div>`;
             }).join('')
             : '<div class="label-med-row">No scheduled medications</div>';
 
