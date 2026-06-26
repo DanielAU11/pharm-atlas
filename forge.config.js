@@ -5,6 +5,14 @@ module.exports = {
   packagerConfig: {
     asar: true,
     icon: './assets/pngegg',
+    executableName: 'PharmAtlas',
+    win32metadata: {
+      CompanyName: 'PharmAtlas',
+      FileDescription: 'PharmAtlas',
+      OriginalFilename: 'PharmAtlas.exe',
+      ProductName: 'PharmAtlas',
+      InternalName: 'PharmAtlas',
+    },
   },
   rebuildConfig: {},
   makers: [

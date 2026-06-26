@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 
+if (require('electron-squirrel-startup')) app.quit();
+
 // 1. Setup Transporter
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -12,7 +14,7 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-app.setAppUserModelId("com.pharmatlas.app"); 
+app.setAppUserModelId("com.squirrel.PharmAtlas.PharmAtlas");
 
 const dataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
 const dbPath = path.join(dataDir, 'db.json');
