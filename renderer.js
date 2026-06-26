@@ -16,6 +16,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     db = { ...emptyDb, ...loadedData };
     renderAll();
     renderFrequencyControls('sched');
+    updateInventoryEntryMode();
     checkSchedules();
 });
 
@@ -291,6 +292,7 @@ function formatMedStrength(med, includeNames = false) {
             return `${name}${formatAmount(parseAmount(component.strength))}${getComponentUnit(component, med)}`;
         }).join(' / ');
     }
+    if (med.displayStrength) return med.displayStrength;
     return `${med.strength}${med.units}`;
 }
 
@@ -766,8 +768,13 @@ window.closeMemberModal = () => document.getElementById('member-modal').style.di
 // --- INVENTORY ---
 window.addInventory = async function() {
     const name = document.getElementById('med-name').value.trim();
-    const strength = document.getElementById('med-strength').value.trim();
-    const units = document.getElementById('med-units').value;
+    const strengthAmount = parseAmount(document.getElementById('med-strength').value, NaN);
+    const selectedUnit = document.getElementById('med-units').value;
+    const selectedUnitParts = selectedUnit.split('/');
+    const activeUnit = selectedUnitParts[0] || selectedUnit;
+    const selectedPerUnit = selectedUnitParts[1] || '';
+    const perAmount = parseAmount(document.getElementById('med-per-amount')?.value, 1);
+    const perUnit = document.getElementById('med-per-unit')?.value || selectedPerUnit;
     const qty = parseAmount(document.getElementById('med-qty').value, NaN);
     const formulation = document.getElementById('med-formulation').value;
     const imageInput = document.getElementById('med-image-input');
@@ -777,7 +784,9 @@ window.addInventory = async function() {
     // --- NEW COMBINATION LOGIC ---
     const isCombo = document.getElementById('is-combination').checked;
     let components = [];
-    let finalStrength = document.getElementById('med-strength').value;
+    let finalStrength = strengthAmount;
+    let finalUnits = activeUnit;
+    let displayStrength = '';
 
     if (isCombo) {
         const rows = document.querySelectorAll('#ingredient-list .combo-row');
@@ -791,8 +800,17 @@ window.addInventory = async function() {
         });
         if (components.length === 0) return alert("Add at least one valid active ingredient.");
         finalStrength = components.map(c => `${formatAmount(c.strength)}${c.unit}`).join('/');
-    } else if (!strength) {
+        displayStrength = finalStrength;
+    } else if (!Number.isFinite(strengthAmount) || strengthAmount <= 0) {
         return alert("Strength required.");
+    } else if (perUnit && Number.isFinite(perAmount) && perAmount > 0) {
+        finalStrength = strengthAmount / perAmount;
+        finalUnits = `${activeUnit}/${perUnit}`;
+        displayStrength = perAmount === 1
+            ? `${formatAmount(strengthAmount)}${activeUnit}/${perUnit}`
+            : `${formatAmount(strengthAmount)}${activeUnit}/${formatAmount(perAmount)}${perUnit}`;
+    } else {
+        displayStrength = `${formatAmount(strengthAmount)}${activeUnit}`;
     }
 
     let imagePath = null;
@@ -808,12 +826,17 @@ window.addInventory = async function() {
         id: Date.now().toString(), 
         name, 
         strength: finalStrength,
-        units, 
+        units: finalUnits,
+        displayStrength,
+        strengthAmount: isCombo ? null : strengthAmount,
+        activeUnit: isCombo ? null : activeUnit,
+        perAmount: isCombo ? null : (perUnit ? perAmount : null),
+        perUnit: isCombo ? null : perUnit,
         formulation, // 'Tablets', 'mL', 'Capsules', etc.
         stock: qty, 
         maxCapacity: qty,
         expiry: expiry,
-        isLiquid: document.getElementById('med-formulation').value === 'mL',
+        isLiquid: finalUnits.includes('/') || document.getElementById('med-formulation').value === 'mL',
         isCombination: isCombo,
         components: components, // Only for combinations    
         minThreshold: parseAmount(document.getElementById('med-threshold').value, 5),
@@ -822,10 +845,12 @@ window.addInventory = async function() {
     
     document.getElementById('med-name').value = '';
     document.getElementById('med-strength').value = '';
+    document.getElementById('med-per-amount').value = '1';
+    document.getElementById('med-per-unit').value = '';
     document.getElementById('med-qty').value = '';
     document.getElementById('ingredient-list').innerHTML = '';
     document.getElementById('is-combination').checked = false;
-    document.getElementById('combination-fields').style.display = 'none';
+    updateInventoryEntryMode();
     imageInput.value = '';
     await sync();
 };
@@ -996,8 +1021,12 @@ function medicationOptionsHtml(selected = '') {
         .join('');
 }
 
+function getOrderSetRowMed(row) {
+    return db.inventory.find(m => m.id === row.querySelector('.os-med-strength')?.value);
+}
+
 function updateOrderSetRowDose(row) {
-    const med = db.inventory.find(m => m.id === row.querySelector('.os-med')?.value);
+    const med = getOrderSetRowMed(row);
     const doseQty = parseAmount(row.querySelector('.os-dose')?.value, NaN);
     const units = row.querySelector('.os-units');
     const calculated = row.querySelector('.os-calculated-dose');
@@ -1009,15 +1038,35 @@ function updateOrderSetRowDose(row) {
         : '';
 }
 
+function updateOrderSetStrengthOptions(row, selectedMedId = '') {
+    const input = row.querySelector('.os-med-search');
+    const strengthSelect = row.querySelector('.os-med-strength');
+    if (!input || !strengthSelect) return;
+
+    const matches = db.inventory.filter(med => med.name === input.value);
+    strengthSelect.innerHTML = '';
+    matches.forEach(med => {
+        const opt = document.createElement('option');
+        opt.value = med.id;
+        opt.innerText = formatMedStrength(med);
+        if (med.id === selectedMedId) opt.selected = true;
+        strengthSelect.appendChild(opt);
+    });
+    input.style.backgroundColor = matches.length > 0 ? '#e0ffe0' : '';
+    updateOrderSetRowDose(row);
+}
+
 window.addOrderSetMedicationRow = function(item = null) {
     const container = document.getElementById('order-set-med-list');
     if (!container) return;
+    const selectedMed = item?.medId ? db.inventory.find(med => med.id === item.medId) : null;
     const row = document.createElement('div');
     row.className = 'sunken-panel order-set-med-row';
     row.style.cssText = 'background:white; padding:6px; margin-bottom:6px;';
     row.innerHTML = `
         <div class="field-row">
-            <label>Med:</label><select class="os-med" style="width:190px;">${medicationOptionsHtml(item?.medId)}</select>
+            <label>Med:</label><input class="os-med-search" list="med-options" style="width:150px;" placeholder="Search..." value="${escapeHtml(selectedMed?.name || '')}">
+            <label>Strength:</label><select class="os-med-strength" style="width:110px;"></select>
             <label>Dose Qty:</label><input class="os-dose" type="number" step="0.1" style="width:55px;" value="${item?.doseQty || ''}">
             <span class="os-units" style="min-width:58px;"></span>
             <label>Freq:</label><select class="os-freq">${frequencyOptionsHtml(item?.freq || 'QD')}</select>
@@ -1033,11 +1082,12 @@ window.addOrderSetMedicationRow = function(item = null) {
         <div class="field-row-stacked" style="margin-top:5px;"><label>Instructions</label><textarea class="os-instructions" rows="2" style="width:100%; resize:none;">${escapeHtml(item?.instructions || '')}</textarea></div>
     `;
     row.querySelector('.os-freq').addEventListener('change', () => renderOrderSetRowControls(row));
-    row.querySelector('.os-med').addEventListener('change', () => updateOrderSetRowDose(row));
+    row.querySelector('.os-med-search').addEventListener('input', () => updateOrderSetStrengthOptions(row));
+    row.querySelector('.os-med-strength').addEventListener('change', () => updateOrderSetRowDose(row));
     row.querySelector('.os-dose').addEventListener('input', () => updateOrderSetRowDose(row));
     row.querySelector('.os-remove').addEventListener('click', () => row.remove());
     container.appendChild(row);
-    updateOrderSetRowDose(row);
+    updateOrderSetStrengthOptions(row, item?.medId || '');
     renderOrderSetRowControls(row, item?.freq === 'QXH' ? [item?.startTime || item?.times?.[0]] : item?.times);
 };
 
@@ -1065,19 +1115,17 @@ function renderOrderSetRowControls(row, existingTimes = null) {
 }
 
 function collectOrderSetItem(row) {
-    const medId = row.querySelector('.os-med').value;
+    const medId = row.querySelector('.os-med-strength').value;
     const doseQty = row.querySelector('.os-dose').value;
     const freq = row.querySelector('.os-freq').value;
     const rawTimes = Array.from(row.querySelectorAll('.os-time-input')).map(input => input.value).filter(Boolean);
     const intervalHours = freq === 'QXH' ? parseInt(row.querySelector('.os-interval-hours').value, 10) : null;
     if (!medId || !doseQty) {
-        alert("Each order set medication needs a med and dose quantity.");
-        return null;
+        return { error: "Each order set medication needs a medication, strength, and dose quantity." };
     }
     if (freq === 'QXH') {
         if (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24 || !rawTimes[0]) {
-            alert("Every X Hours rows need a valid interval and start time.");
-            return null;
+            return { error: "Every X Hours rows need a valid interval and start time." };
         }
         return {
             medId,
@@ -1093,8 +1141,7 @@ function collectOrderSetItem(row) {
     if (freq !== 'PRN') {
         const expected = getExpectedTimeCount(freq);
         if (rawTimes.length !== expected) {
-            alert(`Each ${freq} order needs ${expected} administration time${expected === 1 ? '' : 's'}.`);
-            return null;
+            return { error: `Each ${freq} order needs ${expected} administration time${expected === 1 ? '' : 's'}.` };
         }
     }
     return {
@@ -1142,17 +1189,21 @@ window.saveOrderSet = async function() {
     const editId = document.getElementById('order-set-edit-id').value;
     const memberId = document.getElementById('order-set-member').value;
     const name = document.getElementById('order-set-name').value.trim();
-    const startDate = document.getElementById('order-set-start').value;
+    const startDate = document.getElementById('order-set-start').value || localDateKey();
     const endDate = document.getElementById('order-set-end').value || 'Ongoing';
-    if (!memberId || !name || !startDate) {
-        await appAlert("Member, order set name, and start date are required.");
+    if (!name) {
+        await appAlert("Order set name is required.");
+        document.getElementById('order-set-name').focus();
         return;
     }
 
     const items = [];
     for (const row of Array.from(document.querySelectorAll('#order-set-med-list .order-set-med-row'))) {
         const item = collectOrderSetItem(row);
-        if (!item) return;
+        if (!item || item.error) {
+            await appAlert(item?.error || "Check the order set medication rows.");
+            return;
+        }
         items.push(item);
     }
     if (items.length === 0) {
@@ -1166,7 +1217,9 @@ window.saveOrderSet = async function() {
     else db.orderSets.push(orderSet);
 
     db.schedules = db.schedules.filter(schedule => schedule.orderSetId !== orderSet.id);
-    db.schedules.push(...items.map((item, index) => orderSetItemToSchedule(orderSet, item, index)));
+    if (memberId) {
+        db.schedules.push(...items.map((item, index) => orderSetItemToSchedule(orderSet, item, index)));
+    }
 
     await sync();
     clearOrderSetBuilder();
@@ -1183,6 +1236,45 @@ window.editOrderSet = function(id) {
     document.getElementById('order-set-med-list').innerHTML = '';
     set.items.forEach(item => addOrderSetMedicationRow(item));
     switchTab('order-sets');
+};
+
+window.assignOrderSet = async function(id) {
+    const source = db.orderSets.find(orderSet => orderSet.id === id);
+    if (!source) return;
+    if (db.family.length === 0) {
+        await appAlert("Add a member before assigning an order set.");
+        return;
+    }
+
+    const result = await showActionModal(`Assign Order Set: ${source.name}`, `
+        <div class="field-row">
+            <label>Member:</label>
+            <select name="memberId">${memberOptionsHtml(source.memberId || '')}</select>
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Start:</label><input name="startDate" type="date" value="${escapeHtml(source.startDate || localDateKey())}">
+            <label>End:</label><input name="endDate" type="date" value="${source.endDate === 'Ongoing' ? '' : escapeHtml(source.endDate || '')}">
+        </div>
+    `, 'Assign');
+    if (!result) return;
+    if (!result.memberId || !result.startDate) {
+        await appAlert("Member and start date are required to assign an order set.");
+        return;
+    }
+
+    const assignedSet = {
+        ...source,
+        id: Date.now().toString(),
+        templateId: source.templateId || source.id,
+        memberId: result.memberId,
+        startDate: result.startDate,
+        endDate: result.endDate || 'Ongoing',
+        items: source.items.map(item => ({ ...item }))
+    };
+
+    db.orderSets.push(assignedSet);
+    db.schedules.push(...assignedSet.items.map((item, index) => orderSetItemToSchedule(assignedSet, item, index)));
+    await sync();
 };
 
 window.deleteOrderSet = async function(id) {
@@ -1215,7 +1307,11 @@ window.printOrderSetLabel = function(id) {
 function renderOrderSets() {
     const memberSelect = document.getElementById('order-set-member');
     if (memberSelect) {
-        memberSelect.innerHTML = db.family.map(m => `<option value="${m.id}">${m.lastName}, ${m.firstName}</option>`).join('');
+        memberSelect.innerHTML = `<option value="">Reusable template</option>` + db.family
+            .slice()
+            .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(m => `<option value="${m.id}">${escapeHtml(memberDisplayName(m))}</option>`)
+            .join('');
     }
 
     const startInput = document.getElementById('order-set-start');
@@ -1235,17 +1331,19 @@ function renderOrderSets() {
 
     list.innerHTML = db.orderSets.map(set => {
         const member = db.family.find(m => m.id === set.memberId);
+        const assignmentLabel = member ? `${member.lastName}, ${member.firstName}` : 'Reusable template';
         const itemSummary = set.items.map(item => {
             const med = db.inventory.find(m => m.id === item.medId);
             return med ? med.name : 'Unknown';
         }).join(', ');
         return `<div class="med-item-row" style="border-bottom:1px solid #808080;">
             <div style="flex-grow:1;">
-                <strong>${set.name}</strong> - ${member ? `${member.lastName}, ${member.firstName}` : '?'}<br>
-                <small>${itemSummary}</small>
+                <strong>${escapeHtml(set.name)}</strong> - ${escapeHtml(assignmentLabel)}<br>
+                <small>${escapeHtml(itemSummary)}</small>
             </div>
+            <button onclick="assignOrderSet('${set.id}')">Assign</button>
             <button onclick="printOrderSetLabel('${set.id}')">Label</button>
-            <button onclick="administerOrderSet('${set.id}')">Administer</button>
+            ${member ? `<button onclick="administerOrderSet('${set.id}')">Administer</button>` : ''}
             <button onclick="editOrderSet('${set.id}')">Edit</button>
             <button onclick="deleteOrderSet('${set.id}')">Delete</button>
         </div>`;
@@ -2112,9 +2210,60 @@ function renderCalendar() {
     }
 }
 
+window.updateInventoryEntryMode = function() {
+    const isCombo = document.getElementById('is-combination').checked;
+    const formulation = document.getElementById('med-formulation')?.value || '';
+    const units = document.getElementById('med-units')?.value || '';
+    const unitParts = units.split('/');
+    const strengthInput = document.getElementById('med-strength');
+    const unitsSelect = document.getElementById('med-units');
+    const perContainer = document.getElementById('med-per-container');
+    const perAmountInput = document.getElementById('med-per-amount');
+    const perUnitSelect = document.getElementById('med-per-unit');
+    const stockUnitLabel = document.getElementById('med-stock-unit-label');
+    const combinationFields = document.getElementById('combination-fields');
+
+    const formulationDefaults = {
+        'mL': 'mL',
+        'Drops': 'drop',
+        'Sprays': 'spray',
+        'Inhalations': 'inhalation',
+        'Tablets': 'tablet',
+        'Capsules': 'capsule',
+        'Packet': 'packet',
+        'Patch': 'patch',
+        'Suppository': 'suppository'
+    };
+    const defaultPerUnit = formulationDefaults[formulation] || '';
+    const isConcentration = formulation === 'mL' || units.includes('/') || ['Drops', 'Sprays', 'Inhalations'].includes(formulation);
+
+    if (combinationFields) combinationFields.style.display = isCombo ? 'block' : 'none';
+    if (strengthInput) {
+        strengthInput.disabled = isCombo;
+        strengthInput.title = isCombo ? 'Strength is built from active ingredients.' : '';
+        if (isCombo) strengthInput.value = '';
+    }
+    if (unitsSelect) {
+        unitsSelect.disabled = isCombo;
+        unitsSelect.title = isCombo ? 'Units are set per active ingredient.' : '';
+    }
+    if (perContainer) perContainer.style.display = isCombo ? 'none' : 'inline-block';
+    if (perAmountInput) {
+        perAmountInput.disabled = isCombo || !isConcentration;
+        if (!isConcentration) perAmountInput.value = '1';
+    }
+    if (perUnitSelect) {
+        perUnitSelect.disabled = isCombo || !isConcentration;
+        if (!isConcentration) perUnitSelect.value = '';
+        else if (unitParts[1]) perUnitSelect.value = unitParts[1];
+        else if (!perUnitSelect.value && defaultPerUnit) perUnitSelect.value = defaultPerUnit;
+    }
+    if (stockUnitLabel) stockUnitLabel.innerText = formulation || 'unit(s)';
+};
+
 window.toggleComboFields = function() {
     const isCombo = document.getElementById('is-combination').checked;
-    document.getElementById('combination-fields').style.display = isCombo ? 'block' : 'none';
+    updateInventoryEntryMode();
     if (isCombo && document.getElementById('ingredient-list').children.length === 0) {
         addIngredientRow(); // Add first row by default
     }

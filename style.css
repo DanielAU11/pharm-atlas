@@ -1,3 +1,52 @@
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #c0c0c0;
+    overflow: hidden;
+}
+
+body {
+    display: flex;
+}
+
+.app-window {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-window > .window-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.tabs {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-panel-window {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-panel-window > .window-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
 /* Custom spacing for the 98 look */
 .med-item-row {
     display: flex;
@@ -76,7 +125,7 @@ fieldset {
 }
 
 .drug-info-frame {
-    height: 300px;
+    height: clamp(520px, calc(100vh - 250px), 760px);
     background: #ffffff;
 }
 

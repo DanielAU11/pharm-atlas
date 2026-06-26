@@ -8,9 +8,9 @@
     <link rel="stylesheet" href="https://unpkg.com/98.css">
     <link rel="stylesheet" href="style.css">
 </head>
-<body style="background-color: #aca22293; padding: 20px;"> 
+<body> 
 
-    <div class="window" style="width: auto; margin: 0 auto;">
+    <div class="window app-window">
         <div class="title-bar">
             <div class="title-bar-text">PharmAtlas</div>
             <div class="title-bar-controls">
@@ -33,7 +33,7 @@
             </menu>
 
         <!-- Tab Content Container -->
-        <div class="window" role="tabpanel">
+        <div class="window app-panel-window" role="tabpanel">
             <div class="window-body">
                 
                 <!-- 1. DASHBOARD -->
@@ -230,10 +230,10 @@
 
                         <div class="field-row" style="margin-top: 8px;">
                             <label for="med-strength">Strength:</label>
-                            <input id="med-strength" type="text" style="width: 60px;" />
+                            <input id="med-strength" type="number" min="0" step="0.001" style="width: 70px;" />
                         
                             <label for="med-units">Units:</label>
-                            <select id="med-units">
+                            <select id="med-units" onchange="updateInventoryEntryMode()">
                                 <option value="mg">mg</option>
                                 <option value="mL">ml</option>
                                 <option value="mg/mL">mg/mL</option>
@@ -246,15 +246,30 @@
                                 <option value="U/mL">Units/mL</option>
                                 <option value="CFU">CFU</option>
                             </select>
+                            <span id="med-per-container">
+                                <label for="med-per-amount">per</label>
+                                <input id="med-per-amount" type="number" min="0.001" step="0.001" value="1" style="width: 55px;" />
+                                <select id="med-per-unit">
+                                    <option value="">unit</option>
+                                    <option value="mL">mL</option>
+                                    <option value="tablet">tablet</option>
+                                    <option value="capsule">capsule</option>
+                                    <option value="packet">packet</option>
+                                    <option value="spray">spray</option>
+                                    <option value="drop">drop</option>
+                                    <option value="patch">patch</option>
+                                </select>
+                            </span>
                         
-                            <label for="med-qty">Qty:</label>
+                            <label for="med-qty">Qty on hand:</label>
                             <input id="med-qty" type="number" style="width: 50px;" />
+                            <span id="med-stock-unit-label">Tablets</span>
                             <label>Expiry:</label>
                             <input id="med-expiry" type="date" />
                             <label for="med-threshold">Alert at:</label>
                             <input id="med-threshold" type="number" style="width: 50px;" />
                             <label>Formulation:</label>
-                            <select id="med-formulation">
+                            <select id="med-formulation" onchange="updateInventoryEntryMode()">
                                 <option value="Tablets">Tablets</option>
                                 <option value="Capsules">Capsules</option>
                                 <option value="mL">Liquid (mL)</option>
