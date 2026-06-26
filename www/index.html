@@ -292,7 +292,12 @@
 
                     <fieldset>
                         <legend>Inventory</legend>
-                        <div class="sunken-panel" style="height: 200px; width: 100%; overflow-y: scroll;">
+                        <div class="field-row" style="margin-bottom:6px;">
+                            <label for="inventory-search">Search:</label>
+                            <input id="inventory-search" type="search" placeholder="Find medication..." style="width:220px;" oninput="renderAll()">
+                            <button type="button" onclick="clearInventorySearch()">Clear</button>
+                        </div>
+                        <div class="sunken-panel" style="height: 800px; width: 100%; overflow-y: scroll;">
                             <table class="interactive" style="width: 100%;">
                                 <thead>
                                     <tr>

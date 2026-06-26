@@ -1488,10 +1488,10 @@ function drawVitalChart(canvas, readings, series, options = {}) {
     const min = Math.min(...allValues);
     const max = Math.max(...allValues);
     const spread = Math.max(max - min, 1);
-    const leftPad = 34;
-    const rightPad = 8;
-    const topPad = 14;
-    const bottomPad = 20;
+    const leftPad = 42;
+    const rightPad = 14;
+    const topPad = 16;
+    const bottomPad = 22;
     const xFor = index => readings.length <= 1 ? (leftPad + width - rightPad) / 2 : leftPad + (index / (readings.length - 1)) * (width - leftPad - rightPad);
     const yFor = value => height - bottomPad - ((value - min) / spread) * (height - topPad - bottomPad);
 
@@ -1511,7 +1511,9 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         ctx.stroke();
         ctx.fillStyle = '#ff0000';
         ctx.font = '9px MS Sans Serif, Arial';
-        ctx.fillText('70', 4, y70 + 3);
+        ctx.textAlign = 'right';
+        ctx.fillText('70', leftPad - 6, y70 - 3);
+        ctx.textAlign = 'left';
     }
 
     pointsBySeries.forEach(item => {
@@ -1535,8 +1537,10 @@ function drawVitalChart(canvas, readings, series, options = {}) {
 
     ctx.fillStyle = '#000000';
     ctx.font = '9px MS Sans Serif, Arial';
-    ctx.fillText(`${formatAmount(max)}`, 4, topPad + 3);
-    ctx.fillText(`${formatAmount(min)}`, 4, height - bottomPad);
+    ctx.textAlign = 'right';
+    ctx.fillText(`${formatAmount(max)}`, leftPad - 6, topPad + 3);
+    ctx.fillText(`${formatAmount(min)}`, leftPad - 6, height - bottomPad);
+    ctx.textAlign = 'left';
     ctx.fillText(options.unit || '', leftPad, 10);
     if (readings.length > 0) {
         ctx.fillText(readings[0].date.slice(5), leftPad, height - 4);
@@ -1585,7 +1589,7 @@ function getVitalChartConfigs() {
             { key: 'hr', label: 'Heart Rate', color: '#aa00aa' }
         ] },
         { type: 'weight', title: 'Weight', unit: 'lb', series: [{ key: 'weight', label: 'Weight', color: '#0000aa' }] },
-        { type: 'glucose', title: 'Blood Glucose', unit: 'mg/dL', series: [{ key: 'glucose', label: 'Glucose', color: '#aa0000' }] }
+        { type: 'glucose', title: 'Blood Glucose', unit: 'mg/dL', series: [{ key: 'glucose', label: 'Glucose', color: '#070707' }] }
     ];
 }
 
@@ -1609,7 +1613,7 @@ function renderMemberVitalCharts(memberId, container) {
         panel.innerHTML = `
             <div style="font-size:11px; font-weight:bold;">${chart.title}</div>
             <div class="vital-chart-meta">${first.date} to ${last.date} (${readings.length} readings)</div>
-            <canvas width="300" height="120" class="vital-chart"></canvas>
+            <canvas width="380" height="150" class="vital-chart"></canvas>
             <div class="vital-legend">${legend}<span><span class="legend-swatch" style="background:#ff0000;"></span>Out of goal</span></div>
         `;
         grid.appendChild(panel);
@@ -1832,14 +1836,23 @@ function memberVitalsReportBody(member) {
         return vitalChartReportHtml(member, chart, chartReadings);
     }).join('');
 
-    const rows = memberReadings.map(reading => {
-        const alertClass = isVitalOutOfRange(reading, member) ? ' class="alert"' : '';
-        return `<tr${alertClass}>
-            <td>${escapeHtml(reading.date)} ${escapeHtml(reading.time)}</td>
-            <td>${escapeHtml(vitalTypeLabel(reading.type))}</td>
-            <td>${escapeHtml(formatVitalReading(reading))}</td>
-            <td>${escapeHtml(reading.notes || '')}</td>
-        </tr>`;
+    const logSections = getVitalChartConfigs().map(chart => {
+        const rows = memberReadings
+            .filter(reading => reading.type === chart.type)
+            .map(reading => {
+                const alertClass = isVitalOutOfRange(reading, member) ? ' class="alert"' : '';
+                return `<tr${alertClass}>
+                    <td>${escapeHtml(reading.date)} ${escapeHtml(reading.time)}</td>
+                    <td>${escapeHtml(formatVitalReading(reading))}</td>
+                    <td>${escapeHtml(reading.notes || '')}</td>
+                </tr>`;
+            }).join('');
+        return `
+            <h3>${escapeHtml(chart.title)} Log</h3>
+            <table>
+                <thead><tr><th>Date/Time</th><th>Reading</th><th>Notes</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="3">No readings logged.</td></tr>'}</tbody>
+            </table>`;
     }).join('');
 
     return `
@@ -1847,10 +1860,7 @@ function memberVitalsReportBody(member) {
         <div class="muted">Glucose goal: ${escapeHtml(goals.glucose.low)}-${escapeHtml(goals.glucose.high)} mg/dL | BP goal: ${escapeHtml(goals.bp.systolicLow)}-${escapeHtml(goals.bp.systolicHigh)}/${escapeHtml(goals.bp.diastolicLow)}-${escapeHtml(goals.bp.diastolicHigh)} mmHg</div>
         ${chartsHtml || '<h3>No graphable vitals yet.</h3>'}
         <h2>Reading Log</h2>
-        <table>
-            <thead><tr><th>Date/Time</th><th>Type</th><th>Reading</th><th>Notes</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="4">No vitals logged.</td></tr>'}</tbody>
-        </table>`;
+        ${logSections}`;
 }
 
 window.generateMemberVitalsPdfReport = async function(memberId = currentEditingMemberId) {
@@ -2284,6 +2294,26 @@ window.addIngredientRow = function() {
     container.appendChild(div);
 };
 
+function inventorySearchText(med) {
+    return [
+        med.name,
+        formatMedStrength(med),
+        med.units,
+        med.formulation,
+        med.expiry,
+        med.storage,
+        med.controlLevel,
+        med.notes,
+        ...(med.components || []).flatMap(component => [component.name, component.unit])
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+window.clearInventorySearch = function() {
+    const search = document.getElementById('inventory-search');
+    if (search) search.value = '';
+    renderAll();
+};
+
 
 function renderAll() {
     const recipeSelect = document.getElementById('prepare-select');
@@ -2314,7 +2344,11 @@ function renderAll() {
     const medDataList = document.getElementById('med-options');
     if (tableBody) tableBody.innerHTML = '';
     if (medDataList) medDataList.innerHTML = '';
-sortedInventory.forEach(med => {
+    const inventoryQuery = (document.getElementById('inventory-search')?.value || '').trim().toLowerCase();
+    const filteredInventory = inventoryQuery
+        ? sortedInventory.filter(med => inventorySearchText(med).includes(inventoryQuery))
+        : sortedInventory;
+filteredInventory.forEach(med => {
     let displayStrength = formatMedStrength(med);
     if (tableBody) {
         const row = document.createElement('tr');
@@ -2358,6 +2392,13 @@ sortedInventory.forEach(med => {
             </td>`;
         tableBody.appendChild(row);
     }
+});
+
+if (tableBody && filteredInventory.length === 0) {
+    tableBody.innerHTML = '<tr><td colspan="7" style="padding:8px;">No inventory items match the search.</td></tr>';
+}
+
+sortedInventory.forEach(med => {
     
     if (medDataList) {
         const opt = document.createElement('option');
