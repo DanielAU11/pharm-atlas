@@ -68,6 +68,34 @@ async function sendEmailNotification(recipient, subject, text) {
     }
 }
 
+function safePdfFileName(fileName) {
+    const safeName = String(fileName || `PharmAtlas_Report_${Date.now()}.pdf`)
+        .replace(/[<>:"/\\|?*]+/g, '_');
+    return safeName.toLowerCase().endsWith('.pdf') ? safeName : `${safeName}.pdf`;
+}
+
+async function renderPdfBuffer(html) {
+    const reportWindow = new BrowserWindow({
+        show: false,
+        webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+
+    try {
+        await reportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        return await reportWindow.webContents.printToPDF({
+            printBackground: true,
+            pageSize: 'Letter',
+            margins: { marginType: 'default' }
+        });
+    } finally {
+        reportWindow.destroy();
+    }
+}
+
 // 3. IPC Handlers
 ipcMain.handle('send-email', async (event, { to, subject, body }) => {
     return await sendEmailNotification(to, subject, body);
@@ -91,30 +119,32 @@ ipcMain.handle('save-image', (event, fileName, base64Data) => {
 });
 
 ipcMain.handle('save-pdf-report', async (event, { html, fileName }) => {
-    const safeName = String(fileName || `PharmAtlas_Report_${Date.now()}.pdf`)
-        .replace(/[<>:"/\\|?*]+/g, '_');
-    const finalName = safeName.toLowerCase().endsWith('.pdf') ? safeName : `${safeName}.pdf`;
+    const finalName = safePdfFileName(fileName);
     const pdfPath = path.join(dataDir, finalName);
-    const reportWindow = new BrowserWindow({
-        show: false,
-        webPreferences: {
-            sandbox: true,
-            contextIsolation: true,
-            nodeIntegration: false
-        }
-    });
+    const pdfData = await renderPdfBuffer(html);
+    fs.writeFileSync(pdfPath, pdfData);
+    return pdfPath;
+});
 
+ipcMain.handle('email-pdf-report', async (event, { html, fileName, to, subject, body }) => {
+    const finalName = safePdfFileName(fileName);
     try {
-        await reportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-        const pdfData = await reportWindow.webContents.printToPDF({
-            printBackground: true,
-            pageSize: 'Letter',
-            margins: { marginType: 'default' }
+        const pdfData = await renderPdfBuffer(html);
+        await transporter.sendMail({
+            from: 'danielanthonyuribe@gmail.com',
+            to,
+            subject,
+            text: body,
+            attachments: [{
+                filename: finalName,
+                content: pdfData,
+                contentType: 'application/pdf'
+            }]
         });
-        fs.writeFileSync(pdfPath, pdfData);
-        return pdfPath;
-    } finally {
-        reportWindow.destroy();
+        return { success: true };
+    } catch (error) {
+        console.error("PDF Email Error Details:", error);
+        return { success: false, error: error.message };
     }
 });
 

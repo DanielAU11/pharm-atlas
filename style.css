@@ -161,7 +161,10 @@ fieldset {
 }
 
 #member-active-meds-list {
-    max-height: 120px !important;
+    height: min(400px, 42vh);
+    min-height: 280px;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 #member-admin-log {

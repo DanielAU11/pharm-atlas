@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('api', {
     saveImage: (fileName, base64Data) => ipcRenderer.invoke('save-image', fileName, base64Data),
     notify: (title, body) => ipcRenderer.invoke('notify', title, body),
     sendEmail: (details) => ipcRenderer.invoke('send-email', details),
-    savePdfReport: (details) => ipcRenderer.invoke('save-pdf-report', details)
+    savePdfReport: (details) => ipcRenderer.invoke('save-pdf-report', details),
+    emailPdfReport: (details) => ipcRenderer.invoke('email-pdf-report', details)
 });
