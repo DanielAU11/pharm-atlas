@@ -33,7 +33,8 @@ function createWindow() {
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
-            nodeIntegration: false
+            nodeIntegration: false,
+            backgroundThrottling: false
         }
     });
 
@@ -108,7 +109,7 @@ ipcMain.handle('save-db', (event, data) => {
 });
 
 ipcMain.handle('load-db', () => {
-    if (!fs.existsSync(dbPath)) return { family: [], inventory: [], schedules: [], history: [] };
+    if (!fs.existsSync(dbPath)) return { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [] };
     const data = fs.readFileSync(dbPath, 'utf8');
     return JSON.parse(data);
 });
