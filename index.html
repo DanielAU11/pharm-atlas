@@ -26,7 +26,7 @@
                 <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')">Dashboard</a></li>
                 <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')">Schedule Medications</a></li>
                 <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Order Sets</a></li>
-                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Vitals</a></li>
+                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Monitoring</a></li>
                 <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')">Inventory</a></li>
                 <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')">Drug/Vaccine Information</a></li>
                 <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')">Members</a></li>
@@ -70,7 +70,7 @@
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
-                        <legend>Vitals Trends</legend>
+                        <legend>Monitoring Trends</legend>
                         <div id="vitals-dashboard"></div>
                     </fieldset>
         
@@ -113,6 +113,7 @@
                                 <option value="BID">BID (Twice Daily)</option>
                                 <option value="TID">TID (Thrice Daily)</option>
                                 <option value="QID">QID (Four Times)</option>
+                                <option value="Nightly">Nightly</option>
                                 <option value="QOD">QOD (Every Other Day)</option>
                                 <option value="QW">Once Weekly</option>
                                 <option value="QXH">Every X Hours</option>
@@ -185,7 +186,7 @@
                         <legend>Log Reading</legend>
                         <div class="field-row">
                             <label>Who:</label>
-                            <select id="vital-member-select"></select>
+                            <select id="vital-member-select" onchange="renderVitalTypeOptions()"></select>
                             <label>Type:</label>
                             <select id="vital-type" onchange="renderVitalInputs()">
                                 <option value="bp">BP / Heart Rate</option>
@@ -206,7 +207,13 @@
                         </div>
                     </fieldset>
                     <fieldset>
-                        <legend>Recent Vitals</legend>
+                        <legend>Recent Monitoring</legend>
+                        <div class="field-row" style="margin-bottom:6px;">
+                            <label for="vital-member-filter">Show:</label>
+                            <select id="vital-member-filter" onchange="renderVitals()">
+                                <option value="">All members</option>
+                            </select>
+                        </div>
                         <div class="sunken-panel" style="height:180px; overflow-y:auto;">
                             <table class="interactive" style="width:100%;">
                                 <thead><tr><th>Member</th><th>Date/Time</th><th>Type</th><th>Reading</th><th>Notes</th><th>Actions</th></tr></thead>
@@ -326,6 +333,18 @@
                             </select>
                             <button onclick="addInventory()">Add to Stock</button>
                         </div>
+                        <div class="field-row inventory-tracking-row" style="margin-top:8px;">
+                            <label for="med-inventory-behavior">Track inventory as:</label>
+                            <select id="med-inventory-behavior" onchange="updateInventoryEntryMode()">
+                                <option value="per-dose">Individual dose units</option>
+                                <option value="container-finish">Whole containers</option>
+                            </select>
+                            <label for="med-inventory-unit">Stock unit:</label>
+                            <input id="med-inventory-unit" type="text" style="width:80px;" placeholder="spray" oninput="updateInventoryEntryMode()">
+                            <label for="med-administration-unit">Give/apply as:</label>
+                            <input id="med-administration-unit" type="text" style="width:90px;" placeholder="spray" oninput="updateInventoryEntryMode()">
+                            <span id="med-inventory-guidance" class="form-help"></span>
+                        </div>
                     </fieldset>
 
                     <fieldset>
@@ -440,7 +459,7 @@
     </div> <!-- Closes tabs div -->
     <!-- Medication Profile Modal -->
 <div id="med-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
-    <div class="window" style="width: 400px;">
+    <div class="window medication-profile-window">
         <div class="title-bar">
             <div class="title-bar-text" id="modal-title">Medication Profile</div>
             <div class="title-bar-controls">
@@ -489,18 +508,62 @@
                     </div>
                 </div>
             </div>
+            <fieldset class="med-profile-details">
+                <legend>Medication Details</legend>
+                <div class="field-row">
+                    <label>Formulation:</label>
+                    <select id="modal-formulation" onchange="updateMedProfileMode()">
+                        <option value="Tablets">Tablets</option>
+                        <option value="Capsules">Capsules</option>
+                        <option value="mL">Liquid (mL)</option>
+                        <option value="Granules">Granules</option>
+                        <option value="Packet">Packet</option>
+                        <option value="Inhalations">Inhalations</option>
+                        <option value="Sprays">Sprays</option>
+                        <option value="Suppository">Suppository</option>
+                        <option value="Cream">Cream</option>
+                        <option value="Ointment">Ointment</option>
+                        <option value="Gel">Gel</option>
+                        <option value="Topical Packet">Topical Packet</option>
+                        <option value="Topical Solution">Topical Solution</option>
+                        <option value="Patch">Patch</option>
+                        <option value="Drops">Drops</option>
+                        <option value="Other">Unit Dose</option>
+                    </select>
+                    <label><input id="modal-is-combination" type="checkbox" onchange="updateMedProfileMode()"> Combination product</label>
+                </div>
+                <div id="modal-single-strength-fields" class="field-row" style="margin-top:6px;">
+                    <label>Strength:</label><input id="modal-strength" type="number" min="0" step="any" style="width:80px;">
+                    <label>Units:</label><input id="modal-units" type="text" list="strength-unit-options" style="width:80px;">
+                    <label>per</label><input id="modal-per-amount" type="number" min="0" step="any" style="width:60px;">
+                    <input id="modal-per-unit" type="text" style="width:70px;" placeholder="mL">
+                </div>
+                <datalist id="strength-unit-options">
+                    <option value="mg"><option value="mcg"><option value="g"><option value="%">
+                    <option value="mEq"><option value="IU"><option value="units"><option value="CFU">
+                </datalist>
+                <div id="modal-combination-fields" style="display:none; margin-top:6px;">
+                    <div id="modal-ingredient-list"></div>
+                    <button type="button" onclick="addModalIngredientRow()">+ Add Ingredient</button>
+                </div>
+                <div class="field-row" style="margin-top:6px;">
+                    <label>Alert at:</label><input id="modal-threshold" type="number" min="0" step="any" style="width:60px;">
+                    <label>Track inventory as:</label>
+                    <select id="modal-inventory-behavior" onchange="updateMedProfileMode()">
+                        <option value="per-dose">Individual dose units</option>
+                        <option value="container-finish">Whole containers</option>
+                    </select>
+                </div>
+                <div class="field-row" style="margin-top:6px;">
+                    <label>Stock unit:</label><input id="modal-inventory-unit" type="text" style="width:85px;">
+                    <label>Give/apply as:</label><input id="modal-administration-unit" type="text" style="width:95px;" oninput="updateMedProfileMode()">
+                    <span id="modal-inventory-guidance" class="form-help"></span>
+                </div>
+            </fieldset>
             <div class="field-row">
                 <label>Update Photo:</label>
                 <input id="modal-image-input" type="file" accept="image/*" />
             </div>
-            
-
-
-            <!--<div class="field-row-stacked" style="margin-top: 10px;"> 
-                <label>Storage Conditions:</label>
-                <input id="modal-storage" type="text" placeholder="e.g. Room Temp" />
-            </div>// --> 
-
             <div class="field-row-stacked" style="margin-top: 10px;">
                 <label>Notes:</label>
                 <textarea id="modal-notes" rows="5" style="width: 100%; resize: none;"></textarea>
@@ -595,6 +658,14 @@
             </fieldset>
 
             <fieldset style="margin-top:10px;">
+                <legend>Medication &amp; Lab Monitoring</legend>
+                <div id="member-monitoring-list" class="sunken-panel" style="min-height:62px; max-height:180px; overflow-y:auto; background:white;"></div>
+                <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                    <button type="button" onclick="addMemberMonitoringProfile()">Add Monitoring</button>
+                </div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
                 <legend>Active Medication Orders</legend>
                 <div id="member-active-meds-list"></div>
             </fieldset>
@@ -612,14 +683,15 @@
 
             <fieldset style="margin-top:10px;">
                 <legend>Administration Log</legend>
-                <div id="member-admin-log" class="sunken-panel" style="height:400px; overflow-y:scroll; background:white;"></div>
+                <div id="member-admin-log" class="sunken-panel" style="height:500px; overflow-y:scroll; background:white;"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
-                <legend>Vitals Trends</legend>
+                <legend>Monitoring Trends</legend>
                 <div id="member-vitals-trends"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:8px;">
                     <button onclick="generateMemberVitalsPdfReport()">Monitored Vitals PDF</button>
+                    <button onclick="emailMemberVitalsPdfReport()">Send to Provider</button>
                 </div>
             </fieldset>
 
@@ -647,6 +719,7 @@
                     <option value="BID">BID</option>
                     <option value="TID">TID</option>
                     <option value="QID">QID</option>
+                    <option value="Nightly">Nightly</option>
                     <option value="QOD">QOD</option>
                     <option value="QW">Once Weekly</option>
                     <option value="QXH">Every X Hours</option>

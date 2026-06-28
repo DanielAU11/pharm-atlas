@@ -4,6 +4,24 @@ let currentEditingMedId = null;
 let currentEditingMemberId = null;
 const notifiedDoseKeys = new Set();
 const componentUnitOptions = ['mg', 'mL', 'mg/mL', 'mg/g', 'mEq', 'IU', 'mcg', 'g', 'g/g', '%', 'units', 'U/mL', 'CFU'];
+const formulationDoseUnits = {
+    Tablets: 'tablet',
+    Capsules: 'capsule',
+    mL: 'mL',
+    Granules: 'packet',
+    Packet: 'packet',
+    Inhalations: 'inhalation',
+    Sprays: 'spray',
+    Suppository: 'suppository',
+    Cream: 'application',
+    Ointment: 'application',
+    Gel: 'application',
+    'Topical Packet': 'application',
+    'Topical Solution': 'application',
+    Patch: 'patch',
+    Drops: 'drop',
+    Other: 'unit'
+};
 const glucoseGoalPresets = {
     diabetic: { low: 70, high: 180 },
     nondiabetic: { low: 70, high: 140 },
@@ -100,7 +118,9 @@ function isScheduleDueOnDate(schedule, dateStr) {
     if (schedule.freq === 'Monthly') {
         const current = parseLocal(dateStr);
         const start = parseLocal(schedule.startDate);
-        return current && start && current.getDate() === start.getDate();
+        if (!current || !start || current < start) return false;
+        const lastDayOfCurrentMonth = new Date(current.getFullYear(), current.getMonth() + 1, 0).getDate();
+        return current.getDate() === Math.min(start.getDate(), lastDayOfCurrentMonth);
     }
 
     return true;
@@ -115,10 +135,11 @@ function getScheduleTimes(schedule) {
 }
 
 function getExpectedTimeCount(freq) {
-    return { ONCE: 1, QD: 1, QOD: 1, QW: 1, Monthly: 1, BID: 2, TID: 3, QID: 4 }[freq] || 0;
+    return { ONCE: 1, QD: 1, Nightly: 1, QOD: 1, QW: 1, Monthly: 1, BID: 2, TID: 3, QID: 4 }[freq] || 0;
 }
 
-function defaultTimeForIndex(index) {
+function defaultTimeForIndex(index, freq = '') {
+    if (freq === 'Nightly' && index === 0) return '21:00';
     return ['08:00', '12:00', '17:00', '21:00'][index] || '';
 }
 
@@ -174,7 +195,7 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
         row.className = 'field-row';
         row.style.marginBottom = '4px';
         const label = freq === 'QXH' ? 'Start time:' : `Dose ${i + 1}:`;
-        row.innerHTML = `<label>${label}</label><input class="${prefix}-time-input" type="time" value="${times[i] || defaultTimeForIndex(i)}">`;
+        row.innerHTML = `<label>${label}</label><input class="${prefix}-time-input" type="time" value="${times[i] || defaultTimeForIndex(i, freq)}">`;
         container.appendChild(row);
     }
 };
@@ -234,8 +255,12 @@ function parseAmount(value, fallback = 0) {
 }
 
 function formatAmount(value) {
-    if (!Number.isFinite(value)) return '0';
-    return Number.isInteger(value) ? value.toString() : value.toFixed(2).replace(/\.?0+$/, '');
+    const amount = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(amount)) return '0';
+    return amount.toLocaleString('en-US', {
+        useGrouping: false,
+        maximumFractionDigits: 20
+    });
 }
 
 function getMemberGoals(member) {
@@ -313,7 +338,16 @@ function formatMedStrength(med, includeNames = false) {
         return med.components.map(component => {
             const name = includeNames && component.name ? `${component.name} ` : '';
             return `${name}${formatAmount(parseAmount(component.strength))}${getComponentUnit(component, med)}`;
-        }).join(' / ');
+        }).join('/');
+    }
+    if (Number.isFinite(parseAmount(med.strengthAmount, NaN)) && med.activeUnit) {
+        if (med.perUnit && Number.isFinite(parseAmount(med.perAmount, NaN))) {
+            return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}/${formatAmount(parseAmount(med.perAmount))}${med.perUnit}`;
+        }
+        return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}`;
+    }
+    if (Number.isFinite(parseAmount(med.strength, NaN)) && med.units && !String(med.units).includes('/')) {
+        return `${formatAmount(parseAmount(med.strength))}${med.units}`;
     }
     if (med.displayStrength) return med.displayStrength;
     return `${med.strength}${med.units}`;
@@ -331,7 +365,7 @@ function formatPrescribedDose(med, doseQty) {
         return med.components.map(component => {
             const total = parseAmount(component.strength) * qty;
             return `${formatAmount(total)}${getComponentUnit(component, med)}`;
-        }).join(' / ');
+        }).join('/');
     }
 
     const doseUnit = med.units.includes('/') ? med.units.split('/')[0] : med.units;
@@ -621,12 +655,15 @@ window.alert = message => { void appAlert(String(message)); };
 
 function isTopicalMedication(med) {
     const formulation = String(med?.formulation || '').toLowerCase();
-    return med?.inventoryBehavior === 'container-finish' ||
-        ['cream', 'ointment', 'gel', 'topical packet', 'topical solution'].some(type => formulation.includes(type));
+    return ['cream', 'ointment', 'gel', 'topical packet', 'topical solution'].some(type => formulation.includes(type));
+}
+
+function usesContainerTracking(med) {
+    return med?.inventoryBehavior === 'container-finish' || isTopicalMedication(med);
 }
 
 function inventoryUnitFor(med) {
-    return med?.inventoryUnit || (isTopicalMedication(med) ? 'tube' : (med?.formulation || 'unit(s)'));
+    return med?.inventoryUnit || (usesContainerTracking(med) ? 'container' : (med?.administrationUnit || med?.formulation || 'unit(s)'));
 }
 
 function defaultActualDateTime() {
@@ -762,6 +799,10 @@ function memberPrescriberIds(member) {
     return Array.isArray(member?.prescriberIds) ? member.prescriberIds.filter(Boolean) : [];
 }
 
+function memberMonitoringProfiles(member) {
+    return Array.isArray(member?.monitoringProfiles) ? member.monitoringProfiles.filter(Boolean) : [];
+}
+
 function prescriberOptionsHtml(selected = '', memberId = '', includeAll = true) {
     const member = db.family.find(item => item.id === memberId);
     const allowedIds = member ? new Set(memberPrescriberIds(member)) : null;
@@ -830,6 +871,129 @@ function renderMemberCareLists() {
             : '<div style="font-size:11px; padding:4px;">No diagnoses added.</div>';
     }
 }
+
+function renderMemberMonitoringProfiles(memberId = currentEditingMemberId) {
+    const list = document.getElementById('member-monitoring-list');
+    if (!list) return;
+    const member = db.family.find(item => item.id === memberId);
+    const profiles = memberMonitoringProfiles(member);
+    if (!member) {
+        list.innerHTML = '<div style="font-size:11px; padding:5px;">Save the member before adding medication or lab monitoring.</div>';
+        return;
+    }
+    if (profiles.length === 0) {
+        list.innerHTML = '<div style="font-size:11px; padding:5px;">No therapeutic medication or lab monitoring configured.</div>';
+        return;
+    }
+    list.innerHTML = profiles.map(profile => {
+        const linkedMed = db.inventory.find(item => item.id === profile.medId);
+        return `<div class="med-item-row" style="font-size:11px;">
+            <span>
+                <strong>${escapeHtml(profile.labName)}</strong> - ${escapeHtml(profile.medicationName)}
+                <br><small>Goal ${escapeHtml(formatAmount(parseAmount(profile.goalLow)))}-${escapeHtml(formatAmount(parseAmount(profile.goalHigh)))} ${escapeHtml(profile.unit || 'value')}${linkedMed ? ` | Linked to ${escapeHtml(linkedMed.name)} administrations` : ''}</small>
+            </span>
+            <span>
+                <button type="button" onclick="editMemberMonitoringProfile('${escapeHtml(profile.id)}')">Edit</button>
+                <button type="button" onclick="deleteMemberMonitoringProfile('${escapeHtml(profile.id)}')">Delete</button>
+            </span>
+        </div>`;
+    }).join('');
+}
+
+async function openMemberMonitoringEditor(profile = null) {
+    const inventoryOptions = db.inventory
+        .slice()
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+        .map(med => `<option value="${escapeHtml(med.id)}" ${med.id === profile?.medId ? 'selected' : ''}>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</option>`)
+        .join('');
+    const result = await showActionModal(profile ? 'Edit Medication Monitoring' : 'Add Medication Monitoring', `
+        <div class="field-row-stacked">
+            <label>Medication name:</label>
+            <input name="medicationName" type="text" style="width:100%;" placeholder="e.g. Warfarin" value="${escapeHtml(profile?.medicationName || '')}">
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px;">
+            <label>Link to inventory medication for adherence:</label>
+            <select name="medId" style="width:100%;">
+                <option value="">No inventory link</option>
+                ${inventoryOptions}
+            </select>
+        </div>
+        <div class="field-row" style="margin-top:6px;">
+            <label>Lab / level:</label>
+            <input name="labName" type="text" style="width:130px;" placeholder="e.g. INR" value="${escapeHtml(profile?.labName || '')}">
+            <label>Unit:</label>
+            <input name="unit" type="text" style="width:90px;" placeholder="e.g. ng/mL" value="${escapeHtml(profile?.unit || '')}">
+        </div>
+        <div class="field-row" style="margin-top:6px;">
+            <label>Goal low:</label><input name="goalLow" type="number" step="any" style="width:70px;" value="${escapeHtml(profile?.goalLow ?? '')}">
+            <label>Goal high:</label><input name="goalHigh" type="number" step="any" style="width:70px;" value="${escapeHtml(profile?.goalHigh ?? '')}">
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px;">
+            <label>Monitoring notes:</label>
+            <textarea name="notes" rows="2" style="width:100%; resize:none;" placeholder="Optional monitoring instructions">${escapeHtml(profile?.notes || '')}</textarea>
+        </div>
+    `, profile ? 'Save' : 'Add');
+    if (!result) return null;
+
+    const linkedMed = db.inventory.find(item => item.id === result.medId);
+    const medicationName = String(result.medicationName || linkedMed?.name || '').trim();
+    const labName = String(result.labName || '').trim();
+    const goalLow = parseAmount(result.goalLow, NaN);
+    const goalHigh = parseAmount(result.goalHigh, NaN);
+    if (!medicationName || !labName) {
+        await appAlert('Medication name and lab/level name are required.');
+        return null;
+    }
+    if (!Number.isFinite(goalLow) || !Number.isFinite(goalHigh) || goalHigh <= goalLow) {
+        await appAlert('Enter a valid goal range with the high value greater than the low value.');
+        return null;
+    }
+    return {
+        ...(profile || {}),
+        id: profile?.id || `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        medicationName,
+        medId: result.medId || '',
+        labName,
+        unit: String(result.unit || '').trim() || 'value',
+        goalLow,
+        goalHigh,
+        notes: String(result.notes || '').trim()
+    };
+}
+
+window.addMemberMonitoringProfile = async function() {
+    const member = db.family.find(item => item.id === currentEditingMemberId);
+    if (!member) {
+        await appAlert('Save the member before adding medication or lab monitoring.');
+        return;
+    }
+    const profile = await openMemberMonitoringEditor();
+    if (!profile) return;
+    member.monitoringProfiles = [...memberMonitoringProfiles(member), profile];
+    await sync();
+    renderMemberMonitoringProfiles(member.id);
+};
+
+window.editMemberMonitoringProfile = async function(profileId) {
+    const member = db.family.find(item => item.id === currentEditingMemberId);
+    const index = memberMonitoringProfiles(member).findIndex(profile => profile.id === profileId);
+    if (!member || index < 0) return;
+    const updated = await openMemberMonitoringEditor(member.monitoringProfiles[index]);
+    if (!updated) return;
+    member.monitoringProfiles[index] = updated;
+    await sync();
+    renderMemberMonitoringProfiles(member.id);
+};
+
+window.deleteMemberMonitoringProfile = async function(profileId) {
+    const member = db.family.find(item => item.id === currentEditingMemberId);
+    if (!member) return;
+    if (!await appConfirm('Delete this monitoring profile and its saved lab/level readings?', 'Delete Monitoring')) return;
+    member.monitoringProfiles = memberMonitoringProfiles(member).filter(profile => profile.id !== profileId);
+    db.vitals = db.vitals.filter(reading => reading.monitoringId !== profileId);
+    await sync();
+    renderMemberMonitoringProfiles(member.id);
+};
 
 async function openPrescriberProfileEditor(prescriber = null) {
     const result = await showActionModal(prescriber ? 'Edit Provider' : 'Add Provider', `
@@ -989,6 +1153,7 @@ async function sync() {
     if (currentEditingMemberId && memberModal?.style.display === 'flex') {
         renderMemberAdministrationLog(currentEditingMemberId);
         renderMemberVitalProfile(currentEditingMemberId);
+        renderMemberMonitoringProfiles(currentEditingMemberId);
         renderMemberMedicationTimelines();
         renderMemberCalendar(currentEditingMemberId);
     }
@@ -1000,6 +1165,7 @@ window.removeMember = async function(id) {
         db.family = db.family.filter(m => m.id !== id);
         db.schedules = db.schedules.filter(s => s.memberId !== id);
         db.orderSets = db.orderSets.filter(set => set.memberId !== id);
+        db.vitals = db.vitals.filter(reading => reading.memberId !== id);
         await sync();
     }
 };
@@ -1030,6 +1196,7 @@ window.openMemberModal = function(id = null) {
     if (notifyEnabled) notifyEnabled.checked = true;
     if (emailReminders) emailReminders.checked = true;
     renderMemberCareLists();
+    renderMemberMonitoringProfiles(null);
     
     const activeMedsContainer = document.getElementById('member-active-meds-list');
     if (activeMedsContainer) activeMedsContainer.innerHTML = '';
@@ -1062,6 +1229,7 @@ window.openMemberModal = function(id = null) {
             setHiddenJson('m-prescriber-ids-data', memberPrescriberIds(m));
             setHiddenJson('m-diagnoses-data', normalizeMemberDiagnoses(m));
             renderMemberCareLists();
+            renderMemberMonitoringProfiles(m.id);
             setMemberGoalFields(m);
 
             // 3. Populate Active Meds
@@ -1123,11 +1291,13 @@ window.openMemberModal = function(id = null) {
                 const div = document.createElement('div');
                 div.className = 'sunken-panel';
                 div.style.cssText = "padding:5px; margin-bottom:5px; background:white; border:1px inset gray;";
-                const itemRows = set.items.map(item => {
+                const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id);
+                const itemRows = set.items.map((item, itemIndex) => {
                     const med = db.inventory.find(inv => inv.id === item.medId);
-                    const schedule = db.schedules.find(candidate => candidate.orderSetId === set.id && candidate.medId === item.medId);
+                    const schedule = setSchedules[itemIndex] || setSchedules.find(candidate => candidate.medId === item.medId);
                     return `<div style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} - ${escapeHtml(formatQtyForSchedule(item, med || {}))} | ${escapeHtml(item.freq)} ${escapeHtml(getScheduleTimes(item).join(', ') || 'PRN')}${escapeHtml(prnLimitText(item))}
                         ${schedule ? `<div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>` : ''}
+                        ${schedule ? `<div style="text-align:right; margin-top:3px;"><button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button></div>` : ''}
                     </div>`;
                 }).join('');
                 div.innerHTML = `
@@ -1135,7 +1305,8 @@ window.openMemberModal = function(id = null) {
                     <small>${set.startDate} - ${set.endDate}</small>
                     <div style="margin-top:4px;">${itemRows}</div>
                     <div style="text-align:right; margin-top:5px;">
-                        <button onclick="event.stopPropagation(); printOrderSetLabel('${set.id}')">Label</button>
+                        <button onclick="event.stopPropagation(); printOrderSetLabel('${set.id}')">Set Label</button>
+                        <button onclick="event.stopPropagation(); printOrderSetMedicationLabel('${set.id}')">Individual Labels</button>
                         <button onclick="event.stopPropagation(); administerOrderSet('${set.id}')">Administer</button>
                         <button onclick="event.stopPropagation(); editOrderSet('${set.id}')">Edit Set</button>
                         <button onclick="event.stopPropagation(); deleteOrderSet('${set.id}')">Delete Set</button>
@@ -1157,7 +1328,7 @@ window.openMemberModal = function(id = null) {
                     <div style="text-align:right; margin-top:5px;">
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
-                        ${med && isTopicalMedication(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">Finished Container</button>` : ''}
+                        ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">Finished Container</button>` : ''}
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
                     </div>
                 `;
@@ -1292,12 +1463,13 @@ window.addInventory = async function() {
     const formulation = document.getElementById('med-formulation').value;
     const prescriberId = document.getElementById('med-prescriber')?.value || '';
     const topical = ['cream', 'ointment', 'gel', 'topical packet', 'topical solution'].some(type => formulation.toLowerCase().includes(type));
-    const inventoryUnit = topical
-        ? (document.getElementById('med-topical-stock-unit')?.value || 'tube')
-        : formulation;
-    const administrationUnit = topical
-        ? (document.getElementById('med-topical-admin-unit')?.value || 'application')
-        : formulation;
+    const inventoryBehavior = topical
+        ? 'container-finish'
+        : (document.getElementById('med-inventory-behavior')?.value || 'per-dose');
+    const inventoryUnit = document.getElementById('med-inventory-unit')?.value.trim()
+        || (inventoryBehavior === 'container-finish' ? 'bottle' : (formulationDoseUnits[formulation] || formulation));
+    const administrationUnit = document.getElementById('med-administration-unit')?.value.trim()
+        || (formulationDoseUnits[formulation] || formulation);
     const imageInput = document.getElementById('med-image-input');
     const expiry = document.getElementById('med-expiry').value;
     if (!name || isNaN(qty)) return alert("Name and Qty required.");
@@ -1356,7 +1528,7 @@ window.addInventory = async function() {
         formulation, // 'Tablets', 'mL', 'Capsules', etc.
         inventoryUnit,
         administrationUnit,
-        inventoryBehavior: topical ? 'container-finish' : 'per-dose',
+        inventoryBehavior,
         stock: qty, 
         maxCapacity: qty,
         expiry: expiry,
@@ -1373,10 +1545,14 @@ window.addInventory = async function() {
     document.getElementById('med-per-amount').value = '1';
     document.getElementById('med-per-unit').value = '';
     document.getElementById('med-qty').value = '';
+    document.getElementById('med-inventory-unit').value = '';
+    document.getElementById('med-administration-unit').value = '';
     document.getElementById('ingredient-list').innerHTML = '';
     document.getElementById('is-combination').checked = false;
     const medPrescriber = document.getElementById('med-prescriber');
     if (medPrescriber) medPrescriber.value = '';
+    const behaviorInput = document.getElementById('med-inventory-behavior');
+    if (behaviorInput) behaviorInput.dataset.formulation = '';
     updateInventoryEntryMode();
     imageInput.value = '';
     await sync();
@@ -1391,14 +1567,15 @@ window.takeDose = async function(medId) {
     }
 
     const formulation = med.formulation || 'unit(s)';
+    const administrationUnit = med.administrationUnit || formulation;
     const result = await requestActualAdministration(`Take: ${med.name}`, `
         <div class="field-row" style="margin-top:8px;">
             <label>Member:</label>
             <select name="memberId" style="width:220px;">${memberOptionsHtml(currentEditingMemberId || '')}</select>
         </div>
         <div class="field-row-stacked" style="margin-top:8px;">
-            <label>Amount taken (${escapeHtml(formulation)}):</label>
-            <input name="amountTaken" type="number" min="0" step="0.1" value="1">
+            <label>Amount taken (${escapeHtml(administrationUnit)}):</label>
+            <input name="amountTaken" type="number" min="0" step="any" value="1">
         </div>
         <div class="field-row-stacked" style="margin-top:8px;">
             <label>Note / reason given:</label>
@@ -1416,19 +1593,20 @@ window.takeDose = async function(medId) {
         await appAlert("Enter an amount taken greater than 0.");
         return;
     }
-    if (!isTopicalMedication(med) && parseAmount(med.stock) < amountTaken) {
+    if (!usesContainerTracking(med) && parseAmount(med.stock) < amountTaken) {
         await appAlert("Insufficient stock.");
         return;
     }
 
-    if (!isTopicalMedication(med)) med.stock = parseAmount(med.stock) - amountTaken;
+    if (!usesContainerTracking(med)) med.stock = parseAmount(med.stock) - amountTaken;
     db.history.unshift({
         id: Date.now().toString(),
         timestamp: formatActualTimestamp(result),
         memberId: member.id,
         memberName: memberDisplayName(member),
+        medId: med.id,
         medName: med.name,
-        details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}${isTopicalMedication(med) ? `; container inventory unchanged` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
+        details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}${usesContainerTracking(med) ? `; ${inventoryUnitFor(med)} inventory unchanged until a container is marked finished` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
     });
     await sync();
 };
@@ -1470,6 +1648,72 @@ window.deleteMed = async function(id) {
     }
 };
 
+function addSelectOptionIfMissing(select, value) {
+    if (!select || !value || Array.from(select.options).some(option => option.value === value)) return;
+    select.add(new Option(value, value));
+}
+
+window.addModalIngredientRow = function(component = null) {
+    const container = document.getElementById('modal-ingredient-list');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'field-row modal-combo-row';
+    row.style.marginBottom = '5px';
+    const selectedUnit = component?.unit || 'mg';
+    const unitOptions = componentUnitOptions
+        .map(unit => `<option value="${unit}" ${unit === selectedUnit ? 'selected' : ''}>${unit}</option>`)
+        .join('');
+    row.innerHTML = `
+        <input class="modal-ing-name" type="text" placeholder="Ingredient" style="width:130px;" value="${escapeHtml(component?.name || '')}">
+        <input class="modal-ing-strength" type="number" min="0" step="any" placeholder="Strength" style="width:75px;" value="${escapeHtml(component?.strength ?? '')}">
+        <select class="modal-ing-unit" style="width:80px;">${unitOptions}</select>
+        <button type="button" class="modal-ing-remove">Remove</button>`;
+    row.querySelector('.modal-ing-remove').onclick = () => row.remove();
+    container.appendChild(row);
+};
+
+window.updateMedProfileMode = function() {
+    const formulationSelect = document.getElementById('modal-formulation');
+    const formulation = formulationSelect?.value || '';
+    const isCombo = document.getElementById('modal-is-combination')?.checked;
+    const isTopical = ['cream', 'ointment', 'gel', 'topical packet', 'topical solution']
+        .some(type => formulation.toLowerCase().includes(type));
+    const behavior = document.getElementById('modal-inventory-behavior');
+    const inventoryUnit = document.getElementById('modal-inventory-unit');
+    const administrationUnit = document.getElementById('modal-administration-unit');
+    const guidance = document.getElementById('modal-inventory-guidance');
+    const formulationChanged = behavior?.dataset.formulation !== formulation;
+
+    document.getElementById('modal-single-strength-fields').style.display = isCombo ? 'none' : 'flex';
+    document.getElementById('modal-combination-fields').style.display = isCombo ? 'block' : 'none';
+    if (isCombo && document.getElementById('modal-ingredient-list').children.length === 0) addModalIngredientRow();
+
+    if (formulationChanged) {
+        if (administrationUnit) administrationUnit.value = formulationDoseUnits[formulation] || formulation || 'unit';
+        if (behavior) behavior.value = isTopical ? 'container-finish' : 'per-dose';
+        if (inventoryUnit) {
+            inventoryUnit.value = isTopical
+                ? (formulation === 'Topical Packet' ? 'packet' : (formulation === 'Topical Solution' ? 'bottle' : 'tube'))
+                : (formulationDoseUnits[formulation] || formulation || 'unit');
+        }
+        if (behavior) behavior.dataset.formulation = formulation;
+    }
+    if (isTopical && behavior) behavior.value = 'container-finish';
+    if (behavior) behavior.disabled = isTopical;
+    const behaviorChanged = behavior?.dataset.behavior !== behavior?.value;
+    if (!formulationChanged && behaviorChanged && inventoryUnit) {
+        inventoryUnit.value = behavior.value === 'container-finish'
+            ? 'bottle'
+            : (formulationDoseUnits[formulation] || formulation || 'unit');
+    }
+    if (behavior) behavior.dataset.behavior = behavior.value;
+    if (guidance) {
+        guidance.innerText = behavior?.value === 'container-finish'
+            ? 'Administrations are logged without reducing stock. Mark the container finished when it is empty.'
+            : `Each administered ${administrationUnit?.value || 'dose unit'} reduces stock by the quantity given.`;
+    }
+};
+
 window.openMedProfile = function(id) {
     currentEditingMedId = id;
     const med = db.inventory.find(m => m.id === id);
@@ -1481,6 +1725,25 @@ window.openMedProfile = function(id) {
     document.getElementById('modal-notes').value = med.notes || "";
     document.getElementById('modal-storage').value = med.storage || "";
     document.getElementById('modal-control-level').value = med.controlLevel || "N/A";
+    const formulationSelect = document.getElementById('modal-formulation');
+    addSelectOptionIfMissing(formulationSelect, med.formulation || 'Other');
+    formulationSelect.value = med.formulation || 'Other';
+    const behaviorSelect = document.getElementById('modal-inventory-behavior');
+    behaviorSelect.dataset.formulation = med.formulation || 'Other';
+    behaviorSelect.value = med.inventoryBehavior || (isTopicalMedication(med) ? 'container-finish' : 'per-dose');
+    behaviorSelect.dataset.behavior = behaviorSelect.value;
+    document.getElementById('modal-is-combination').checked = !!med.isCombination;
+    document.getElementById('modal-strength').value = med.strengthAmount ?? med.strength ?? '';
+    document.getElementById('modal-units').value = med.activeUnit || String(med.units || '').split('/')[0] || '';
+    document.getElementById('modal-per-amount').value = med.perAmount ?? '';
+    document.getElementById('modal-per-unit').value = med.perUnit || String(med.units || '').split('/')[1] || '';
+    document.getElementById('modal-threshold').value = med.minThreshold ?? 0;
+    document.getElementById('modal-inventory-unit').value = inventoryUnitFor(med);
+    document.getElementById('modal-administration-unit').value = med.administrationUnit || formulationDoseUnits[med.formulation] || med.formulation || 'unit';
+    const ingredientList = document.getElementById('modal-ingredient-list');
+    ingredientList.innerHTML = '';
+    (med.components || []).forEach(component => addModalIngredientRow(component));
+    updateMedProfileMode();
     const prescriberSelect = document.getElementById('modal-prescriber');
     if (prescriberSelect) prescriberSelect.innerHTML = prescriberOptionsHtml(med.prescriberId || '', '', true);
     const imgContainer = document.getElementById('modal-image-container');
@@ -1497,6 +1760,43 @@ window.saveMedProfile = async function() {
             await appAlert('Medication name is required.');
             return;
         }
+        const formulation = document.getElementById('modal-formulation').value;
+        const isCombination = document.getElementById('modal-is-combination').checked;
+        let components = [];
+        let strengthAmount = null;
+        let activeUnit = '';
+        let perAmount = null;
+        let perUnit = '';
+
+        if (isCombination) {
+            components = Array.from(document.querySelectorAll('#modal-ingredient-list .modal-combo-row')).map(row => ({
+                name: row.querySelector('.modal-ing-name').value.trim(),
+                strength: parseAmount(row.querySelector('.modal-ing-strength').value, NaN),
+                unit: row.querySelector('.modal-ing-unit').value
+            })).filter(component => component.name && Number.isFinite(component.strength));
+            if (components.length === 0) {
+                await appAlert('Add at least one valid active ingredient.');
+                return;
+            }
+            med.strength = components.map(component => `${formatAmount(component.strength)}${component.unit}`).join('/');
+            med.units = components.map(component => component.unit).join('/');
+            med.displayStrength = med.strength;
+        } else {
+            strengthAmount = parseAmount(document.getElementById('modal-strength').value, NaN);
+            activeUnit = document.getElementById('modal-units').value.trim();
+            perAmount = parseAmount(document.getElementById('modal-per-amount').value, NaN);
+            perUnit = document.getElementById('modal-per-unit').value.trim();
+            if (!Number.isFinite(strengthAmount) || strengthAmount <= 0 || !activeUnit) {
+                await appAlert('Enter a valid strength and unit.');
+                return;
+            }
+            const hasConcentrationDenominator = Number.isFinite(perAmount) && perAmount > 0 && perUnit;
+            med.strength = hasConcentrationDenominator ? strengthAmount / perAmount : strengthAmount;
+            med.units = hasConcentrationDenominator ? `${activeUnit}/${perUnit}` : activeUnit;
+            med.displayStrength = hasConcentrationDenominator
+                ? `${formatAmount(strengthAmount)}${activeUnit}/${formatAmount(perAmount)}${perUnit}`
+                : `${formatAmount(strengthAmount)}${activeUnit}`;
+        }
         med.name = updatedName;
         med.stock = parseAmount(document.getElementById('modal-stock').value, med.stock);
         med.notes = document.getElementById('modal-notes').value;
@@ -1504,6 +1804,23 @@ window.saveMedProfile = async function() {
         med.controlLevel = document.getElementById('modal-control-level').value;
         med.expiry = document.getElementById('modal-expiry').value;
         med.prescriberId = document.getElementById('modal-prescriber')?.value || '';
+        med.formulation = formulation;
+        med.isCombination = isCombination;
+        med.components = components;
+        med.strengthAmount = isCombination ? null : strengthAmount;
+        med.activeUnit = isCombination ? null : activeUnit;
+        med.perAmount = isCombination || !perUnit ? null : perAmount;
+        med.perUnit = isCombination ? '' : perUnit;
+        med.minThreshold = parseAmount(document.getElementById('modal-threshold').value, 0);
+        med.inventoryBehavior = isTopicalMedication({ formulation })
+            ? 'container-finish'
+            : document.getElementById('modal-inventory-behavior').value;
+        med.inventoryUnit = document.getElementById('modal-inventory-unit').value.trim()
+            || (med.inventoryBehavior === 'container-finish' ? 'container' : formulationDoseUnits[formulation] || formulation);
+        med.administrationUnit = document.getElementById('modal-administration-unit').value.trim()
+            || formulationDoseUnits[formulation] || formulation;
+        med.isLiquid = !isCombination && (med.units.includes('/') || formulation === 'mL');
+        if (parseAmount(med.stock) > parseAmount(med.maxCapacity)) med.maxCapacity = med.stock;
 
         // 2. Handle Image Upload
         const imageInput = document.getElementById('modal-image-input');
@@ -1541,6 +1858,7 @@ function frequencyOptionsHtml(selected = 'QD') {
         ['BID', 'BID'],
         ['TID', 'TID'],
         ['QID', 'QID'],
+        ['Nightly', 'Nightly'],
         ['QOD', 'QOD'],
         ['QW', 'Once Weekly'],
         ['QXH', 'Every X Hours'],
@@ -1614,6 +1932,7 @@ window.addOrderSetMedicationRow = function(item = null) {
             <input class="os-calculated-dose" type="text" disabled style="width:150px; background:#c0c0c0; font-weight:bold;">
         </div>
         <div class="field-row os-qod" style="display:none; margin-top:5px;"><label>QOD Start:</label><input class="os-qod-start" type="date" value="${item?.qodStart || ''}"></div>
+        <div class="field-row os-anchor" style="display:none; margin-top:5px;"><label>First dose date:</label><input class="os-anchor-date" type="date" value="${item?.anchorDate || ''}"><span class="form-help">Sets the weekly/monthly dates within the order set window.</span></div>
         <div class="field-row os-interval" style="display:none; margin-top:5px;"><label>Every:</label><input class="os-interval-hours" type="number" min="1" max="24" step="1" value="${item?.intervalHours || 8}" style="width:45px;"><span>hrs</span></div>
         <div class="field-row os-prn-limit" style="display:none; margin-top:5px;"><label>PRN Max:</label><input class="os-prn-max-doses" type="number" min="1" step="1" style="width:45px;" value="${item?.prnMaxDoses || ''}"><span>doses per</span><input class="os-prn-window-hours" type="number" min="1" max="168" step="1" value="${item?.prnWindowHours || 24}" style="width:45px;"><span>hrs</span></div>
         <div class="field-row-stacked" style="margin-top:5px;"><label>Administration Time(s)</label><div class="os-time-fields"></div></div>
@@ -1632,6 +1951,11 @@ window.addOrderSetMedicationRow = function(item = null) {
 function renderOrderSetRowControls(row, existingTimes = null) {
     const freq = row.querySelector('.os-freq').value;
     row.querySelector('.os-qod').style.display = freq === 'QOD' ? 'flex' : 'none';
+    row.querySelector('.os-anchor').style.display = ['QW', 'Monthly'].includes(freq) ? 'flex' : 'none';
+    const anchorInput = row.querySelector('.os-anchor-date');
+    if (['QW', 'Monthly'].includes(freq) && anchorInput && !anchorInput.value) {
+        anchorInput.value = document.getElementById('order-set-start')?.value || localDateKey();
+    }
     row.querySelector('.os-interval').style.display = freq === 'QXH' ? 'flex' : 'none';
     row.querySelector('.os-prn-limit').style.display = freq === 'PRN' ? 'flex' : 'none';
     const timeContainer = row.querySelector('.os-time-fields');
@@ -1648,7 +1972,7 @@ function renderOrderSetRowControls(row, existingTimes = null) {
         timeRow.className = 'field-row';
         timeRow.style.marginBottom = '4px';
         const label = freq === 'QXH' ? 'Start time:' : `Dose ${i + 1}:`;
-        timeRow.innerHTML = `<label>${label}</label><input class="os-time-input" type="time" value="${times[i] || defaultTimeForIndex(i)}">`;
+        timeRow.innerHTML = `<label>${label}</label><input class="os-time-input" type="time" value="${times[i] || defaultTimeForIndex(i, freq)}">`;
         timeContainer.appendChild(timeRow);
     }
 }
@@ -1703,6 +2027,7 @@ function collectOrderSetItem(row) {
         prnWindowHours: prnWindowHours || 24,
         startTime: rawTimes[0] || '',
         qodStart: freq === 'QOD' ? row.querySelector('.os-qod-start').value : '',
+        anchorDate: ['QW', 'Monthly'].includes(freq) ? row.querySelector('.os-anchor-date').value : '',
         instructions: row.querySelector('.os-instructions').value
     };
 }
@@ -1716,7 +2041,7 @@ function orderSetItemToSchedule(orderSet, item, index) {
         doseQty: item.doseQty,
         prescriberId: item.prescriberId || med?.prescriberId || '',
         freq: item.freq,
-        startDate: orderSet.startDate,
+        startDate: item.anchorDate || orderSet.startDate,
         endDate: orderSet.endDate,
         instructions: item.instructions,
         qodStart: item.freq === 'QOD' ? (item.qodStart || orderSet.startDate) : '',
@@ -1758,6 +2083,13 @@ window.saveOrderSet = async function() {
         if (!item || item.error) {
             await appAlert(item?.error || "Check the order set medication rows.");
             return;
+        }
+        if (['QW', 'Monthly'].includes(item.freq)) {
+            item.anchorDate = item.anchorDate || startDate;
+            if (item.anchorDate < startDate || (endDate !== 'Ongoing' && item.anchorDate > endDate)) {
+                await appAlert(`The first ${item.freq === 'QW' ? 'weekly' : 'monthly'} dose date must be inside the order set start/end window.`);
+                return;
+            }
         }
         items.push(item);
     }
@@ -1824,8 +2156,23 @@ window.assignOrderSet = async function(id) {
         memberId: result.memberId,
         startDate: result.startDate,
         endDate: result.endDate || 'Ongoing',
-        items: source.items.map(item => ({ ...item }))
+        items: source.items.map(item => {
+            if (!['QW', 'Monthly'].includes(item.freq) || !item.anchorDate || !source.startDate) return { ...item };
+            const offset = Math.max(daysBetween(item.anchorDate, source.startDate), 0);
+            const rebasedAnchor = parseLocal(result.startDate);
+            rebasedAnchor.setDate(rebasedAnchor.getDate() + offset);
+            return { ...item, anchorDate: localDateKey(rebasedAnchor) };
+        })
     };
+    const invalidAnchor = assignedSet.items.find(item =>
+        ['QW', 'Monthly'].includes(item.freq) &&
+        item.anchorDate &&
+        (item.anchorDate < assignedSet.startDate || (assignedSet.endDate !== 'Ongoing' && item.anchorDate > assignedSet.endDate))
+    );
+    if (invalidAnchor) {
+        await appAlert('The assigned date range is too short for one of the weekly/monthly first-dose dates. Extend the end date or edit the order set.');
+        return;
+    }
 
     db.orderSets.push(assignedSet);
     db.schedules.push(...assignedSet.items.map((item, index) => orderSetItemToSchedule(assignedSet, item, index)));
@@ -1848,7 +2195,8 @@ window.printOrderSetLabel = function(id) {
         if (!med) return '';
         const schedule = { ...item, startDate: set.startDate, endDate: set.endDate };
         const instr = item.instructions ? ` - ${escapeHtml(item.instructions)}` : '';
-        return `<div class="label-med-row">* ${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}; Qty ${escapeHtml(formatQtyForSchedule(schedule, med))}; ${escapeHtml(item.freq)} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}${instr}</div>`;
+        const timing = item.freq === 'PRN' ? 'As Needed' : `${item.freq} ${getScheduleTimes(schedule).join(', ')}`;
+        return `<div class="label-med-row">* ${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}; Qty ${escapeHtml(formatQtyForSchedule(schedule, med))}; ${escapeHtml(timing)}${instr}</div>`;
     }).join('');
 
     previewLabelHtml(`
@@ -1857,6 +2205,29 @@ window.printOrderSetLabel = function(id) {
             <div class="label-small">${escapeHtml(member ? `${member.firstName} ${member.lastName}` : '')} | ${escapeHtml(set.startDate)}-${escapeHtml(set.endDate)}</div>
             ${rows}
         </div>`);
+};
+
+window.printOrderSetMedicationLabel = async function(id) {
+    const set = db.orderSets.find(orderSet => orderSet.id === id);
+    if (!set) return;
+    const schedules = db.schedules.filter(schedule => schedule.orderSetId === set.id);
+    if (!set.memberId || schedules.length === 0) {
+        await appAlert('Assign this order set to a member before printing individual medication labels.');
+        return;
+    }
+
+    const options = schedules.map(schedule => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        if (!med) return '';
+        return `<option value="${escapeHtml(schedule.id)}">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} - ${escapeHtml(schedule.freq)}</option>`;
+    }).join('');
+    const result = await showActionModal(`Individual Labels: ${set.name}`, `
+        <div class="field-row-stacked">
+            <label>Medication:</label>
+            <select name="scheduleId" style="width:100%;">${options}</select>
+        </div>
+    `, 'Choose Dates');
+    if (result?.scheduleId) await window.printSingleLabel(result.scheduleId);
 };
 
 function renderOrderSets() {
@@ -1897,7 +2268,8 @@ function renderOrderSets() {
                 <small>${escapeHtml(itemSummary)}</small>
             </div>
             <button onclick="assignOrderSet('${set.id}')">Assign</button>
-            <button onclick="printOrderSetLabel('${set.id}')">Label</button>
+            <button onclick="printOrderSetLabel('${set.id}')">Set Label</button>
+            ${member ? `<button onclick="printOrderSetMedicationLabel('${set.id}')">Individual Labels</button>` : ''}
             ${member ? `<button onclick="administerOrderSet('${set.id}')">Administer</button>` : ''}
             <button onclick="editOrderSet('${set.id}')">Edit</button>
             <button onclick="deleteOrderSet('${set.id}')">Delete</button>
@@ -1906,7 +2278,28 @@ function renderOrderSets() {
 }
 
 // --- VITALS ---
-function vitalTypeLabel(type) {
+function monitoringProfileById(member, monitoringId) {
+    return memberMonitoringProfiles(member).find(profile => profile.id === monitoringId);
+}
+
+function monitoringDetailsForReading(reading, member) {
+    const profile = monitoringProfileById(member, reading?.monitoringId);
+    return profile || {
+        id: reading?.monitoringId || '',
+        medicationName: reading?.medicationName || 'Medication',
+        labName: reading?.monitorName || 'Therapeutic Level',
+        unit: reading?.monitorUnit || 'value',
+        goalLow: reading?.goalLow,
+        goalHigh: reading?.goalHigh,
+        medId: reading?.medId || ''
+    };
+}
+
+function vitalTypeLabel(type, reading = null, member = null) {
+    if (type === 'med-monitor') {
+        const profile = monitoringDetailsForReading(reading, member);
+        return `${profile.labName} - ${profile.medicationName}`;
+    }
     return { bp: 'BP / HR', weight: 'Weight', glucose: 'Blood Glucose', temperature: 'Temperature' }[type] || type;
 }
 
@@ -1918,6 +2311,11 @@ function formatVitalReading(reading) {
     if (reading.type === 'weight') return `${reading.weight} ${reading.weightUnit || 'lb'}`;
     if (reading.type === 'glucose') return `${reading.glucose} mg/dL`;
     if (reading.type === 'temperature') return `${reading.temperature} ${reading.temperatureUnit || 'F'}`;
+    if (reading.type === 'med-monitor') {
+        const member = db.family.find(item => item.id === reading.memberId);
+        const profile = monitoringDetailsForReading(reading, member);
+        return `${formatAmount(parseAmount(reading.monitorValue))} ${profile.unit || 'value'}`;
+    }
     return '';
 }
 
@@ -1933,15 +2331,50 @@ function isVitalOutOfRange(reading, member) {
         return (Number.isFinite(sys) && (sys < goals.bp.systolicLow || sys > goals.bp.systolicHigh)) ||
             (Number.isFinite(dia) && (dia < goals.bp.diastolicLow || dia > goals.bp.diastolicHigh));
     }
+    if (reading.type === 'med-monitor') {
+        const profile = monitoringDetailsForReading(reading, member);
+        const value = parseAmount(reading.monitorValue, NaN);
+        const low = parseAmount(profile.goalLow, NaN);
+        const high = parseAmount(profile.goalHigh, NaN);
+        return Number.isFinite(value) && Number.isFinite(low) && Number.isFinite(high) && (value < low || value > high);
+    }
     return false;
 }
+
+window.renderVitalTypeOptions = function() {
+    const select = document.getElementById('vital-type');
+    if (!select) return;
+    const selected = select.value;
+    const member = db.family.find(item => item.id === document.getElementById('vital-member-select')?.value);
+    const standardOptions = [
+        ['bp', 'BP / Heart Rate'],
+        ['weight', 'Weight'],
+        ['glucose', 'Blood Glucose'],
+        ['temperature', 'Temperature']
+    ].map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    const monitoringOptions = memberMonitoringProfiles(member)
+        .map(profile => `<option value="monitor:${escapeHtml(profile.id)}">${escapeHtml(profile.labName)} - ${escapeHtml(profile.medicationName)}</option>`)
+        .join('');
+    select.innerHTML = `${standardOptions}${monitoringOptions ? `<optgroup label="Medication / Lab Monitoring">${monitoringOptions}</optgroup>` : ''}`;
+    if (Array.from(select.options).some(option => option.value === selected)) select.value = selected;
+    else select.value = 'bp';
+    renderVitalInputs();
+};
 
 window.renderVitalInputs = function() {
     const type = document.getElementById('vital-type')?.value || 'bp';
     const container = document.getElementById('vital-input-fields');
     if (!container) return;
 
-    if (type === 'bp') {
+    if (type.startsWith('monitor:')) {
+        const member = db.family.find(item => item.id === document.getElementById('vital-member-select')?.value);
+        const profile = monitoringProfileById(member, type.slice('monitor:'.length));
+        container.innerHTML = profile
+            ? `<label>${escapeHtml(profile.labName)}:</label><input id="vital-monitor-value" type="number" step="any" style="width:90px;">
+                <span>${escapeHtml(profile.unit || 'value')}</span>
+                <span class="form-help">Goal: ${escapeHtml(formatAmount(parseAmount(profile.goalLow)))}-${escapeHtml(formatAmount(parseAmount(profile.goalHigh)))} ${escapeHtml(profile.unit || 'value')}</span>`
+            : '<span class="form-help">Select a valid medication monitoring profile.</span>';
+    } else if (type === 'bp') {
         container.innerHTML = `
             <label>Systolic:</label><input id="vital-systolic" type="number" style="width:60px;">
             <label>Diastolic:</label><input id="vital-diastolic" type="number" style="width:60px;">
@@ -1960,24 +2393,39 @@ window.renderVitalInputs = function() {
 
 window.saveVitalReading = async function() {
     const memberId = document.getElementById('vital-member-select').value;
-    const type = document.getElementById('vital-type').value;
+    const selectedType = document.getElementById('vital-type').value;
     const date = document.getElementById('vital-date').value;
     const time = document.getElementById('vital-time').value;
     const notes = document.getElementById('vital-notes')?.value.trim() || '';
     if (!memberId || !date || !time) return alert("Member, date, and time are required.");
 
-    const reading = { id: Date.now().toString(), memberId, type, date, time, notes };
-    if (type === 'bp') {
+    const reading = { id: Date.now().toString(), memberId, type: selectedType, date, time, notes };
+    if (selectedType.startsWith('monitor:')) {
+        const member = db.family.find(item => item.id === memberId);
+        const monitoringId = selectedType.slice('monitor:'.length);
+        const profile = monitoringProfileById(member, monitoringId);
+        const monitorValue = parseAmount(document.getElementById('vital-monitor-value')?.value, NaN);
+        if (!profile || !Number.isFinite(monitorValue)) return alert("A valid monitored lab or level value is required.");
+        reading.type = 'med-monitor';
+        reading.monitoringId = profile.id;
+        reading.monitorValue = monitorValue;
+        reading.monitorName = profile.labName;
+        reading.medicationName = profile.medicationName;
+        reading.monitorUnit = profile.unit;
+        reading.goalLow = profile.goalLow;
+        reading.goalHigh = profile.goalHigh;
+        reading.medId = profile.medId || '';
+    } else if (selectedType === 'bp') {
         reading.systolic = parseAmount(document.getElementById('vital-systolic').value, NaN);
         reading.diastolic = parseAmount(document.getElementById('vital-diastolic').value, NaN);
         reading.hr = parseAmount(document.getElementById('vital-hr').value, NaN);
         if (isNaN(reading.systolic) || isNaN(reading.diastolic)) return alert("Systolic and diastolic BP are required.");
         if (isNaN(reading.hr)) reading.hr = '';
-    } else if (type === 'weight') {
+    } else if (selectedType === 'weight') {
         reading.weight = parseAmount(document.getElementById('vital-weight').value, NaN);
         reading.weightUnit = document.getElementById('vital-weight-unit').value;
         if (isNaN(reading.weight)) return alert("Weight is required.");
-    } else if (type === 'temperature') {
+    } else if (selectedType === 'temperature') {
         reading.temperature = parseAmount(document.getElementById('vital-temperature').value, NaN);
         reading.temperatureUnit = document.getElementById('vital-temperature-unit').value;
         if (isNaN(reading.temperature)) return alert("Temperature is required.");
@@ -2012,10 +2460,11 @@ function readingSeriesValue(reading, seriesKey) {
         const temperature = parseAmount(reading.temperature, NaN);
         return reading.temperatureUnit === 'C' ? (temperature * 9 / 5) + 32 : temperature;
     }
+    if (seriesKey === 'monitorValue') return parseAmount(reading.monitorValue, NaN);
     return NaN;
 }
 
-function isChartPointOutOfRange(type, key, value, member) {
+function isChartPointOutOfRange(type, key, value, member, options = {}) {
     const goals = getMemberGoals(member);
     if (type === 'glucose' && key === 'glucose') {
         return value < goals.glucose.low || value > goals.glucose.high;
@@ -2026,7 +2475,17 @@ function isChartPointOutOfRange(type, key, value, member) {
     if (type === 'bp' && key === 'diastolic') {
         return value < goals.bp.diastolicLow || value > goals.bp.diastolicHigh;
     }
+    if (type === 'med-monitor' && key === 'monitorValue') {
+        const low = parseAmount(options.goalLow, NaN);
+        const high = parseAmount(options.goalHigh, NaN);
+        return Number.isFinite(low) && Number.isFinite(high) && (value < low || value > high);
+    }
     return false;
+}
+
+function readingDateTime(reading) {
+    const value = new Date(`${reading.date}T${reading.time || '00:00'}`);
+    return Number.isFinite(value.getTime()) ? value : null;
 }
 
 function drawVitalChart(canvas, readings, series, options = {}) {
@@ -2048,8 +2507,9 @@ function drawVitalChart(canvas, readings, series, options = {}) {
     const goals = getMemberGoals(options.member);
     if (options.type === 'glucose') goalValues.push(70, goals.glucose.low, goals.glucose.high);
     if (options.type === 'bp') goalValues.push(goals.bp.systolicLow, goals.bp.systolicHigh, goals.bp.diastolicLow, goals.bp.diastolicHigh);
+    if (options.type === 'med-monitor') goalValues.push(parseAmount(options.goalLow, NaN), parseAmount(options.goalHigh, NaN));
 
-    const allValues = pointsBySeries.flatMap(item => item.values.map(p => p.value)).concat(goalValues);
+    const allValues = pointsBySeries.flatMap(item => item.values.map(p => p.value)).concat(goalValues).filter(Number.isFinite);
     if (allValues.length === 0) {
         ctx.fillStyle = '#000000';
         ctx.font = '10px MS Sans Serif, Arial';
@@ -2060,11 +2520,24 @@ function drawVitalChart(canvas, readings, series, options = {}) {
     const min = Math.min(...allValues);
     const max = Math.max(...allValues);
     const spread = Math.max(max - min, 1);
-    const leftPad = 42;
+    const leftPad = options.type === 'med-monitor' ? 72 : 42;
     const rightPad = 14;
     const topPad = 16;
     const bottomPad = 22;
-    const xFor = index => readings.length <= 1 ? (leftPad + width - rightPad) / 2 : leftPad + (index / (readings.length - 1)) * (width - leftPad - rightPad);
+    const readingTimes = readings.map(reading => readingDateTime(reading)?.getTime()).filter(Number.isFinite);
+    const adherenceTimes = (options.adherenceEntries || [])
+        .map(entry => parseHistoryTimestamp(entry.timestamp)?.getTime())
+        .filter(Number.isFinite);
+    const axisTimes = [...readingTimes, ...adherenceTimes];
+    const firstTime = axisTimes.length ? Math.min(...axisTimes) : 0;
+    const lastTime = axisTimes.length ? Math.max(...axisTimes) : firstTime;
+    const xForTime = time => lastTime === firstTime
+        ? (leftPad + width - rightPad) / 2
+        : leftPad + ((time - firstTime) / (lastTime - firstTime)) * (width - leftPad - rightPad);
+    const xFor = index => {
+        const time = readingDateTime(readings[index])?.getTime();
+        return Number.isFinite(time) ? xForTime(time) : (leftPad + width - rightPad) / 2;
+    };
     const yFor = value => height - bottomPad - ((value - min) / spread) * (height - topPad - bottomPad);
 
     ctx.strokeStyle = '#c0c0c0';
@@ -2087,6 +2560,27 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         ctx.fillText('70', leftPad - 6, y70 - 3);
         ctx.textAlign = 'left';
     }
+    if (options.type === 'med-monitor') {
+        [
+            [parseAmount(options.goalLow, NaN), `Low ${formatAmount(parseAmount(options.goalLow))}`],
+            [parseAmount(options.goalHigh, NaN), `High ${formatAmount(parseAmount(options.goalHigh))}`]
+        ].filter(([value]) => Number.isFinite(value)).forEach(([value, label]) => {
+            const y = yFor(value);
+            ctx.save();
+            ctx.strokeStyle = '#008000';
+            ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            ctx.moveTo(leftPad, y);
+            ctx.lineTo(width - rightPad, y);
+            ctx.stroke();
+            ctx.restore();
+            ctx.fillStyle = '#008000';
+            ctx.font = '8px MS Sans Serif, Arial';
+            ctx.textAlign = 'right';
+            ctx.fillText(label, leftPad - 5, y - 2);
+            ctx.textAlign = 'left';
+        });
+    }
 
     pointsBySeries.forEach(item => {
         ctx.strokeStyle = item.color;
@@ -2102,9 +2596,24 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         item.values.forEach(point => {
             const x = xFor(point.index);
             const y = yFor(point.value);
-            ctx.fillStyle = isChartPointOutOfRange(options.type, item.key, point.value, options.member) ? '#ff0000' : item.color;
+            ctx.fillStyle = isChartPointOutOfRange(options.type, item.key, point.value, options.member, options) ? '#ff0000' : item.color;
             ctx.fillRect(x - 2, y - 2, 4, 4);
         });
+    });
+
+    (options.adherenceEntries || []).forEach(entry => {
+        const time = parseHistoryTimestamp(entry.timestamp)?.getTime();
+        if (!Number.isFinite(time) || time < firstTime || time > lastTime) return;
+        const x = xForTime(time);
+        const y = height - bottomPad - 5;
+        ctx.fillStyle = '#000080';
+        ctx.beginPath();
+        ctx.moveTo(x, y - 4);
+        ctx.lineTo(x + 4, y);
+        ctx.lineTo(x, y + 4);
+        ctx.lineTo(x - 4, y);
+        ctx.closePath();
+        ctx.fill();
     });
 
     ctx.fillStyle = '#000000';
@@ -2123,7 +2632,17 @@ function drawVitalChart(canvas, readings, series, options = {}) {
 function renderVitals() {
     const memberSelect = document.getElementById('vital-member-select');
     if (memberSelect) {
+        const selectedMember = memberSelect.value;
         memberSelect.innerHTML = db.family.map(m => `<option value="${m.id}">${m.lastName}, ${m.firstName}</option>`).join('');
+        if (db.family.some(member => member.id === selectedMember)) memberSelect.value = selectedMember;
+    }
+    const memberFilter = document.getElementById('vital-member-filter');
+    if (memberFilter) {
+        const selectedFilter = memberFilter.value;
+        memberFilter.innerHTML = `<option value="">All members</option>${db.family
+            .map(member => `<option value="${member.id}">${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</option>`)
+            .join('')}`;
+        if (!selectedFilter || db.family.some(member => member.id === selectedFilter)) memberFilter.value = selectedFilter;
     }
 
     const dateInput = document.getElementById('vital-date');
@@ -2133,28 +2652,31 @@ function renderVitals() {
         const now = new Date();
         timeInput.value = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     }
-    renderVitalInputs();
+    renderVitalTypeOptions();
 
     const tableBody = document.getElementById('vital-table-body');
     if (tableBody) {
-        const sortedVitals = [...db.vitals].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+        const filterMemberId = memberFilter?.value || '';
+        const sortedVitals = db.vitals
+            .filter(reading => !filterMemberId || reading.memberId === filterMemberId)
+            .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
         tableBody.innerHTML = sortedVitals.slice(0, 50).map(reading => {
             const member = db.family.find(m => m.id === reading.memberId);
             const warningStyle = isVitalOutOfRange(reading, member) ? 'color:red; font-weight:bold;' : '';
             return `<tr style="${warningStyle}">
                 <td>${member ? `${member.lastName}, ${member.firstName}` : '?'}</td>
                 <td>${reading.date} ${reading.time}</td>
-                <td>${vitalTypeLabel(reading.type)}</td>
+                <td>${escapeHtml(vitalTypeLabel(reading.type, reading, member))}</td>
                 <td>${formatVitalReading(reading)}</td>
                 <td>${escapeHtml(reading.notes || '')}</td>
                 <td><button onclick="deleteVitalReading('${reading.id}')">Delete</button></td>
             </tr>`;
-        }).join('');
+        }).join('') || '<tr><td colspan="6" style="padding:8px;">No vital readings match this member filter.</td></tr>';
     }
 }
 
-function getVitalChartConfigs() {
-    return [
+function getVitalChartConfigs(member = null) {
+    const standardCharts = [
         { type: 'bp', title: 'BP / HR', unit: 'mmHg / bpm', series: [
             { key: 'systolic', label: 'Systolic', color: '#0000aa' },
             { key: 'diastolic', label: 'Diastolic', color: '#008000' },
@@ -2164,6 +2686,39 @@ function getVitalChartConfigs() {
         { type: 'glucose', title: 'Blood Glucose', unit: 'mg/dL', series: [{ key: 'glucose', label: 'Glucose', color: '#070707' }] },
         { type: 'temperature', title: 'Temperature', unit: 'F', series: [{ key: 'temperature', label: 'Temperature', color: '#b34d00' }] }
     ];
+    const monitoringCharts = memberMonitoringProfiles(member).map(profile => ({
+        type: 'med-monitor',
+        monitoringId: profile.id,
+        title: `${profile.labName} - ${profile.medicationName}`,
+        unit: profile.unit || 'value',
+        goalLow: profile.goalLow,
+        goalHigh: profile.goalHigh,
+        medId: profile.medId || '',
+        series: [{ key: 'monitorValue', label: profile.labName, color: '#202020' }]
+    }));
+    return [...standardCharts, ...monitoringCharts];
+}
+
+function readingMatchesChart(reading, chart) {
+    return reading.type === chart.type && (chart.type !== 'med-monitor' || reading.monitoringId === chart.monitoringId);
+}
+
+function adherenceEntriesForChart(member, chart, readings) {
+    if (!member || !chart.medId || readings.length === 0) return [];
+    const med = db.inventory.find(item => item.id === chart.medId);
+    const firstDate = readings[0].date;
+    const lastDate = readings[readings.length - 1].date;
+    return db.history
+        .filter(entry => entry.memberId === member.id)
+        .filter(entry => !entry.doseStatus || ['given', 'late', 'early'].includes(entry.doseStatus))
+        .filter(entry => entry.medId === chart.medId || (!!med && entry.medName === med.name))
+        .filter(entry => {
+            const timestamp = parseHistoryTimestamp(entry.timestamp);
+            if (!timestamp) return false;
+            const date = localDateKey(timestamp);
+            return date >= firstDate && date <= lastDate;
+        })
+        .sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
 }
 
 function renderMemberVitalCharts(memberId, container) {
@@ -2172,9 +2727,9 @@ function renderMemberVitalCharts(memberId, container) {
     container.innerHTML = '<div class="vital-chart-grid"></div>';
     const grid = container.querySelector('.vital-chart-grid');
 
-    getVitalChartConfigs().forEach(chart => {
+    getVitalChartConfigs(member).forEach(chart => {
         const readings = db.vitals
-            .filter(v => v.memberId === memberId && v.type === chart.type)
+            .filter(v => v.memberId === memberId && readingMatchesChart(v, chart))
             .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
         if (readings.length === 0) return;
 
@@ -2182,19 +2737,23 @@ function renderMemberVitalCharts(memberId, container) {
         const last = readings[readings.length - 1];
         const panel = document.createElement('div');
         panel.className = 'vital-chart-panel';
-        const legend = chart.series.map(s => `<span><span class="legend-swatch" style="background:${s.color};"></span>${s.label}</span>`).join(' ');
+        const legend = chart.series.map(s => `<span><span class="legend-swatch" style="background:${s.color};"></span>${escapeHtml(s.label)}</span>`).join(' ');
+        const adherenceEntries = adherenceEntriesForChart(member, chart, readings);
+        const monitoringLegend = chart.type === 'med-monitor'
+            ? `<span><span class="legend-swatch goal-swatch"></span>Goal range</span>${chart.medId ? '<span><span class="legend-diamond"></span>Dose taken</span>' : ''}`
+            : '';
         panel.innerHTML = `
-            <div style="font-size:11px; font-weight:bold;">${chart.title}</div>
-            <div class="vital-chart-meta">${first.date} to ${last.date} (${readings.length} readings)</div>
+            <div style="font-size:11px; font-weight:bold;">${escapeHtml(chart.title)}</div>
+            <div class="vital-chart-meta">${first.date} to ${last.date} (${readings.length} readings${chart.medId ? `, ${adherenceEntries.length} linked doses` : ''})</div>
             <canvas width="380" height="150" class="vital-chart"></canvas>
-            <div class="vital-legend">${legend}<span><span class="legend-swatch" style="background:#ff0000;"></span>Out of goal</span></div>
+            <div class="vital-legend">${legend}${monitoringLegend}<span><span class="legend-swatch" style="background:#ff0000;"></span>Out of goal</span></div>
         `;
         grid.appendChild(panel);
-        drawVitalChart(panel.querySelector('canvas'), readings, chart.series, { type: chart.type, unit: chart.unit, member });
+        drawVitalChart(panel.querySelector('canvas'), readings, chart.series, { ...chart, member, adherenceEntries });
     });
 
     if (!grid.children.length) {
-        container.innerHTML = '<div style="font-size:11px;">No vitals logged for this member.</div>';
+        container.innerHTML = '<div style="font-size:11px;">No monitoring readings logged for this member.</div>';
     }
 }
 
@@ -2468,14 +3027,14 @@ async function emailReportPdf(title, bodyHtml, filenamePrefix, to, message) {
             body: message || `${title}\n\nGenerated by PharmAtlas.`
         });
         if (result?.success) {
-            await appAlert(`Schedule PDF sent to ${to}.`);
+            await appAlert(`PDF report sent to ${to}.`);
             return true;
         }
-        await appAlert(`Unable to send schedule PDF${result?.error ? `: ${result.error}` : '.'}`);
+        await appAlert(`Unable to send PDF report${result?.error ? `: ${result.error}` : '.'}`);
         return false;
     } catch (error) {
         console.error(error);
-        await appAlert("Unable to send schedule PDF.");
+        await appAlert("Unable to send PDF report.");
         return false;
     }
 }
@@ -2626,14 +3185,19 @@ function vitalChartReportHtml(member, chart, readings) {
     const canvas = document.createElement('canvas');
     canvas.width = 680;
     canvas.height = 260;
-    drawVitalChart(canvas, readings, chart.series, { type: chart.type, unit: chart.unit, member });
+    const adherenceEntries = adherenceEntriesForChart(member, chart, readings);
+    drawVitalChart(canvas, readings, chart.series, { ...chart, member, adherenceEntries });
     const imageUrl = canvas.toDataURL('image/png');
     const legend = chart.series
         .map(series => `<span><span class="swatch" style="background:${series.color};"></span>${escapeHtml(series.label)}</span>`)
         .join('');
+    const monitoringLegend = chart.type === 'med-monitor'
+        ? `<span><span class="swatch" style="background:#008000;"></span>Goal range</span>${chart.medId ? '<span><span class="swatch" style="background:#000080;"></span>Dose taken</span>' : ''}`
+        : '';
     return `
         <h3>${escapeHtml(chart.title)}</h3>
-        <div class="legend">${legend}<span><span class="swatch" style="background:#ff0000;"></span>Out of goal</span></div>
+        <div class="legend">${legend}${monitoringLegend}<span><span class="swatch" style="background:#ff0000;"></span>Out of goal</span></div>
+        ${chart.type === 'med-monitor' ? `<div class="muted">Goal: ${escapeHtml(formatAmount(parseAmount(chart.goalLow)))}-${escapeHtml(formatAmount(parseAmount(chart.goalHigh)))} ${escapeHtml(chart.unit)}${chart.medId ? ` | Linked administrations shown: ${adherenceEntries.length}` : ''}</div>` : ''}
         <img class="chart-img" src="${imageUrl}" alt="${escapeHtml(chart.title)} chart">`;
 }
 
@@ -2643,14 +3207,15 @@ function memberVitalsReportBody(member) {
         .filter(reading => reading.memberId === member.id)
         .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 
-    const chartsHtml = getVitalChartConfigs().map(chart => {
-        const chartReadings = memberReadings.filter(reading => reading.type === chart.type);
+    const charts = getVitalChartConfigs(member);
+    const chartsHtml = charts.map(chart => {
+        const chartReadings = memberReadings.filter(reading => readingMatchesChart(reading, chart));
         return vitalChartReportHtml(member, chart, chartReadings);
     }).join('');
 
-    const logSections = getVitalChartConfigs().map(chart => {
+    const logSections = charts.map(chart => {
         const rows = memberReadings
-            .filter(reading => reading.type === chart.type)
+            .filter(reading => readingMatchesChart(reading, chart))
             .map(reading => {
                 const alertClass = isVitalOutOfRange(reading, member) ? ' class="alert"' : '';
                 return `<tr${alertClass}>
@@ -2670,7 +3235,7 @@ function memberVitalsReportBody(member) {
     return `
         <h2>${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</h2>
         <div class="muted">Glucose goal: ${escapeHtml(goals.glucose.low)}-${escapeHtml(goals.glucose.high)} mg/dL | BP goal: ${escapeHtml(goals.bp.systolicLow)}-${escapeHtml(goals.bp.systolicHigh)}/${escapeHtml(goals.bp.diastolicLow)}-${escapeHtml(goals.bp.diastolicHigh)} mmHg</div>
-        ${chartsHtml || '<h3>No graphable vitals yet.</h3>'}
+        ${chartsHtml || '<h3>No graphable monitoring readings yet.</h3>'}
         <h2>Reading Log</h2>
         ${logSections}`;
 }
@@ -2683,9 +3248,65 @@ window.generateMemberVitalsPdfReport = async function(memberId = currentEditingM
     }
 
     await saveReportPdf(
-        `PharmAtlas Monitored Vitals Report - ${member.firstName} ${member.lastName}`,
+        `PharmAtlas Monitoring Report - ${member.firstName} ${member.lastName}`,
         memberVitalsReportBody(member),
-        `PharmAtlas_Vitals_${member.lastName}_${member.firstName}`
+        `PharmAtlas_Monitoring_${member.lastName}_${member.firstName}`
+    );
+};
+
+window.fillVitalsProviderEmail = function(providerId) {
+    const emailInput = document.querySelector('#action-modal-body input[name="email"]');
+    const provider = db.prescribers.find(item => item.id === providerId);
+    if (emailInput) emailInput.value = provider?.email || '';
+};
+
+window.emailMemberVitalsPdfReport = async function(memberId = currentEditingMemberId) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return appAlert('Open a saved member profile before emailing a monitoring report.');
+    if (!db.vitals.some(reading => reading.memberId === member.id)) {
+        return appAlert('No monitoring readings have been logged for this member.');
+    }
+
+    const providers = memberPrescriberIds(member)
+        .map(id => db.prescribers.find(item => item.id === id))
+        .filter(Boolean)
+        .sort((a, b) => prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }));
+    const defaultProvider = providers.find(provider => provider.email) || providers[0];
+    const providerOptions = providers
+        .map(provider => `<option value="${escapeHtml(provider.id)}" ${provider.id === defaultProvider?.id ? 'selected' : ''}>${escapeHtml(prescriberDisplayName(provider))}${provider.email ? ` - ${escapeHtml(provider.email)}` : ' - no email saved'}</option>`)
+        .join('');
+    const title = `PharmAtlas Monitoring Report - ${member.firstName} ${member.lastName}`;
+    const defaultMessage = `Attached is the monitored vital signs and therapeutic lab report for ${member.firstName} ${member.lastName}.\n\nGenerated by PharmAtlas.`;
+    const result = await showActionModal('Send Monitoring Report to Provider', `
+        <div class="field-row-stacked">
+            <label>Provider profile:</label>
+            <select name="providerId" onchange="fillVitalsProviderEmail(this.value)" style="width:100%;">
+                <option value="">Enter an email manually</option>
+                ${providerOptions}
+            </select>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Provider email:</label>
+            <input name="email" type="email" value="${escapeHtml(defaultProvider?.email || '')}" style="width:100%;" placeholder="provider@example.com">
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Message:</label>
+            <textarea name="message" rows="4" style="width:100%; resize:none;">${escapeHtml(defaultMessage)}</textarea>
+        </div>
+    `, 'Send Email');
+    if (!result) return;
+
+    const email = String(result.email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        await appAlert('Select a provider with an email address or enter a valid email manually.');
+        return;
+    }
+    await emailReportPdf(
+        title,
+        memberVitalsReportBody(member),
+        `PharmAtlas_Monitoring_${member.lastName}_${member.firstName}`,
+        email,
+        result.message
     );
 };
 
@@ -2816,33 +3437,12 @@ window.addSchedule = async function() {
 
 
 async function getAdministrationStockPlan(med, sched) {
-    const formulation = med.formulation || 'unit(s)';
-    if (isTopicalMedication(med)) {
+    const doseUnit = med.administrationUnit || med.formulation || 'unit(s)';
+    if (usesContainerTracking(med)) {
         return {
             qtyToSubtract: 0,
-            logDetail: `Topical application; ${inventoryUnitFor(med)} inventory is reduced only when a container is marked finished`
+            logDetail: `${formatAmount(parseAmount(sched.doseQty, 0))} ${doseUnit}; ${inventoryUnitFor(med)} inventory is reduced only when a container is marked finished`
         };
-    }
-    const specialFormulations = ['Cream', 'Ointment', 'Gel', 'Patch', 'Drops', 'Solution', 'Spray'];
-    const isSpecial = specialFormulations.some(f => formulation.includes(f));
-
-    if (isSpecial) {
-        const decision = await showActionModal(`Stock Handling: ${med.name}`, `
-            <div style="font-size:11px; margin-bottom:8px;">How should stock be handled for this ${escapeHtml(formulation)} administration?</div>
-            <div class="field-row-stacked">
-                <label><input name="stockAction" type="radio" value="logOnly" checked> Log dose only; do not reduce stock</label>
-                <label><input name="stockAction" type="radio" value="removeContainer"> Log dose and remove 1 container from stock</label>
-            </div>
-        `, 'Continue');
-        if (!decision) return null;
-        if (decision.stockAction === 'removeContainer') {
-            if (parseAmount(med.stock) < 1) {
-                await appAlert("Insufficient stock to remove a container.");
-                return null;
-            }
-            return { qtyToSubtract: 1, logDetail: `Dose applied; 1 ${formulation} container removed` };
-        }
-        return { qtyToSubtract: 0, logDetail: `Dose applied (${formulation})` };
     }
 
     const qtyToSubtract = parseAmount(sched.doseQty, 0);
@@ -2852,7 +3452,7 @@ async function getAdministrationStockPlan(med, sched) {
     }
     return {
         qtyToSubtract,
-        logDetail: `${formatAmount(qtyToSubtract)} ${formulation}`
+        logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit}`
     };
 }
 
@@ -2950,6 +3550,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         timestamp: formatActualTimestamp(actual),
         memberId: sched.memberId,
         memberName: memberDisplayName(db.family.find(member => member.id === sched.memberId)),
+        medId: med.id,
         medName: med.name,
         scheduleId: sched.id,
         scheduledDate: instanceDate,
@@ -2960,7 +3561,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         doseNote: actual.doseNote || '',
         prnLimitOverride: !!actual.prnLimitOverride,
         sourceLabel,
-        stockDelta: isGivenDose ? stockPlan.qtyToSubtract : (isTopicalMedication(med) ? 0 : parseAmount(sched.doseQty, 0)),
+        stockDelta: isGivenDose ? stockPlan.qtyToSubtract : (usesContainerTracking(med) ? 0 : parseAmount(sched.doseQty, 0)),
         stockLogDetail: stockPlan.logDetail,
         details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${overrideText}${noteText}`
     });
@@ -2988,8 +3589,8 @@ function isGivenStatus(status) {
 
 function administrationStockDelta(entry, med, schedule) {
     const saved = parseAmount(entry.stockDelta, NaN);
-    if (Number.isFinite(saved) && (saved > 0 || isGivenStatus(entry.doseStatus) || isTopicalMedication(med))) return saved;
-    if (!med || isTopicalMedication(med)) return 0;
+    if (Number.isFinite(saved) && (saved > 0 || isGivenStatus(entry.doseStatus) || usesContainerTracking(med))) return saved;
+    if (!med || usesContainerTracking(med)) return 0;
     const containerMatch = String(entry.details || '').match(/([0-9]+(?:\.[0-9]+)?)\s+[^;]*container removed/i);
     if (containerMatch) return parseAmount(containerMatch[1], 0);
     return schedule ? parseAmount(schedule.doseQty, 0) : 0;
@@ -3122,11 +3723,11 @@ window.administerDose = async function(medId, scheduleId) {
 window.finishTopicalContainer = async function(scheduleId) {
     const schedule = db.schedules.find(item => item.id === scheduleId);
     const med = schedule && db.inventory.find(item => item.id === schedule.medId);
-    if (!schedule || !med || !isTopicalMedication(med)) return;
+    if (!schedule || !med || !usesContainerTracking(med)) return;
 
     const defaults = defaultActualDateTime();
     const result = await showActionModal(`Finish Container: ${med.name}`, `
-        <div style="font-size:11px; margin-bottom:8px;">Mark the topical container as finished. This is the only action that reduces topical inventory.</div>
+        <div style="font-size:11px; margin-bottom:8px;">Mark a container as finished. This is the only action that reduces inventory while this medication is tracked by whole container.</div>
         <div class="field-row">
             <label>Date:</label><input name="actualDate" type="date" value="${defaults.date}">
             <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
@@ -3160,7 +3761,7 @@ window.finishTopicalContainer = async function(scheduleId) {
         medName: med.name,
         scheduleId: schedule.id,
         doseStatus: 'container-finished',
-        details: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished; topical inventory reduced${result.note ? `; Note: ${result.note}` : ''}`
+        details: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished; container inventory reduced${result.note ? `; Note: ${result.note}` : ''}`
     });
     await sync();
 };
@@ -3410,6 +4011,10 @@ window.updateInventoryEntryMode = function() {
     const topicalStockUnit = document.getElementById('med-topical-stock-unit');
     const topicalAdminUnitWrap = document.getElementById('med-topical-admin-unit-wrap');
     const combinationFields = document.getElementById('combination-fields');
+    const inventoryBehavior = document.getElementById('med-inventory-behavior');
+    const inventoryUnitInput = document.getElementById('med-inventory-unit');
+    const administrationUnitInput = document.getElementById('med-administration-unit');
+    const inventoryGuidance = document.getElementById('med-inventory-guidance');
 
     const formulationDefaults = {
         'mL': 'mL',
@@ -3430,6 +4035,29 @@ window.updateInventoryEntryMode = function() {
     const isTopical = ['cream', 'ointment', 'gel', 'topical packet', 'topical solution'].some(type => formulation.toLowerCase().includes(type));
     const defaultPerUnit = formulationDefaults[formulation] || '';
     const isConcentration = formulation === 'mL' || units.includes('/') || ['Drops', 'Sprays', 'Inhalations'].includes(formulation);
+    const formulationChanged = inventoryBehavior?.dataset.formulation !== formulation;
+
+    if (formulationChanged) {
+        if (administrationUnitInput) administrationUnitInput.value = formulationDoseUnits[formulation] || formulation || 'unit';
+        if (inventoryBehavior) inventoryBehavior.value = isTopical ? 'container-finish' : 'per-dose';
+        if (inventoryUnitInput) {
+            if (isTopical) {
+                inventoryUnitInput.value = formulation === 'Topical Packet' ? 'packet' : (formulation === 'Topical Solution' ? 'bottle' : 'tube');
+            } else {
+                inventoryUnitInput.value = formulationDoseUnits[formulation] || formulation || 'unit';
+            }
+        }
+        if (inventoryBehavior) inventoryBehavior.dataset.formulation = formulation;
+    }
+    if (isTopical && inventoryBehavior) inventoryBehavior.value = 'container-finish';
+    if (inventoryBehavior) inventoryBehavior.disabled = isTopical;
+    const behaviorChanged = inventoryBehavior?.dataset.behavior !== inventoryBehavior?.value;
+    if (!formulationChanged && behaviorChanged && inventoryUnitInput) {
+        inventoryUnitInput.value = inventoryBehavior.value === 'container-finish'
+            ? 'bottle'
+            : (formulationDoseUnits[formulation] || formulation || 'unit');
+    }
+    if (inventoryBehavior) inventoryBehavior.dataset.behavior = inventoryBehavior.value;
 
     if (combinationFields) combinationFields.style.display = isCombo ? 'block' : 'none';
     if (strengthInput) {
@@ -3452,10 +4080,15 @@ window.updateInventoryEntryMode = function() {
         else if (unitParts[1]) perUnitSelect.value = unitParts[1];
         else if (!perUnitSelect.value && defaultPerUnit) perUnitSelect.value = defaultPerUnit;
     }
-    if (stockUnitLabel) stockUnitLabel.innerText = isTopical ? 'containers:' : (formulation || 'unit(s)');
-    if (topicalStockUnit) topicalStockUnit.style.display = isTopical ? 'inline-block' : 'none';
-    if (topicalStockUnit && formulation === 'Topical Solution' && topicalStockUnit.value === 'tube') topicalStockUnit.value = 'bottle';
-    if (topicalAdminUnitWrap) topicalAdminUnitWrap.style.display = isTopical ? 'inline-block' : 'none';
+    const tracksContainers = inventoryBehavior?.value === 'container-finish';
+    if (stockUnitLabel) stockUnitLabel.innerText = inventoryUnitInput?.value || (tracksContainers ? 'containers' : (formulationDoseUnits[formulation] || formulation || 'unit(s)'));
+    if (topicalStockUnit) topicalStockUnit.style.display = 'none';
+    if (topicalAdminUnitWrap) topicalAdminUnitWrap.style.display = 'none';
+    if (inventoryGuidance) {
+        inventoryGuidance.innerText = tracksContainers
+            ? 'Doses do not reduce stock. Use Finished Container when one is empty.'
+            : `Each administered ${administrationUnitInput?.value || 'dose unit'} reduces stock by the quantity given.`;
+    }
 };
 
 window.toggleComboFields = function() {
@@ -3474,7 +4107,7 @@ window.addIngredientRow = function() {
     const unitOptions = componentUnitOptions.map(unit => `<option value="${unit}">${unit}</option>`).join('');
     div.innerHTML = `
         <input class="ing-name" type="text" placeholder="Name (e.g. APAP)" style="width:100px;">
-        <input class="ing-strength" type="number" placeholder="Str" style="width:50px;">
+        <input class="ing-strength" type="number" min="0" step="any" placeholder="Str" style="width:60px;">
         <select class="ing-unit" style="width:75px;">${unitOptions}</select>
         <button onclick="this.parentElement.remove()">X</button>
     `;
@@ -3650,7 +4283,7 @@ window.calculateLiveDose = function() {
             const total = parseAmount(c.strength) * qty;
             return `${formatAmount(total)}${getComponentUnit(c, med)}`;
         });
-        calcDisplay.value = results.join(' / ');
+        calcDisplay.value = results.join('/');
         return; // Exit early as we've handled the display
     }
     if (med.isLiquid) {
@@ -3682,14 +4315,39 @@ window.clearHistory = async function() {
 function getLabelSelectionRange(schedule) {
     const today = localDateKey();
     const start = schedule.startDate && schedule.startDate > today ? schedule.startDate : today;
-    if (schedule.endDate && schedule.endDate !== 'Ongoing') return { start, end: schedule.endDate };
+    if (schedule.endDate && schedule.endDate !== 'Ongoing') {
+        return schedule.endDate < start
+            ? { start: schedule.startDate, end: schedule.endDate }
+            : { start, end: schedule.endDate };
+    }
     const end = new Date();
     end.setDate(end.getDate() + 30);
     return { start, end: localDateKey(end) };
 }
 
+function dateKeyPlusDays(dateKey, days) {
+    const date = parseLocal(dateKey);
+    if (!date) return '';
+    date.setDate(date.getDate() + days);
+    return localDateKey(date);
+}
+
+window.updateIndividualLabelOptions = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const rangeMode = body.querySelector('[name="labelRangeMode"]')?.value || 'single';
+    const doseMode = body.querySelector('[name="labelDoseMode"]')?.value || 'all';
+    const singleRow = body.querySelector('#individual-label-single-row');
+    const customRow = body.querySelector('#individual-label-custom-row');
+    const timeRow = body.querySelector('#individual-label-time-row');
+    if (singleRow) singleRow.style.display = rangeMode === 'single' ? 'flex' : 'none';
+    if (customRow) customRow.style.display = rangeMode === 'custom' ? 'flex' : 'none';
+    if (timeRow) timeRow.style.display = doseMode === 'specific' ? 'flex' : 'none';
+};
+
 function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
-    const times = doseTimes.length > 0 ? doseTimes.join(', ') : 'PRN';
+    const times = doseTimes.length > 0 ? doseTimes.join(', ') : 'As Needed';
+    const header = schedule.freq === 'PRN' ? 'As Needed' : `${doseDate} | ${times}`;
     const instructionLine = schedule.instructions
         ? `<div class="label-small"><b>Instructions:</b> ${escapeHtml(schedule.instructions)}</div>`
         : '';
@@ -3704,7 +4362,7 @@ function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
 
     return `
         <div class="${labelClass}">
-            <div class="label-date">${escapeHtml(doseDate)} | ${escapeHtml(times)}</div>
+            <div class="label-date">${escapeHtml(header)}</div>
             <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</div>
             <div class="label-small">Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
             <div class="label-small"><b>Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}</b></div>
@@ -3719,41 +4377,111 @@ window.printSingleLabel = async function(scheduleId) {
     const med = db.inventory.find(m => m.id === s.medId);
     const mem = db.family.find(f => f.id === s.memberId);
     if (!med || !mem) return;
-
-    const range = getLabelSelectionRange(s);
-    const instances = getScheduleInstancesInRange(s, range.start, range.end);
-    if (instances.length === 0) {
-        await appAlert("No scheduled doses were found for this order date range.");
+    if (s.freq === 'PRN') {
+        previewLabelHtml(medicationLabelHtml(s, med, mem, '', []));
         return;
     }
 
-    const byDate = instances.reduce((acc, instance) => {
-        if (!acc[instance.date]) acc[instance.date] = [];
-        acc[instance.date].push(instance.time);
-        return acc;
-    }, {});
-    const options = Object.entries(byDate).map(([date, times]) => {
-        const sortedTimes = times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
-        const allOption = sortedTimes.length > 1
-            ? `<option value="${escapeHtml(`${date}|ALL`)}">${escapeHtml(date)} - all doses (${escapeHtml(sortedTimes.join(', '))})</option>`
-            : '';
-        const timeOptions = sortedTimes.map(time => `<option value="${escapeHtml(`${date}|${time}`)}">${escapeHtml(date)} ${escapeHtml(time)}</option>`).join('');
-        return allOption + timeOptions;
-    }).join('');
+    const remainingRange = getLabelSelectionRange(s);
+    const nextDose = getNextScheduledDose(s);
+    const defaultDate = nextDose?.date >= remainingRange.start && nextDose?.date <= remainingRange.end
+        ? nextDose.date
+        : remainingRange.start;
+    const defaultCustomEnd = dateKeyPlusDays(remainingRange.start, 6);
+    const customEnd = defaultCustomEnd && defaultCustomEnd < remainingRange.end ? defaultCustomEnd : remainingRange.end;
+    const orderHasEndDate = s.endDate && s.endDate !== 'Ongoing';
+    const minDate = s.startDate || '';
+    const maxDate = orderHasEndDate ? s.endDate : '';
+    const dateBounds = `${minDate ? ` min="${escapeHtml(minDate)}"` : ''}${maxDate ? ` max="${escapeHtml(maxDate)}"` : ''}`;
+    const scheduledTimes = getScheduleTimes(s).slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+    const timeOptions = scheduledTimes
+        .map(time => `<option value="${escapeHtml(time)}">${escapeHtml(time)}</option>`)
+        .join('');
+    const doseModeOptions = scheduledTimes.length > 1
+        ? `
+            <option value="all">All scheduled times on one label per date</option>
+            <option value="specific">One selected time per date</option>
+            <option value="separate">Separate label for each scheduled time</option>`
+        : '<option value="all">Scheduled time on one label per date</option>';
+    const fullRangeOption = orderHasEndDate
+        ? '<option value="full">Full order range (start through end)</option>'
+        : '';
 
     const result = await showActionModal(`Print Label: ${med.name}`, `
-        <div class="field-row">
-            <label>Dose:</label>
-            <select name="labelDose" style="width:260px;">${options}</select>
+        <div class="field-row-stacked">
+            <label>Print period:</label>
+            <select name="labelRangeMode" onchange="updateIndividualLabelOptions()" style="width:280px;">
+                <option value="single">Specific date</option>
+                <option value="custom">Custom date range</option>
+                ${fullRangeOption}
+            </select>
         </div>
-    `, 'Preview Label');
-    if (!result?.labelDose) return;
+        <div id="individual-label-single-row" class="field-row" style="margin-top:8px;">
+            <label>Date:</label>
+            <input name="labelSingleDate" type="date" value="${escapeHtml(defaultDate)}"${dateBounds}>
+        </div>
+        <div id="individual-label-custom-row" class="field-row" style="display:none; margin-top:8px;">
+            <label>Start:</label><input name="labelStartDate" type="date" value="${escapeHtml(remainingRange.start)}"${dateBounds}>
+            <label>End:</label><input name="labelEndDate" type="date" value="${escapeHtml(customEnd)}"${dateBounds}>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Dose times:</label>
+            <select name="labelDoseMode" onchange="updateIndividualLabelOptions()" style="width:280px;">
+                ${doseModeOptions}
+            </select>
+        </div>
+        <div id="individual-label-time-row" class="field-row" style="display:none; margin-top:8px;">
+            <label>Scheduled time:</label>
+            <select name="labelSpecificTime">${timeOptions}</select>
+        </div>
+        ${!orderHasEndDate ? '<div class="form-help" style="margin-top:8px;">This order is ongoing, so use a specific date or custom date range.</div>' : ''}
+    `, 'Preview Labels');
+    if (!result) return;
 
-    const [doseDate, doseTime] = result.labelDose.split('|');
-    const doseTimes = doseTime === 'ALL'
-        ? byDate[doseDate].slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
-        : [doseTime];
-    previewLabelHtml(medicationLabelHtml(s, med, mem, doseDate, doseTimes));
+    let startDate = '';
+    let endDate = '';
+    if (result.labelRangeMode === 'single') {
+        startDate = result.labelSingleDate;
+        endDate = result.labelSingleDate;
+    } else if (result.labelRangeMode === 'full') {
+        startDate = s.startDate;
+        endDate = s.endDate;
+    } else {
+        startDate = result.labelStartDate;
+        endDate = result.labelEndDate;
+    }
+    if (!startDate || !endDate || endDate < startDate) {
+        await appAlert('Enter a valid label date or date range.');
+        return;
+    }
+
+    let instances = getScheduleInstancesInRange(s, startDate, endDate);
+    if (result.labelDoseMode === 'specific') {
+        instances = instances.filter(instance => instance.time === result.labelSpecificTime);
+    }
+    if (instances.length === 0) {
+        await appAlert('This medication has no scheduled doses in the selected date range.');
+        return;
+    }
+
+    let labels = [];
+    if (result.labelDoseMode === 'all') {
+        const byDate = instances.reduce((acc, instance) => {
+            if (!acc[instance.date]) acc[instance.date] = [];
+            acc[instance.date].push(instance.time);
+            return acc;
+        }, {});
+        labels = Object.entries(byDate).map(([date, times]) =>
+            medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)))
+        );
+    } else {
+        labels = instances.map(instance => medicationLabelHtml(s, med, mem, instance.date, [instance.time]));
+    }
+
+    if (labels.length > 100 && !await appConfirm(`This will create ${labels.length} labels. Continue?`, 'Large Label Print Job')) {
+        return;
+    }
+    previewLabelHtml(labels.join(''));
 };
 
 window.printInventoryLabel = function(medId) {
