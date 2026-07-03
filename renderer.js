@@ -1,9 +1,10 @@
-const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [] };
+const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [] };
 let db = { ...emptyDb };
 let currentEditingMedId = null;
 let currentEditingMemberId = null;
 const notifiedDoseKeys = new Set();
 const componentUnitOptions = ['mg', 'mL', 'mg/mL', 'mg/g', 'mEq', 'IU', 'mcg', 'g', 'g/g', '%', 'units', 'U/mL', 'CFU'];
+const componentPerUnitOptions = ['', 'mL', 'tablet', 'capsule', 'packet', 'spray', 'drop', 'inhalation', 'patch', 'suppository'];
 const formulationDoseUnits = {
     Tablets: 'tablet',
     Capsules: 'capsule',
@@ -332,13 +333,59 @@ function getComponentUnit(component, med) {
     return component.unit || med.units || 'mg';
 }
 
+function formatComponentStrength(component, med, includeName = false) {
+    const name = includeName && component.name ? `${component.name} ` : '';
+    const rawStrength = Number.isFinite(parseAmount(component.strengthAmount, NaN))
+        ? parseAmount(component.strengthAmount)
+        : parseAmount(component.strength);
+    const perAmount = parseAmount(component.perAmount, NaN);
+    const denominator = component.perUnit && Number.isFinite(perAmount) && perAmount > 0
+        ? `/${formatAmount(perAmount)}${component.perUnit}`
+        : '';
+    return `${name}${formatAmount(rawStrength)}${getComponentUnit(component, med)}${denominator}`;
+}
+
+function sharedComponentDenominator(components) {
+    if (!Array.isArray(components) || components.length === 0) return null;
+    const firstAmount = parseAmount(components[0].perAmount, NaN);
+    const firstUnit = components[0].perUnit || '';
+    if (!firstUnit || !Number.isFinite(firstAmount) || firstAmount <= 0) return null;
+    const isShared = components.every(component =>
+        component.perUnit === firstUnit &&
+        parseAmount(component.perAmount, NaN) === firstAmount
+    );
+    return isShared ? { amount: firstAmount, unit: firstUnit } : null;
+}
+
+function formatCombinationStrength(med, includeNames = false) {
+    const components = med?.components || [];
+    const sharedDenominator = sharedComponentDenominator(components);
+    if (!sharedDenominator) {
+        return components.map(component => formatComponentStrength(component, med, includeNames)).join('/');
+    }
+    const numerators = components.map(component => {
+        const name = includeNames && component.name ? `${component.name} ` : '';
+        const rawStrength = Number.isFinite(parseAmount(component.strengthAmount, NaN))
+            ? parseAmount(component.strengthAmount)
+            : parseAmount(component.strength) * sharedDenominator.amount;
+        return `${name}${formatAmount(rawStrength)}${getComponentUnit(component, med)}`;
+    });
+    return `${numerators.join('/')}/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}`;
+}
+
+function formatInventoryUnits(med) {
+    if (!med?.isCombination || !Array.isArray(med.components) || med.components.length === 0) {
+        return med?.units || '';
+    }
+    const units = Array.from(new Set(med.components.map(component => getComponentUnit(component, med)).filter(Boolean)));
+    const sharedDenominator = sharedComponentDenominator(med.components);
+    return `${units.join('/')}${sharedDenominator ? `/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}` : ''}`;
+}
+
 function formatMedStrength(med, includeNames = false) {
     if (!med) return '';
     if (med.isCombination && med.components && med.components.length > 0) {
-        return med.components.map(component => {
-            const name = includeNames && component.name ? `${component.name} ` : '';
-            return `${name}${formatAmount(parseAmount(component.strength))}${getComponentUnit(component, med)}`;
-        }).join('/');
+        return formatCombinationStrength(med, includeNames);
     }
     if (Number.isFinite(parseAmount(med.strengthAmount, NaN)) && med.activeUnit) {
         if (med.perUnit && Number.isFinite(parseAmount(med.perAmount, NaN))) {
@@ -1194,7 +1241,7 @@ window.openMemberModal = function(id = null) {
     const notifyEnabled = document.getElementById('m-notify-enabled');
     const emailReminders = document.getElementById('m-email-reminders');
     if (notifyEnabled) notifyEnabled.checked = true;
-    if (emailReminders) emailReminders.checked = true;
+    if (emailReminders) emailReminders.checked = false;
     renderMemberCareLists();
     renderMemberMonitoringProfiles(null);
     
@@ -1225,7 +1272,7 @@ window.openMemberModal = function(id = null) {
             safeSet('m-calendar-color', m.calendarColor || (m.sex === 'Female' ? '#8b1558' : '#000080'));
             const notifications = m.notificationPrefs || {};
             if (notifyEnabled) notifyEnabled.checked = notifications.medicationReminders !== false;
-            if (emailReminders) emailReminders.checked = notifications.emailReminders !== false;
+            if (emailReminders) emailReminders.checked = notifications.emailReminders === true;
             setHiddenJson('m-prescriber-ids-data', memberPrescriberIds(m));
             setHiddenJson('m-diagnoses-data', normalizeMemberDiagnoses(m));
             renderMemberCareLists();
@@ -1295,7 +1342,7 @@ window.openMemberModal = function(id = null) {
                 const itemRows = set.items.map((item, itemIndex) => {
                     const med = db.inventory.find(inv => inv.id === item.medId);
                     const schedule = setSchedules[itemIndex] || setSchedules.find(candidate => candidate.medId === item.medId);
-                    return `<div style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} - ${escapeHtml(formatQtyForSchedule(item, med || {}))} | ${escapeHtml(item.freq)} ${escapeHtml(getScheduleTimes(item).join(', ') || 'PRN')}${escapeHtml(prnLimitText(item))}
+                    return `<div style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, item.doseQty)) : 'Unknown'} | Qty: ${escapeHtml(formatQtyForSchedule(item, med || {}))} | ${escapeHtml(item.freq)} ${escapeHtml(getScheduleTimes(item).join(', ') || 'PRN')}${escapeHtml(prnLimitText(item))}
                         ${schedule ? `<div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>` : ''}
                         ${schedule ? `<div style="text-align:right; margin-top:3px;"><button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button></div>` : ''}
                     </div>`;
@@ -1322,8 +1369,8 @@ window.openMemberModal = function(id = null) {
                 div.className = 'sunken-panel';
                 div.style.cssText = "padding:5px; margin-bottom:5px; cursor:pointer; background:white; border:1px inset gray;";
                 div.innerHTML = `
-                    <strong>${med ? med.name : 'Unknown'} ${med ? formatMedStrength(med) : ''}</strong> - ${med ? formatQtyForSchedule(s, med) : s.doseQty}<br>
-                    <small>${s.freq} | ${getScheduleTimes(s).join(', ') || 'PRN'}${escapeHtml(prnLimitText(s))}</small>
+                    <strong>${med ? med.name : 'Unknown'} ${med ? formatMedStrength(med) : ''}</strong><br>
+                    <small>Dose: ${med ? escapeHtml(formatPrescribedDose(med, s.doseQty)) : 'Unknown'} | Qty: ${med ? escapeHtml(formatQtyForSchedule(s, med)) : escapeHtml(s.doseQty)} | ${escapeHtml(s.freq)} ${escapeHtml(getScheduleTimes(s).join(', ') || 'PRN')}${escapeHtml(prnLimitText(s))}</small>
                     <div class="member-med-timeline" data-schedule-id="${s.id}"></div>
                     <div style="text-align:right; margin-top:5px;">
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
@@ -1429,7 +1476,7 @@ window.saveMember = async function() {
         prescriberIds,
         notificationPrefs: {
             medicationReminders: document.getElementById('m-notify-enabled')?.checked !== false,
-            emailReminders: document.getElementById('m-email-reminders')?.checked !== false
+            emailReminders: document.getElementById('m-email-reminders')?.checked === true
         },
         calendarColor: document.getElementById('m-calendar-color').value || '#000080',
         vitalGoals,
@@ -1483,16 +1530,33 @@ window.addInventory = async function() {
 
     if (isCombo) {
         const rows = document.querySelectorAll('#ingredient-list .combo-row');
+        let invalidComponentDenominator = false;
         rows.forEach(row => {
             const componentName = row.querySelector('.ing-name').value.trim();
-            const componentStrength = parseAmount(row.querySelector('.ing-strength').value, NaN);
+            const componentStrengthAmount = parseAmount(row.querySelector('.ing-strength').value, NaN);
             const componentUnit = row.querySelector('.ing-unit').value;
-            if (componentName && !isNaN(componentStrength)) {
-                components.push({ name: componentName, strength: componentStrength, unit: componentUnit });
+            const componentPerAmount = parseAmount(row.querySelector('.ing-per-amount')?.value, NaN);
+            const componentPerUnit = row.querySelector('.ing-per-unit')?.value || '';
+            if (componentPerUnit && (!Number.isFinite(componentPerAmount) || componentPerAmount <= 0)) {
+                invalidComponentDenominator = true;
+            }
+            if (componentName && Number.isFinite(componentStrengthAmount)) {
+                const hasDenominator = componentPerUnit && Number.isFinite(componentPerAmount) && componentPerAmount > 0;
+                components.push({
+                    name: componentName,
+                    strength: hasDenominator ? componentStrengthAmount / componentPerAmount : componentStrengthAmount,
+                    strengthAmount: componentStrengthAmount,
+                    unit: componentUnit,
+                    perAmount: hasDenominator ? componentPerAmount : null,
+                    perUnit: hasDenominator ? componentPerUnit : ''
+                });
             }
         });
+        if (invalidComponentDenominator) return alert("Each ingredient with a per-unit needs a volume or quantity greater than 0.");
         if (components.length === 0) return alert("Add at least one valid active ingredient.");
-        finalStrength = components.map(c => `${formatAmount(c.strength)}${c.unit}`).join('/');
+        const combinationMed = { isCombination: true, components, units: activeUnit };
+        finalStrength = formatCombinationStrength(combinationMed);
+        finalUnits = formatInventoryUnits(combinationMed);
         displayStrength = finalStrength;
     } else if (!Number.isFinite(strengthAmount) || strengthAmount <= 0) {
         return alert("Strength required.");
@@ -1663,10 +1727,17 @@ window.addModalIngredientRow = function(component = null) {
     const unitOptions = componentUnitOptions
         .map(unit => `<option value="${unit}" ${unit === selectedUnit ? 'selected' : ''}>${unit}</option>`)
         .join('');
+    const selectedPerUnit = component?.perUnit || (document.getElementById('modal-formulation')?.value === 'mL' ? 'mL' : '');
+    const perUnitOptions = componentPerUnitOptions
+        .map(unit => `<option value="${unit}" ${unit === selectedPerUnit ? 'selected' : ''}>${unit || 'unit'}</option>`)
+        .join('');
     row.innerHTML = `
         <input class="modal-ing-name" type="text" placeholder="Ingredient" style="width:130px;" value="${escapeHtml(component?.name || '')}">
-        <input class="modal-ing-strength" type="number" min="0" step="any" placeholder="Strength" style="width:75px;" value="${escapeHtml(component?.strength ?? '')}">
+        <input class="modal-ing-strength" type="number" min="0" step="any" placeholder="Strength" style="width:75px;" value="${escapeHtml(component?.strengthAmount ?? component?.strength ?? '')}">
         <select class="modal-ing-unit" style="width:80px;">${unitOptions}</select>
+        <span>per</span>
+        <input class="modal-ing-per-amount" type="number" min="0.001" step="any" style="width:58px;" value="${escapeHtml(component?.perAmount ?? '1')}">
+        <select class="modal-ing-per-unit" style="width:80px;">${perUnitOptions}</select>
         <button type="button" class="modal-ing-remove">Remove</button>`;
     row.querySelector('.modal-ing-remove').onclick = () => row.remove();
     container.appendChild(row);
@@ -1697,6 +1768,11 @@ window.updateMedProfileMode = function() {
                 : (formulationDoseUnits[formulation] || formulation || 'unit');
         }
         if (behavior) behavior.dataset.formulation = formulation;
+        if (formulation === 'mL') {
+            document.querySelectorAll('#modal-ingredient-list .modal-ing-per-unit').forEach(select => {
+                if (!select.value) select.value = 'mL';
+            });
+        }
     }
     if (isTopical && behavior) behavior.value = 'container-finish';
     if (behavior) behavior.disabled = isTopical;
@@ -1769,17 +1845,35 @@ window.saveMedProfile = async function() {
         let perUnit = '';
 
         if (isCombination) {
-            components = Array.from(document.querySelectorAll('#modal-ingredient-list .modal-combo-row')).map(row => ({
-                name: row.querySelector('.modal-ing-name').value.trim(),
-                strength: parseAmount(row.querySelector('.modal-ing-strength').value, NaN),
-                unit: row.querySelector('.modal-ing-unit').value
-            })).filter(component => component.name && Number.isFinite(component.strength));
+            let invalidComponentDenominator = false;
+            components = Array.from(document.querySelectorAll('#modal-ingredient-list .modal-combo-row')).map(row => {
+                const strengthAmountValue = parseAmount(row.querySelector('.modal-ing-strength').value, NaN);
+                const componentPerAmount = parseAmount(row.querySelector('.modal-ing-per-amount')?.value, NaN);
+                const componentPerUnit = row.querySelector('.modal-ing-per-unit')?.value || '';
+                if (componentPerUnit && (!Number.isFinite(componentPerAmount) || componentPerAmount <= 0)) {
+                    invalidComponentDenominator = true;
+                }
+                const hasDenominator = componentPerUnit && Number.isFinite(componentPerAmount) && componentPerAmount > 0;
+                return {
+                    name: row.querySelector('.modal-ing-name').value.trim(),
+                    strength: hasDenominator ? strengthAmountValue / componentPerAmount : strengthAmountValue,
+                    strengthAmount: strengthAmountValue,
+                    unit: row.querySelector('.modal-ing-unit').value,
+                    perAmount: hasDenominator ? componentPerAmount : null,
+                    perUnit: hasDenominator ? componentPerUnit : ''
+                };
+            }).filter(component => component.name && Number.isFinite(component.strength));
+            if (invalidComponentDenominator) {
+                await appAlert('Each ingredient with a per-unit needs a volume or quantity greater than 0.');
+                return;
+            }
             if (components.length === 0) {
                 await appAlert('Add at least one valid active ingredient.');
                 return;
             }
-            med.strength = components.map(component => `${formatAmount(component.strength)}${component.unit}`).join('/');
-            med.units = components.map(component => component.unit).join('/');
+            const combinationMed = { ...med, isCombination: true, components };
+            med.strength = formatCombinationStrength(combinationMed);
+            med.units = formatInventoryUnits(combinationMed);
             med.displayStrength = med.strength;
         } else {
             strengthAmount = parseAmount(document.getElementById('modal-strength').value, NaN);
@@ -1819,7 +1913,7 @@ window.saveMedProfile = async function() {
             || (med.inventoryBehavior === 'container-finish' ? 'container' : formulationDoseUnits[formulation] || formulation);
         med.administrationUnit = document.getElementById('modal-administration-unit').value.trim()
             || formulationDoseUnits[formulation] || formulation;
-        med.isLiquid = !isCombination && (med.units.includes('/') || formulation === 'mL');
+        med.isLiquid = formulation === 'mL' || (!isCombination && med.units.includes('/'));
         if (parseAmount(med.stock) > parseAmount(med.maxCapacity)) med.maxCapacity = med.stock;
 
         // 2. Handle Image Upload
@@ -3099,6 +3193,7 @@ function memberScheduleReportBody(member, startDate, endDate) {
                         <th style="width:60px;">Time</th>
                         <th>Medication</th>
                         <th>Strength</th>
+                        <th>Dose</th>
                         <th>Qty</th>
                         <th>Instructions</th>
                         <th>Comments</th>
@@ -3120,6 +3215,7 @@ function memberScheduleReportBody(member, startDate, endDate) {
                 <td>${escapeHtml(instance.time)}</td>
                 <td>${escapeHtml(med.name)}</td>
                 <td>${escapeHtml(formatMedStrength(med))}</td>
+                <td>${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</td>
                 <td>${escapeHtml(formatQtyForSchedule(schedule, med))}</td>
                 <td>${escapeHtml(schedule.instructions || '')}</td>
                 <td class="comment-cell"></td>
@@ -3345,34 +3441,65 @@ window.updateSchedStrength = function() {
 };
 
 //Scheduler checks every minute to see if any meds are due and sends a notification
+function reminderWasSent(key) {
+    return notifiedDoseKeys.has(key) || (Array.isArray(db.reminderLog) && db.reminderLog.includes(key));
+}
+
+function recordReminderSent(key) {
+    notifiedDoseKeys.add(key);
+    if (!Array.isArray(db.reminderLog)) db.reminderLog = [];
+    if (!db.reminderLog.includes(key)) db.reminderLog.push(key);
+}
+
+function pruneReminderLog(todayKey) {
+    if (!Array.isArray(db.reminderLog)) db.reminderLog = [];
+    const cutoff = parseLocal(todayKey);
+    cutoff.setDate(cutoff.getDate() - 14);
+    const cutoffKey = localDateKey(cutoff);
+    db.reminderLog = db.reminderLog.filter(key => String(key).slice(0, 10) >= cutoffKey);
+    notifiedDoseKeys.clear();
+    db.reminderLog.forEach(key => notifiedDoseKeys.add(key));
+}
+
 async function checkSchedules() {
     const now = new Date();
     const todayKey = localDateKey(now);
     const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    pruneReminderLog(todayKey);
+    let reminderLogChanged = false;
 
-    db.schedules.forEach(s => {
-        const reminderKey = `${todayKey}|${s.id}|${currentTime}`;
-        if (isScheduleDueOnDate(s, todayKey) && getScheduleTimes(s).includes(currentTime) && !isScheduleInstanceDocumented(s.id, todayKey, currentTime) && !notifiedDoseKeys.has(reminderKey)) {
-            const med = db.inventory.find(m => m.id === s.medId);
-            const member = db.family.find(f => f.id === s.memberId);
-            
-            if (med && member) {
-                notifiedDoseKeys.add(reminderKey);
-                const notificationPrefs = member.notificationPrefs || {};
-                if (notificationPrefs.medicationReminders !== false) {
-                    window.api.notify("Medication Due!", `${member.firstName} needs ${med.name} at ${currentTime}`);
-                }
+    for (const s of db.schedules) {
+        if (!isScheduleDueOnDate(s, todayKey) ||
+            !getScheduleTimes(s).includes(currentTime) ||
+            isScheduleInstanceDocumented(s.id, todayKey, currentTime)) continue;
 
-                if (member.email && notificationPrefs.emailReminders !== false) {
-                    window.api.sendEmail({
-                        to: member.email,
-                        subject: `PharmAtlas: Medication Reminder for ${member.firstName}`,
-                        body: `Hello, this is a reminder to take ${formatQtyForSchedule(s, med)} of ${med.name} (${formatMedStrength(med, true)}) at ${currentTime}.\nInstructions: ${s.instructions || 'None'}`
-                    });
-                }
-            }
+        const med = db.inventory.find(m => m.id === s.medId);
+        const member = db.family.find(f => f.id === s.memberId);
+        if (!med || !member) continue;
+
+        const notificationPrefs = member.notificationPrefs || {};
+        const reminderBaseKey = `${todayKey}|${member.id}|${med.id}|${currentTime}`;
+        const desktopKey = `${reminderBaseKey}|desktop`;
+        const emailKey = `${reminderBaseKey}|email`;
+
+        if (notificationPrefs.medicationReminders !== false && !reminderWasSent(desktopKey)) {
+            await Promise.resolve(window.api.notify("Medication Due!", `${member.firstName} needs ${med.name} at ${currentTime}`));
+            recordReminderSent(desktopKey);
+            reminderLogChanged = true;
         }
-    });
+
+        if (member.email && notificationPrefs.emailReminders === true && !reminderWasSent(emailKey)) {
+            await Promise.resolve(window.api.sendEmail({
+                to: member.email,
+                subject: `PharmAtlas: Medication Reminder for ${member.firstName}`,
+                body: `Hello, this is a reminder to take ${formatQtyForSchedule(s, med)} of ${med.name} (${formatMedStrength(med, true)}) at ${currentTime}.\nInstructions: ${s.instructions || 'None'}`
+            }));
+            recordReminderSent(emailKey);
+            reminderLogChanged = true;
+        }
+    }
+
+    if (reminderLogChanged) await window.api.save(db);
 }
 
 setInterval(checkSchedules, 60 * 1000); // Check every minute
@@ -4048,6 +4175,11 @@ window.updateInventoryEntryMode = function() {
             }
         }
         if (inventoryBehavior) inventoryBehavior.dataset.formulation = formulation;
+        if (formulation === 'mL') {
+            document.querySelectorAll('#ingredient-list .ing-per-unit').forEach(select => {
+                if (!select.value) select.value = 'mL';
+            });
+        }
     }
     if (isTopical && inventoryBehavior) inventoryBehavior.value = 'container-finish';
     if (inventoryBehavior) inventoryBehavior.disabled = isTopical;
@@ -4105,10 +4237,17 @@ window.addIngredientRow = function() {
     div.className = 'field-row combo-row';
     div.style.marginBottom = '5px';
     const unitOptions = componentUnitOptions.map(unit => `<option value="${unit}">${unit}</option>`).join('');
+    const defaultPerUnit = document.getElementById('med-formulation')?.value === 'mL' ? 'mL' : '';
+    const perUnitOptions = componentPerUnitOptions
+        .map(unit => `<option value="${unit}" ${unit === defaultPerUnit ? 'selected' : ''}>${unit || 'unit'}</option>`)
+        .join('');
     div.innerHTML = `
         <input class="ing-name" type="text" placeholder="Name (e.g. APAP)" style="width:100px;">
         <input class="ing-strength" type="number" min="0" step="any" placeholder="Str" style="width:60px;">
         <select class="ing-unit" style="width:75px;">${unitOptions}</select>
+        <span>per</span>
+        <input class="ing-per-amount" type="number" min="0.001" step="any" value="1" style="width:55px;">
+        <select class="ing-per-unit" style="width:80px;">${perUnitOptions}</select>
         <button onclick="this.parentElement.remove()">X</button>
     `;
     container.appendChild(div);
@@ -4118,7 +4257,7 @@ function inventorySearchText(med) {
     return [
         med.name,
         formatMedStrength(med),
-        med.units,
+        formatInventoryUnits(med),
         inventoryUnitFor(med),
         med.expiry,
         med.storage,
@@ -4203,7 +4342,7 @@ filteredInventory.forEach(med => {
                 <span style="cursor:pointer; text-decoration:underline;" onclick="openMedProfile('${med.id}')">${med.name}</span>
             </td>
             <td>${displayStrength}</td> 
-            <td>${med.units}</td>
+            <td>${escapeHtml(formatInventoryUnits(med))}</td>
             <td>${formatAmount(parseAmount(med.stock))} ${escapeHtml(inventoryUnitFor(med))}</td>
             <td>${med.minThreshold}</td>
             <td>${med.expiry || 'N/A'}</td> <!-- NEW EXPIRATION COLUMN -->

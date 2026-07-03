@@ -5,6 +5,19 @@ const nodemailer = require('nodemailer');
 
 if (require('electron-squirrel-startup')) app.quit();
 
+let win;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        if (!win) return;
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+    });
+}
+
 // 1. Setup Transporter
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -20,8 +33,6 @@ const dataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
 const dbPath = path.join(dataDir, 'db.json');
 
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-let win; 
 
 function createWindow() {
     const { screen } = require('electron');

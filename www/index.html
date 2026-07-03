@@ -243,6 +243,7 @@
                         <!-- Inside panel-inventory fieldset -->
                         <div id="combination-fields" style="display:none; margin-top:10px; border:1px dashed gray; padding:10px; background:#f0f0f0;">
                             <strong>Active Ingredients:</strong>
+                            <span class="form-help">For liquids, enter each ingredient amount and the shared volume, such as 100 mg per 5 mL.</span>
                             <div id="ingredient-list">
                                 <!-- Dynamic ingredient rows go here -->
                             </div>
@@ -616,7 +617,7 @@
                     <legend>Notifications</legend>
                     <div class="notification-toggle-list">
                         <label class="notification-toggle"><input id="m-notify-enabled" type="checkbox" checked><span>Medication reminders</span></label>
-                        <label class="notification-toggle"><input id="m-email-reminders" type="checkbox" checked><span>Email reminders</span></label>
+                        <label class="notification-toggle"><input id="m-email-reminders" type="checkbox"><span>Email reminders (opt in)</span></label>
                     </div>
                 </fieldset>
                 <input id="m-prescriber-ids-data" type="hidden">
