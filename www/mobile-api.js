@@ -3,7 +3,7 @@
 
     const dbKey = 'pharmatlas-db';
     const imagePrefix = 'pharmatlas-image:';
-    const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [] };
+    const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [] };
 
     function getMimeType(fileName) {
         const lower = String(fileName || '').toLowerCase();

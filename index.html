@@ -25,6 +25,7 @@
             <menu role="tablist">
                 <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')">Dashboard</a></li>
                 <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')">Schedule Medications</a></li>
+                <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')">Prepackage Meds</a></li>
                 <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Order Sets</a></li>
                 <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Monitoring</a></li>
                 <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')">Inventory</a></li>
@@ -116,6 +117,8 @@
                                 <option value="Nightly">Nightly</option>
                                 <option value="QOD">QOD (Every Other Day)</option>
                                 <option value="QW">Once Weekly</option>
+                                <option value="QXW">Every X Weeks</option>
+                                <option value="XPW">X Times Per Week</option>
                                 <option value="QXH">Every X Hours</option>
                                 <option value="PRN">PRN (As Needed)</option>
                                 <option value="Monthly">Once Monthly</option>
@@ -126,6 +129,22 @@
                             <div id="sched-interval-container" style="display:none;">
                                 <label>Every:</label><input id="sched-interval-hours" type="number" min="1" max="24" step="1" value="8" style="width:45px;"> <span>hrs</span>
                             </div>
+                        </div>
+                        <div id="sched-week-interval-container" class="field-row" style="display:none; margin-top:8px;">
+                            <label>Every:</label><input id="sched-interval-weeks" type="number" min="1" max="52" step="1" value="2" style="width:48px;"><span>weeks</span>
+                        </div>
+                        <div id="sched-weekly-count-container" class="field-row" style="display:none; margin-top:8px;">
+                            <label>Times per week:</label><input id="sched-times-per-week" type="number" min="1" max="7" step="1" value="3" style="width:48px;">
+                        </div>
+                        <div id="sched-weekday-container" class="weekday-picker" style="display:none; margin-top:8px;">
+                            <span>Days:</span>
+                            <span class="weekday-option"><input id="sched-weekday-0" type="checkbox" value="0"><label for="sched-weekday-0">Sun</label></span>
+                            <span class="weekday-option"><input id="sched-weekday-1" type="checkbox" value="1"><label for="sched-weekday-1">Mon</label></span>
+                            <span class="weekday-option"><input id="sched-weekday-2" type="checkbox" value="2"><label for="sched-weekday-2">Tue</label></span>
+                            <span class="weekday-option"><input id="sched-weekday-3" type="checkbox" value="3"><label for="sched-weekday-3">Wed</label></span>
+                            <span class="weekday-option"><input id="sched-weekday-4" type="checkbox" value="4"><label for="sched-weekday-4">Thu</label></span>
+                            <span class="weekday-option"><input id="sched-weekday-5" type="checkbox" value="5"><label for="sched-weekday-5">Fri</label></span>
+                            <span class="weekday-option"><input id="sched-weekday-6" type="checkbox" value="6"><label for="sched-weekday-6">Sat</label></span>
                         </div>
                         <div id="sched-prn-limit-container" class="field-row" style="display:none; margin-top:8px;">
                             <label>PRN Max:</label>
@@ -154,6 +173,31 @@
 
                 </div>
 
+                <div id="panel-prepackage" style="display:none;">
+                    <div class="field-row prepack-filter-row">
+                        <label for="prepack-member-filter">Member:</label>
+                        <select id="prepack-member-filter" onchange="renderPrepackageQueues()">
+                            <option value="">All members</option>
+                        </select>
+                    </div>
+                    <div class="prepack-layout">
+                        <fieldset>
+                            <legend>Active Prepack Queues</legend>
+                            <div id="prepack-active-list" class="sunken-panel prepack-queue-list"></div>
+                        </fieldset>
+                        <fieldset>
+                            <legend>Prepack Workspace</legend>
+                            <div id="prepack-workspace" class="prepack-workspace">
+                                <div class="empty-state">Select an active prepack queue.</div>
+                            </div>
+                        </fieldset>
+                    </div>
+                    <fieldset>
+                        <legend>Completed Prepackages</legend>
+                        <div id="prepack-completed-list" class="sunken-panel prepack-completed-list"></div>
+                    </fieldset>
+                </div>
+
                 <!-- 3. ORDER SETS -->
                 <div id="panel-order-sets" style="display: none;">
                     <fieldset>
@@ -174,9 +218,19 @@
                             </span>
                         </div>
                     </fieldset>
+                    <div class="field-row order-set-filter-row">
+                        <label for="order-set-member-filter">Assigned member:</label>
+                        <select id="order-set-member-filter" onchange="renderOrderSets()">
+                            <option value="">All members</option>
+                        </select>
+                    </div>
                     <fieldset>
-                        <legend>Saved Order Sets</legend>
-                        <div id="order-set-list" class="sunken-panel" style="height:300px; overflow-y:auto; background:white;"></div>
+                        <legend>Reusable Order Sets</legend>
+                        <div id="order-set-template-list" class="sunken-panel order-set-list"></div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>Assigned Order Sets</legend>
+                        <div id="order-set-assigned-list" class="sunken-panel order-set-list"></div>
                     </fieldset>
                 </div>
 
@@ -239,6 +293,11 @@
                         <div class="field-row">
                             <label>Photo:</label>
                             <input id="med-image-input" type="file" accept="image/*" />
+                        </div>
+                        <div class="field-row">
+                            <label for="med-barcode-code">QR code:</label>
+                            <input id="med-barcode-code" type="text" style="width:220px;" placeholder="Generated automatically">
+                            <button type="button" onclick="generateMedicationCode('med-barcode-code')">Generate</button>
                         </div>
                         <!-- Inside panel-inventory fieldset -->
                         <div id="combination-fields" style="display:none; margin-top:10px; border:1px dashed gray; padding:10px; background:#f0f0f0;">
@@ -507,6 +566,11 @@
                         <label>Prescriber:</label>
                         <select id="modal-prescriber" style="width:150px;"></select>
                     </div>
+                    <div class="field-row">
+                        <label for="modal-barcode-code">QR code:</label>
+                        <input id="modal-barcode-code" type="text" style="width:170px;">
+                        <button type="button" onclick="generateMedicationCode('modal-barcode-code')">Generate</button>
+                    </div>
                 </div>
             </div>
             <fieldset class="med-profile-details">
@@ -531,7 +595,8 @@
                         <option value="Drops">Drops</option>
                         <option value="Other">Unit Dose</option>
                     </select>
-                    <label><input id="modal-is-combination" type="checkbox" onchange="updateMedProfileMode()"> Combination product</label>
+                    <input id="modal-is-combination" type="checkbox" onchange="updateMedProfileMode()">
+                    <label for="modal-is-combination">Combination product</label>
                 </div>
                 <div id="modal-single-strength-fields" class="field-row" style="margin-top:6px;">
                     <label>Strength:</label><input id="modal-strength" type="number" min="0" step="any" style="width:80px;">
@@ -616,8 +681,14 @@
                 <fieldset class="profile-notification-options">
                     <legend>Notifications</legend>
                     <div class="notification-toggle-list">
-                        <label class="notification-toggle"><input id="m-notify-enabled" type="checkbox" checked><span>Medication reminders</span></label>
-                        <label class="notification-toggle"><input id="m-email-reminders" type="checkbox"><span>Email reminders (opt in)</span></label>
+                        <div class="notification-toggle">
+                            <input id="m-notify-enabled" type="checkbox" checked>
+                            <label for="m-notify-enabled">Medication reminders</label>
+                        </div>
+                        <div class="notification-toggle">
+                            <input id="m-email-reminders" type="checkbox">
+                            <label for="m-email-reminders">Email reminders (opt in)</label>
+                        </div>
                     </div>
                 </fieldset>
                 <input id="m-prescriber-ids-data" type="hidden">
@@ -672,6 +743,11 @@
             </fieldset>
 
             <fieldset style="margin-top:10px;">
+                <legend>PRN Medication Orders</legend>
+                <div id="member-prn-meds-list"></div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
                 <legend>Medication Calendar</legend>
                 <div class="calendar-controls">
                     <button type="button" onclick="shiftMemberCalendar(-7)">Previous 7 Days</button>
@@ -723,6 +799,8 @@
                     <option value="Nightly">Nightly</option>
                     <option value="QOD">QOD</option>
                     <option value="QW">Once Weekly</option>
+                    <option value="QXW">Every X Weeks</option>
+                    <option value="XPW">X Times Per Week</option>
                     <option value="QXH">Every X Hours</option>
                     <option value="PRN">PRN</option>
                     <option value="Monthly">Once Monthly</option>
@@ -730,6 +808,18 @@
             </div>
             <div id="mod-qod-start-container" class="field-row-stacked" style="display:none;"><label>Every Other Day Start</label><input id="mod-qod-start-date" type="date"></div>
             <div id="mod-interval-container" class="field-row" style="display:none;"><label>Every:</label><input id="mod-interval-hours" type="number" min="1" max="24" step="1" value="8" style="width:45px;"><span>hrs</span></div>
+            <div id="mod-week-interval-container" class="field-row" style="display:none;"><label>Every:</label><input id="mod-interval-weeks" type="number" min="1" max="52" step="1" value="2" style="width:45px;"><span>weeks</span></div>
+            <div id="mod-weekly-count-container" class="field-row" style="display:none;"><label>Times per week:</label><input id="mod-times-per-week" type="number" min="1" max="7" step="1" value="3" style="width:45px;"></div>
+            <div id="mod-weekday-container" class="weekday-picker" style="display:none;">
+                <span>Days:</span>
+                <span class="weekday-option"><input id="mod-weekday-0" type="checkbox" value="0"><label for="mod-weekday-0">Sun</label></span>
+                <span class="weekday-option"><input id="mod-weekday-1" type="checkbox" value="1"><label for="mod-weekday-1">Mon</label></span>
+                <span class="weekday-option"><input id="mod-weekday-2" type="checkbox" value="2"><label for="mod-weekday-2">Tue</label></span>
+                <span class="weekday-option"><input id="mod-weekday-3" type="checkbox" value="3"><label for="mod-weekday-3">Wed</label></span>
+                <span class="weekday-option"><input id="mod-weekday-4" type="checkbox" value="4"><label for="mod-weekday-4">Thu</label></span>
+                <span class="weekday-option"><input id="mod-weekday-5" type="checkbox" value="5"><label for="mod-weekday-5">Fri</label></span>
+                <span class="weekday-option"><input id="mod-weekday-6" type="checkbox" value="6"><label for="mod-weekday-6">Sat</label></span>
+            </div>
             <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span></div>
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
             <div class="field-row-stacked"><label>Instructions</label><textarea id="mod-instr" rows="3"></textarea></div>
@@ -752,12 +842,14 @@
             <div class="window-body">
                 <div id="label-preview-content" class="sunken-panel"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:8px;">
+                    <button id="schedule-prepack-button" type="button" style="display:none;" onclick="schedulePendingPrepack()">Schedule Prepack</button>
                     <button onclick="printPreviewedLabel()">Print</button>
                     <button onclick="closeLabelPreview()">Cancel</button>
                 </div>
             </div>
         </div>
     </div>
+    <script src="vendor/qrcode.js"></script>
     <script src="mobile-api.js"></script>
     <script src="renderer.js"></script>
 </body>

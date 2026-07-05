@@ -84,6 +84,19 @@ fieldset {
     margin-bottom: 15px;
 }
 
+.weekday-picker {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.weekday-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    white-space: nowrap;
+}
+
 .vital-chart-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(360px, max-content));
@@ -256,11 +269,230 @@ fieldset {
     font-size: 11px;
 }
 
+.notification-toggle label {
+    white-space: nowrap;
+}
+
 .notification-toggle input[type="checkbox"] {
     width: 13px;
     height: 13px;
     flex: 0 0 auto;
     margin: 0;
+}
+
+.order-set-filter-row {
+    justify-content: flex-end;
+    margin: 4px 0 8px;
+}
+
+.order-set-list {
+    min-height: 110px;
+    max-height: 230px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.prepack-filter-row {
+    justify-content: flex-end;
+    margin-bottom: 6px;
+}
+
+.prepack-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 30%) minmax(0, 1fr);
+    gap: 8px;
+}
+
+.prepack-layout fieldset {
+    min-width: 0;
+}
+
+.prepack-queue-list {
+    height: 430px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.prepack-completed-list {
+    min-height: 80px;
+    max-height: 180px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.prepack-queue-row {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 5px 7px;
+    text-align: left;
+}
+
+.prepack-queue-row.selected {
+    outline: 2px solid #000080;
+    outline-offset: -3px;
+}
+
+.prepack-queue-row.completed,
+.prepack-complete-banner {
+    background: #c8f0c8;
+    color: #005000;
+}
+
+.prepack-workspace {
+    min-height: 430px;
+}
+
+.prepack-workspace-header,
+.prepack-scanner,
+.prepack-day-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.prepack-workspace-header {
+    justify-content: space-between;
+    border-bottom: 1px solid #808080;
+    padding-bottom: 6px;
+}
+
+.prepack-day-strip {
+    margin: 8px 0;
+}
+
+.prepack-day-button {
+    min-width: 60px;
+}
+
+.prepack-day-button.active {
+    font-weight: bold;
+    outline: 2px solid #000080;
+}
+
+.prepack-day-button.completed {
+    background: #c8f0c8;
+    color: #005000;
+}
+
+.prepack-day-button.needs-reprint,
+.prepack-reprint-warning {
+    background: #fff0a8;
+    color: #700000;
+}
+
+.prepack-scanner {
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #c0c0c0;
+}
+
+.prepack-scanner input {
+    width: min(320px, 100%);
+    font-family: monospace;
+}
+
+.prepack-complete-banner,
+.prepack-reprint-warning {
+    padding: 7px;
+    margin: 6px 0;
+    border: 1px solid #808080;
+    font-weight: bold;
+}
+
+.prepack-items {
+    margin-top: 8px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.prepack-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 48px;
+    padding: 5px;
+    border-bottom: 1px dotted #808080;
+}
+
+.prepack-item-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.prepack-mark {
+    width: 24px;
+    flex: 0 0 24px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.prepack-item-correct {
+    background: #c8f0c8;
+    color: #005000;
+}
+
+.prepack-item-wrong {
+    background: #ffd0d0;
+    color: #a00000;
+}
+
+.prepack-scan-error {
+    margin-top: 2px;
+    font-weight: bold;
+}
+
+.prepack-date-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.prepack-remove-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 6px 2px;
+    border-bottom: 1px dotted #808080;
+}
+
+.prepack-remove-option label {
+    flex: 1;
+}
+
+.prepack-remove-danger {
+    color: #b00000;
+    font-weight: bold;
+}
+
+.empty-state {
+    padding: 8px;
+    font-size: 11px;
+}
+
+.label-selection-list {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 6px;
+    background: #ffffff;
+}
+
+.label-selection-group {
+    border-bottom: 1px dotted #808080;
+    padding: 4px 2px;
+}
+
+.label-selection-heading,
+.label-selection-item {
+    display: flex;
+    align-items: center;
+    min-height: 20px;
+}
+
+.label-selection-children {
+    margin-left: 22px;
 }
 
 .calendar-controls {
@@ -351,6 +583,11 @@ fieldset {
     padding-right: 4px;
 }
 
+#member-prn-meds-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
 #member-admin-log {
     height: 95px !important;
 }
@@ -391,7 +628,7 @@ fieldset {
 
 #label-preview-content .label-page {
     width: 2.25in;
-    min-height: 1.25in;
+    height: 1.25in;
     background: #ffffff;
     color: #000000;
     padding: 0.05in;
@@ -422,6 +659,44 @@ fieldset {
     line-height: 1.05;
     margin-top: 1px;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
+}
+
+#label-preview-content .order-set-label-row,
+#print-area .order-set-label-row {
+    border-top: 1px dotted #808080;
+    padding-top: 1px;
+    margin-top: 1px;
+}
+
+#label-preview-content .order-set-label-med,
+#print-area .order-set-label-med {
+    font-weight: bold;
+}
+
+.inventory-qr-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.03in;
+}
+
+.inventory-qr-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.inventory-label-qr {
+    width: 0.62in;
+    height: 0.62in;
+    flex: 0 0 0.62in;
+    image-rendering: pixelated;
+}
+
+.label-code {
+    margin-top: 2px;
+    font-family: monospace !important;
+    font-size: 5.5pt !important;
+    overflow-wrap: anywhere;
 }
 
 #label-preview-content .label-compact .label-title { font-size: 10pt; }
@@ -431,6 +706,16 @@ fieldset {
 #label-preview-content .label-dense .label-title { font-size: 9pt; }
 #label-preview-content .label-dense .label-small,
 #label-preview-content .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+#label-preview-content .label-ultra-dense { padding: 0.035in; }
+#label-preview-content .label-ultra-dense .label-date { font-size: 6.8pt; }
+#label-preview-content .label-ultra-dense .label-title { font-size: 7.8pt; line-height: 0.92; }
+#label-preview-content .label-ultra-dense .label-small,
+#label-preview-content .label-ultra-dense .label-med-row { font-size: 6.25pt; line-height: 0.88; }
+#label-preview-content .label-micro { padding: 0.025in; }
+#label-preview-content .label-micro .label-date { font-size: 6pt; }
+#label-preview-content .label-micro .label-title { font-size: 6.8pt; line-height: 0.86; }
+#label-preview-content .label-micro .label-small,
+#label-preview-content .label-micro .label-med-row { font-size: 5.35pt; line-height: 0.82; }
 
 /* Ensure the red text for low stock stands out */
 .low-stock-text {
@@ -654,6 +939,18 @@ fieldset {
     .med-timeline {
         grid-template-columns: repeat(7, minmax(60px, 1fr));
     }
+
+    .prepack-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .prepack-queue-list {
+        height: 180px;
+    }
+
+    .prepack-workspace {
+        min-height: 360px;
+    }
 }
 
 @media print {
@@ -695,11 +992,12 @@ fieldset {
         page-break-after: always !important;
         page-break-before: avoid !important;
     }
+    .inventory-qr-label { display: flex !important; }
     #print-area .label-page:last-of-type { page-break-after: avoid !important; }
     .label-date { font-weight: bold; border-bottom: 1px solid black; font-size: 8pt; margin-bottom: 1px; }
     .label-title { font-size: 11pt; font-weight: bold; line-height: 1.0; margin-top: 2px; overflow-wrap: anywhere; }
-    .label-small { font-size: 9pt; line-height: 1.05; margin-top: 1px; word-wrap: break-word; }
-    .label-med-row { font-size: 9pt; margin-bottom: 1px; word-wrap: break-word; line-height: 0.9; }
+    .label-small { font-size: 9pt; line-height: 1.05; margin-top: 1px; word-wrap: break-word; overflow-wrap: anywhere; }
+    .label-med-row { font-size: 9pt; margin-bottom: 1px; word-wrap: break-word; overflow-wrap: anywhere; line-height: 0.9; }
     .label-compact .label-title { font-size: 10pt; }
     .label-compact .label-small,
     .label-compact .label-med-row { font-size: 8pt; line-height: 1.0; }
@@ -707,4 +1005,14 @@ fieldset {
     .label-dense .label-title { font-size: 9pt; }
     .label-dense .label-small,
     .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+    .label-ultra-dense { padding: 0.035in !important; }
+    .label-ultra-dense .label-date { font-size: 6.8pt; }
+    .label-ultra-dense .label-title { font-size: 7.8pt; line-height: 0.92; }
+    .label-ultra-dense .label-small,
+    .label-ultra-dense .label-med-row { font-size: 6.25pt; line-height: 0.88; }
+    .label-micro { padding: 0.025in !important; }
+    .label-micro .label-date { font-size: 6pt; }
+    .label-micro .label-title { font-size: 6.8pt; line-height: 0.86; }
+    .label-micro .label-small,
+    .label-micro .label-med-row { font-size: 5.35pt; line-height: 0.82; }
 }

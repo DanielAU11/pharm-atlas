@@ -5,6 +5,19 @@ const nodemailer = require('nodemailer');
 
 if (require('electron-squirrel-startup')) app.quit();
 
+// Keep source runs isolated from the installed app so an older background
+// process cannot capture the dev launch or lock Chromium's cache.
+const runtimeProfileName = app.isPackaged ? 'PharmAtlas' : 'PharmAtlas-Dev';
+const localAppData = process.env.LOCALAPPDATA || app.getPath('appData');
+const runtimeDataDir = path.join(localAppData, runtimeProfileName);
+const sessionDataDir = path.join(runtimeDataDir, 'SessionData');
+const cacheDir = path.join(runtimeDataDir, 'Cache');
+fs.mkdirSync(sessionDataDir, { recursive: true });
+fs.mkdirSync(cacheDir, { recursive: true });
+app.setPath('userData', runtimeDataDir);
+app.setPath('sessionData', sessionDataDir);
+app.commandLine.appendSwitch('disk-cache-dir', cacheDir);
+
 let win;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -18,21 +31,37 @@ if (!hasSingleInstanceLock) {
     });
 }
 
-// 1. Setup Transporter
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: 'danielanthonyuribe@gmail.com',
-        pass: 'nmjv lyav hzsh tkbo' // Ensure this is a 16-character App Password
-    }
-});
-
-app.setAppUserModelId("com.squirrel.PharmAtlas.PharmAtlas");
+app.setAppUserModelId('com.squirrel.pharm_atlas.PharmAtlas');
 
 const dataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
 const dbPath = path.join(dataDir, 'db.json');
+const emailConfigPath = path.join(dataDir, 'email-config.json');
 
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+function loadEmailConfig() {
+    let savedConfig = {};
+    try {
+        if (fs.existsSync(emailConfigPath)) {
+            savedConfig = JSON.parse(fs.readFileSync(emailConfigPath, 'utf8').replace(/^\uFEFF/, ''));
+        }
+    } catch (error) {
+        console.error('Unable to read local email configuration:', error.message);
+    }
+
+    return {
+        user: process.env.PHARMATLAS_EMAIL_USER || savedConfig.user || '',
+        pass: process.env.PHARMATLAS_EMAIL_APP_PASSWORD || savedConfig.appPassword || savedConfig.pass || ''
+    };
+}
+
+const emailConfig = loadEmailConfig();
+const transporter = emailConfig.user && emailConfig.pass
+    ? nodemailer.createTransport({
+        service: 'gmail',
+        auth: emailConfig
+    })
+    : null;
 
 function createWindow() {
     const { screen } = require('electron');
@@ -65,9 +94,16 @@ function createWindow() {
 
 // 2. Email Function with better error logging
 async function sendEmailNotification(recipient, subject, text) {
+    if (!transporter) {
+        return {
+            success: false,
+            error: 'Email is not configured. Add email-config.json to the PharmAtlasData folder.'
+        };
+    }
+
     console.log(`Attempting to send email to: ${recipient}`);
     const mailOptions = {
-        from: 'danielanthonyuribe@gmail.com',
+        from: emailConfig.user,
         to: recipient,
         subject: subject,
         text: text
@@ -143,10 +179,17 @@ ipcMain.handle('save-pdf-report', async (event, { html, fileName }) => {
 
 ipcMain.handle('email-pdf-report', async (event, { html, fileName, to, subject, body }) => {
     const finalName = safePdfFileName(fileName);
+    if (!transporter) {
+        return {
+            success: false,
+            error: 'Email is not configured. Add email-config.json to the PharmAtlasData folder.'
+        };
+    }
+
     try {
         const pdfData = await renderPdfBuffer(html);
         await transporter.sendMail({
-            from: 'danielanthonyuribe@gmail.com',
+            from: emailConfig.user,
             to,
             subject,
             text: body,

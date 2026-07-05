@@ -1,4 +1,4 @@
-const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [] };
+const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [] };
 let db = { ...emptyDb };
 let currentEditingMedId = null;
 let currentEditingMemberId = null;
@@ -32,14 +32,17 @@ const defaultBpGoals = { systolicLow: 90, systolicHigh: 130, diastolicLow: 60, d
 let memberTimelineStart = null;
 let dashboardCalendarStart = localDateKey();
 let memberCalendarStart = localDateKey();
+let activePrepackQueueId = null;
 
 window.addEventListener('DOMContentLoaded', async () => {
     const loadedData = await window.api.load();
     db = { ...emptyDb, ...loadedData };
+    const medicationCodesAdded = ensureMedicationCodes();
     renderAll();
     renderFrequencyControls('sched');
     updateInventoryEntryMode();
     checkSchedules();
+    if (medicationCodesAdded) await window.api.save(db);
 });
 
 // Helper: Convert file to Base64 for saving
@@ -57,6 +60,56 @@ function localDateKey(date = new Date()) {
     return `${year}-${month}-${day}`;
 }
 
+function normalizeMedicationCode(value) {
+    return String(value || '').trim().toUpperCase();
+}
+
+function createMedicationCode() {
+    let code = '';
+    do {
+        code = `PA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    } while (db.inventory.some(med => normalizeMedicationCode(med.barcodeCode) === code));
+    return code;
+}
+
+function ensureMedicationCodes() {
+    let changed = false;
+    const used = new Set();
+    db.inventory.forEach(med => {
+        let code = normalizeMedicationCode(med.barcodeCode);
+        if (!code || used.has(code)) {
+            code = createMedicationCode();
+            med.barcodeCode = code;
+            changed = true;
+        } else if (med.barcodeCode !== code) {
+            med.barcodeCode = code;
+            changed = true;
+        }
+        used.add(code);
+    });
+    return changed;
+}
+
+window.generateMedicationCode = function(inputId) {
+    const input = document.getElementById(inputId);
+    if (input) input.value = createMedicationCode();
+};
+
+function medicationCodeIsAvailable(code, excludedMedId = '') {
+    const normalized = normalizeMedicationCode(code);
+    return normalized && !db.inventory.some(med =>
+        med.id !== excludedMedId && normalizeMedicationCode(med.barcodeCode) === normalized
+    );
+}
+
+function medicationQrDataUrl(code) {
+    if (typeof window.qrcode !== 'function') return '';
+    const qr = window.qrcode(0, 'M');
+    qr.addData(normalizeMedicationCode(code));
+    qr.make();
+    return qr.createDataURL(4, 1);
+}
+
 // Helper to parse "YYYY-MM-DD" as a local date (avoiding UTC shift)
 function parseLocal(dateStr) {
     if (!dateStr || dateStr === "Ongoing") return null;
@@ -66,7 +119,25 @@ function parseLocal(dateStr) {
 
 function daysBetween(dateA, dateB) {
     const oneDayMs = 1000 * 60 * 60 * 24;
-    return Math.floor((parseLocal(dateA) - parseLocal(dateB)) / oneDayMs);
+    const first = parseLocal(dateA);
+    const second = parseLocal(dateB);
+    if (!first || !second) return NaN;
+    const firstUtc = Date.UTC(first.getFullYear(), first.getMonth(), first.getDate());
+    const secondUtc = Date.UTC(second.getFullYear(), second.getMonth(), second.getDate());
+    return Math.floor((firstUtc - secondUtc) / oneDayMs);
+}
+
+function dateKeysInRange(startDate, endDate) {
+    const start = parseLocal(startDate);
+    const end = parseLocal(endDate);
+    if (!start || !end || end < start) return [];
+    const dates = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+        dates.push(localDateKey(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
 }
 
 function timeToMinutes(time) {
@@ -96,10 +167,28 @@ function generateIntervalTimes(startTime, intervalHours) {
     return times;
 }
 
+function weekStartDate(dateStr) {
+    const date = parseLocal(dateStr);
+    if (!date) return null;
+    date.setDate(date.getDate() - date.getDay());
+    date.setHours(0, 0, 0, 0);
+    return date;
+}
+
+function weeksBetweenDates(dateStr, anchorStr) {
+    const dateWeek = weekStartDate(dateStr);
+    const anchorWeek = weekStartDate(anchorStr);
+    if (!dateWeek || !anchorWeek) return NaN;
+    const dateUtc = Date.UTC(dateWeek.getFullYear(), dateWeek.getMonth(), dateWeek.getDate());
+    const anchorUtc = Date.UTC(anchorWeek.getFullYear(), anchorWeek.getMonth(), anchorWeek.getDate());
+    return Math.floor((dateUtc - anchorUtc) / (7 * 24 * 60 * 60 * 1000));
+}
+
 function isScheduleDueOnDate(schedule, dateStr) {
     if (!schedule || schedule.freq === 'PRN') return false;
     if (!schedule.startDate || dateStr < schedule.startDate) return false;
     if (schedule.endDate !== "Ongoing" && schedule.endDate && dateStr > schedule.endDate) return false;
+    if (Array.isArray(schedule.includedDates) && schedule.includedDates.length > 0 && !schedule.includedDates.includes(dateStr)) return false;
 
     if (schedule.freq === 'ONCE') {
         return dateStr === schedule.startDate;
@@ -114,6 +203,16 @@ function isScheduleDueOnDate(schedule, dateStr) {
     if (schedule.freq === 'QW') {
         const diff = daysBetween(dateStr, schedule.startDate);
         return diff >= 0 && diff % 7 === 0;
+    }
+
+    if (schedule.freq === 'QXW' || schedule.freq === 'XPW') {
+        const current = parseLocal(dateStr);
+        const weekdays = Array.isArray(schedule.weekdays) ? schedule.weekdays.map(Number) : [];
+        if (!current || !weekdays.includes(current.getDay())) return false;
+        if (schedule.freq === 'XPW') return true;
+        const weekDifference = weeksBetweenDates(dateStr, schedule.startDate);
+        const intervalWeeks = parseInt(schedule.intervalWeeks, 10) || 1;
+        return weekDifference >= 0 && weekDifference % intervalWeeks === 0;
     }
 
     if (schedule.freq === 'Monthly') {
@@ -136,7 +235,33 @@ function getScheduleTimes(schedule) {
 }
 
 function getExpectedTimeCount(freq) {
-    return { ONCE: 1, QD: 1, Nightly: 1, QOD: 1, QW: 1, Monthly: 1, BID: 2, TID: 3, QID: 4 }[freq] || 0;
+    return { ONCE: 1, QD: 1, Nightly: 1, QOD: 1, QW: 1, QXW: 1, XPW: 1, Monthly: 1, BID: 2, TID: 3, QID: 4 }[freq] || 0;
+}
+
+function formatFrequency(schedule) {
+    if (!schedule) return '';
+    const selectedDates = Array.isArray(schedule.includedDates) && schedule.includedDates.length > 0
+        ? ` on ${schedule.includedDates.length} selected date${schedule.includedDates.length === 1 ? '' : 's'}`
+        : '';
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const selectedDays = (schedule.weekdays || [])
+        .map(day => dayNames[Number(day)])
+        .filter(Boolean)
+        .join(', ');
+    if (schedule.freq === 'QXW') {
+        const interval = parseInt(schedule.intervalWeeks, 10) || 1;
+        return `Every ${interval} week${interval === 1 ? '' : 's'}${selectedDays ? ` on ${selectedDays}` : ''}${selectedDates}`;
+    }
+    if (schedule.freq === 'XPW') {
+        const count = parseInt(schedule.timesPerWeek, 10) || schedule.weekdays?.length || 1;
+        return `${count} time${count === 1 ? '' : 's'} per week${selectedDays ? ` on ${selectedDays}` : ''}${selectedDates}`;
+    }
+    return `${schedule.freq || ''}${selectedDates}`;
+}
+
+function scheduleExceptionText(schedule) {
+    const count = Array.isArray(schedule?.excludedInstances) ? schedule.excludedInstances.length : 0;
+    return count ? ` | ${count} excluded dose${count === 1 ? '' : 's'}` : '';
 }
 
 function defaultTimeForIndex(index, freq = '') {
@@ -153,6 +278,11 @@ function getFieldIds(prefix) {
             qodStart: 'mod-qod-start-date',
             intervalContainer: 'mod-interval-container',
             intervalHours: 'mod-interval-hours',
+            weekIntervalContainer: 'mod-week-interval-container',
+            intervalWeeks: 'mod-interval-weeks',
+            weeklyCountContainer: 'mod-weekly-count-container',
+            timesPerWeek: 'mod-times-per-week',
+            weekdayContainer: 'mod-weekday-container',
             prnContainer: 'mod-prn-limit-container',
             prnMaxDoses: 'mod-prn-max-doses',
             prnWindowHours: 'mod-prn-window-hours'
@@ -164,6 +294,11 @@ function getFieldIds(prefix) {
             qodStart: 'qod-start-date',
             intervalContainer: 'sched-interval-container',
             intervalHours: 'sched-interval-hours',
+            weekIntervalContainer: 'sched-week-interval-container',
+            intervalWeeks: 'sched-interval-weeks',
+            weeklyCountContainer: 'sched-weekly-count-container',
+            timesPerWeek: 'sched-times-per-week',
+            weekdayContainer: 'sched-weekday-container',
             prnContainer: 'sched-prn-limit-container',
             prnMaxDoses: 'sched-prn-max-doses',
             prnWindowHours: 'sched-prn-window-hours'
@@ -178,10 +313,22 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
 
     const qodContainer = document.getElementById(ids.qodContainer);
     const intervalContainer = document.getElementById(ids.intervalContainer);
+    const weekIntervalContainer = document.getElementById(ids.weekIntervalContainer);
+    const weeklyCountContainer = document.getElementById(ids.weeklyCountContainer);
+    const weekdayContainer = document.getElementById(ids.weekdayContainer);
     const prnContainer = document.getElementById(ids.prnContainer);
     if (qodContainer) qodContainer.style.display = freq === 'QOD' ? 'block' : 'none';
     if (intervalContainer) intervalContainer.style.display = freq === 'QXH' ? 'flex' : 'none';
+    if (weekIntervalContainer) weekIntervalContainer.style.display = freq === 'QXW' ? 'flex' : 'none';
+    if (weeklyCountContainer) weeklyCountContainer.style.display = freq === 'XPW' ? 'flex' : 'none';
+    if (weekdayContainer) weekdayContainer.style.display = ['QXW', 'XPW'].includes(freq) ? 'flex' : 'none';
     if (prnContainer) prnContainer.style.display = freq === 'PRN' ? 'flex' : 'none';
+    if (weekdayContainer && ['QXW', 'XPW'].includes(freq) && !weekdayContainer.querySelector('input:checked')) {
+        const startDate = document.getElementById(prefix === 'mod' ? 'mod-start' : 'sched-start')?.value || localDateKey();
+        const weekday = parseLocal(startDate)?.getDay() ?? new Date().getDay();
+        const checkbox = weekdayContainer.querySelector(`input[value="${weekday}"]`);
+        if (checkbox) checkbox.checked = true;
+    }
 
     container.innerHTML = '';
     if (freq === 'PRN') {
@@ -206,6 +353,11 @@ function collectFrequencyDetails(prefix) {
     const freq = document.getElementById(ids.freq).value;
     const intervalInput = document.getElementById(ids.intervalHours);
     const intervalHours = freq === 'QXH' ? parseInt(intervalInput.value, 10) : null;
+    const intervalWeeks = freq === 'QXW' ? parseInt(document.getElementById(ids.intervalWeeks)?.value, 10) : null;
+    const timesPerWeek = freq === 'XPW' ? parseInt(document.getElementById(ids.timesPerWeek)?.value, 10) : null;
+    const weekdays = ['QXW', 'XPW'].includes(freq)
+        ? Array.from(document.querySelectorAll(`#${ids.weekdayContainer} input[type="checkbox"]:checked`)).map(input => parseInt(input.value, 10)).sort()
+        : [];
     const prnMaxDoses = freq === 'PRN' ? parseInt(document.getElementById(ids.prnMaxDoses)?.value, 10) : null;
     const prnWindowHours = freq === 'PRN' ? parseInt(document.getElementById(ids.prnWindowHours)?.value, 10) : null;
     const rawTimes = Array.from(document.querySelectorAll(`#${ids.timeFields} .${prefix}-time-input`))
@@ -234,6 +386,26 @@ function collectFrequencyDetails(prefix) {
         }
         return { freq, times: generateIntervalTimes(rawTimes[0], intervalHours), intervalHours, startTime: rawTimes[0] };
     }
+    if (freq === 'QXW') {
+        if (!Number.isInteger(intervalWeeks) || intervalWeeks < 1 || intervalWeeks > 52) {
+            alert("Every X Weeks must be between 1 and 52 weeks.");
+            return null;
+        }
+        if (weekdays.length === 0) {
+            alert("Select at least one weekday for the Every X Weeks schedule.");
+            return null;
+        }
+    }
+    if (freq === 'XPW') {
+        if (!Number.isInteger(timesPerWeek) || timesPerWeek < 1 || timesPerWeek > 7) {
+            alert("Times per week must be between 1 and 7.");
+            return null;
+        }
+        if (weekdays.length !== timesPerWeek) {
+            alert(`Select exactly ${timesPerWeek} weekday${timesPerWeek === 1 ? '' : 's'}.`);
+            return null;
+        }
+    }
 
     const expected = getExpectedTimeCount(freq);
     if (rawTimes.length !== expected) {
@@ -247,7 +419,14 @@ function collectFrequencyDetails(prefix) {
         return null;
     }
 
-    return { freq, times: uniqueTimes, intervalHours: null };
+    return { freq, times: uniqueTimes, intervalHours: null, intervalWeeks, timesPerWeek, weekdays };
+}
+
+function setWeekdaySelections(containerId, weekdays = []) {
+    const selected = new Set((weekdays || []).map(Number));
+    document.querySelectorAll(`#${containerId} input[type="checkbox"]`).forEach(input => {
+        input.checked = selected.has(parseInt(input.value, 10));
+    });
 }
 
 function parseAmount(value, fallback = 0) {
@@ -357,7 +536,7 @@ function sharedComponentDenominator(components) {
     return isShared ? { amount: firstAmount, unit: firstUnit } : null;
 }
 
-function formatCombinationStrength(med, includeNames = false) {
+function formatCombinationStrength(med, includeNames = false, includeSolidDenominator = true) {
     const components = med?.components || [];
     const sharedDenominator = sharedComponentDenominator(components);
     if (!sharedDenominator) {
@@ -370,7 +549,11 @@ function formatCombinationStrength(med, includeNames = false) {
             : parseAmount(component.strength) * sharedDenominator.amount;
         return `${name}${formatAmount(rawStrength)}${getComponentUnit(component, med)}`;
     });
-    return `${numerators.join('/')}/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}`;
+    const isLiquidDenominator = ['mL', 'L'].includes(sharedDenominator.unit);
+    const denominator = includeSolidDenominator || isLiquidDenominator
+        ? `/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}`
+        : '';
+    return `${numerators.join('/')}${denominator}`;
 }
 
 function formatInventoryUnits(med) {
@@ -382,14 +565,18 @@ function formatInventoryUnits(med) {
     return `${units.join('/')}${sharedDenominator ? `/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}` : ''}`;
 }
 
-function formatMedStrength(med, includeNames = false) {
+function formatMedStrength(med, includeNames = false, includeSolidDenominator = true) {
     if (!med) return '';
     if (med.isCombination && med.components && med.components.length > 0) {
-        return formatCombinationStrength(med, includeNames);
+        return formatCombinationStrength(med, includeNames, includeSolidDenominator);
     }
     if (Number.isFinite(parseAmount(med.strengthAmount, NaN)) && med.activeUnit) {
         if (med.perUnit && Number.isFinite(parseAmount(med.perAmount, NaN))) {
-            return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}/${formatAmount(parseAmount(med.perAmount))}${med.perUnit}`;
+            const isLiquidDenominator = ['ml', 'l'].includes(String(med.perUnit).toLowerCase());
+            const denominator = includeSolidDenominator || isLiquidDenominator
+                ? `/${formatAmount(parseAmount(med.perAmount))}${med.perUnit}`
+                : '';
+            return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}${denominator}`;
         }
         return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}`;
     }
@@ -398,6 +585,10 @@ function formatMedStrength(med, includeNames = false) {
     }
     if (med.displayStrength) return med.displayStrength;
     return `${med.strength}${med.units}`;
+}
+
+function formatLabelMedStrength(med, includeNames = false) {
+    return formatMedStrength(med, includeNames, false);
 }
 
 function formatPrescribedDose(med, doseQty) {
@@ -420,8 +611,28 @@ function formatPrescribedDose(med, doseQty) {
 }
 
 function formatQtyForSchedule(schedule, med) {
-    const qty = formatAmount(parseAmount(schedule.doseQty));
-    return `${qty} ${med.administrationUnit || med.formulation || 'unit(s)'}`;
+    const numericQty = parseAmount(schedule.doseQty);
+    const qty = formatAmount(numericQty);
+    const rawUnit = med.administrationUnit || med.formulation || 'unit';
+    const pluralUnits = {
+        tablet: 'tablets',
+        capsule: 'capsules',
+        packet: 'packets',
+        spray: 'sprays',
+        drop: 'drops',
+        inhalation: 'inhalations',
+        patch: 'patches',
+        suppository: 'suppositories',
+        application: 'applications',
+        bottle: 'bottles',
+        container: 'containers',
+        tube: 'tubes',
+        jar: 'jars',
+        unit: 'units'
+    };
+    const unitKey = String(rawUnit).toLowerCase();
+    const unit = numericQty === 1 ? rawUnit : (pluralUnits[unitKey] || rawUnit);
+    return `${qty} ${unit}`;
 }
 
 function prnLimitText(schedule) {
@@ -486,7 +697,8 @@ function getScheduleInstancesForDate(schedule, dateStr) {
     return times
         .slice()
         .sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
-        .map(time => ({ date: dateStr, time, key: scheduleInstanceKey(schedule.id, dateStr, time) }));
+        .map(time => ({ date: dateStr, time, key: scheduleInstanceKey(schedule.id, dateStr, time) }))
+        .filter(instance => !(schedule.excludedInstances || []).includes(instance.key));
 }
 
 function getAvailableScheduleInstancesForDate(schedule, dateStr) {
@@ -591,9 +803,38 @@ function printPreparedArea() {
 }
 
 let pendingLabelHtml = '';
+let pendingPrepackDefinition = null;
 
-function previewLabelHtml(labelHtml) {
+function fitLabelPages(container) {
+    const densityClasses = ['label-compact', 'label-dense', 'label-ultra-dense', 'label-micro'];
+    container.querySelectorAll('.label-page').forEach(page => {
+        const textElements = page.querySelectorAll('.label-date, .label-title, .label-small, .label-med-row');
+        textElements.forEach(element => {
+            element.style.removeProperty('font-size');
+            element.style.removeProperty('line-height');
+        });
+        page.classList.remove(...densityClasses);
+        for (const densityClass of densityClasses) {
+            if (page.scrollHeight <= page.clientHeight + 1 && page.scrollWidth <= page.clientWidth + 1) break;
+            page.classList.add(densityClass);
+        }
+        for (let attempt = 0; attempt < 3 && (page.scrollHeight > page.clientHeight + 1 || page.scrollWidth > page.clientWidth + 1); attempt++) {
+            const heightRatio = page.clientHeight / page.scrollHeight;
+            const widthRatio = page.clientWidth / page.scrollWidth;
+            const fitRatio = Math.max(Math.min(heightRatio, widthRatio, 1) * 0.96, 0.7);
+            textElements.forEach(element => {
+                const styles = getComputedStyle(element);
+                element.style.fontSize = `${parseFloat(styles.fontSize) * fitRatio}px`;
+                element.style.lineHeight = '0.82';
+            });
+        }
+    });
+    pendingLabelHtml = container.innerHTML;
+}
+
+function previewLabelHtml(labelHtml, prepackDefinition = null) {
     pendingLabelHtml = labelHtml;
+    pendingPrepackDefinition = prepackDefinition;
     const modal = document.getElementById('label-preview-modal');
     const content = document.getElementById('label-preview-content');
     if (!modal || !content) {
@@ -604,19 +845,56 @@ function previewLabelHtml(labelHtml) {
     }
     content.innerHTML = labelHtml;
     modal.style.display = 'flex';
+    const scheduleButton = document.getElementById('schedule-prepack-button');
+    if (scheduleButton) scheduleButton.style.display = prepackDefinition && !prepackDefinition.existingQueueId ? 'inline-block' : 'none';
+    fitLabelPages(content);
+    requestAnimationFrame(() => {
+        fitLabelPages(content);
+        if (document.fonts?.ready) {
+            document.fonts.ready.then(() => fitLabelPages(content));
+        }
+    });
 }
 
 window.closeLabelPreview = function() {
     pendingLabelHtml = '';
+    pendingPrepackDefinition = null;
     const modal = document.getElementById('label-preview-modal');
     if (modal) modal.style.display = 'none';
+    const scheduleButton = document.getElementById('schedule-prepack-button');
+    if (scheduleButton) scheduleButton.style.display = 'none';
 };
 
-window.printPreviewedLabel = function() {
+window.schedulePendingPrepack = async function() {
+    if (!pendingPrepackDefinition || pendingPrepackDefinition.existingQueueId) return;
+    const definition = pendingPrepackDefinition;
+    const defaults = defaultActualDateTime();
+    const result = await showActionModal('Schedule Prepack', `
+        <div class="field-row">
+            <label>Prepack date:</label><input name="prepackDate" type="date" value="${defaults.date}">
+            <label>Time:</label><input name="prepackTime" type="time" value="${defaults.time}">
+        </div>
+    `, 'Add to Queue');
+    if (!result) return;
+    if (!result.prepackDate || !result.prepackTime) {
+        await appAlert('Choose the date and time when this prepack should be prepared.');
+        return;
+    }
+    await createPrepackQueue(definition, {
+        labelsPrinted: false,
+        scheduledFor: `${result.prepackDate}T${result.prepackTime}`
+    });
+    window.closeLabelPreview();
+    switchTab('prepackage');
+};
+
+window.printPreviewedLabel = async function() {
     if (!pendingLabelHtml) return;
     const printArea = document.getElementById('print-area');
     printArea.innerHTML = pendingLabelHtml;
+    const prepackDefinition = pendingPrepackDefinition;
     window.closeLabelPreview();
+    if (prepackDefinition) await commitPrepackPrint(prepackDefinition);
     printPreparedArea();
 };
 
@@ -655,7 +933,13 @@ function collectNamedInputs(container) {
         } else if (input.type === 'radio') {
             if (input.checked) result[input.name] = input.value;
         } else {
-            result[input.name] = input.value;
+            if (Object.prototype.hasOwnProperty.call(result, input.name)) {
+                result[input.name] = Array.isArray(result[input.name])
+                    ? [...result[input.name], input.value]
+                    : [result[input.name], input.value];
+            } else {
+                result[input.name] = input.value;
+            }
         }
     });
     return result;
@@ -707,6 +991,11 @@ function isTopicalMedication(med) {
 
 function usesContainerTracking(med) {
     return med?.inventoryBehavior === 'container-finish' || isTopicalMedication(med);
+}
+
+function finishedContainerButtonText(med) {
+    const unit = String(inventoryUnitFor(med) || '').toLowerCase();
+    return unit.includes('bottle') ? 'Finished Bottle' : 'Finished Container';
 }
 
 function inventoryUnitFor(med) {
@@ -1179,7 +1468,7 @@ window.adminOrderSetSubmitAll = function() {
 };
 
 window.switchTab = function(tabName) {
-    const tabs = ['dashboard', 'schedules', 'order-sets', 'vitals', 'inventory', 'drug-info', 'family'];
+    const tabs = ['dashboard', 'schedules', 'prepackage', 'order-sets', 'vitals', 'inventory', 'drug-info', 'family'];
     tabs.forEach(t => {
         const tabElement = document.getElementById(`tab-${t}`);
         const panelElement = document.getElementById(`panel-${t}`);
@@ -1201,6 +1490,7 @@ async function sync() {
         renderMemberAdministrationLog(currentEditingMemberId);
         renderMemberVitalProfile(currentEditingMemberId);
         renderMemberMonitoringProfiles(currentEditingMemberId);
+        renderMemberPrnMedicationOrders(currentEditingMemberId);
         renderMemberMedicationTimelines();
         renderMemberCalendar(currentEditingMemberId);
     }
@@ -1217,11 +1507,41 @@ window.removeMember = async function(id) {
     }
 };
 
+function renderMemberPrnMedicationOrders(memberId) {
+    const container = document.getElementById('member-prn-meds-list');
+    if (!container) return;
+    const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq === 'PRN');
+    if (schedules.length === 0) {
+        container.innerHTML = '<div style="font-size:11px; padding:5px;">No PRN medication orders.</div>';
+        return;
+    }
+    container.innerHTML = schedules.map(schedule => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        const set = schedule.orderSetId ? db.orderSets.find(item => item.id === schedule.orderSetId) : null;
+        if (!med) return '';
+        return `<div class="sunken-panel" style="padding:5px; margin-bottom:5px; background:white; border:1px inset gray;">
+            <strong>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong>
+            ${set ? `<span class="form-help"> | Order Set: ${escapeHtml(set.name)}</span>` : ''}
+            <br><small>Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}${escapeHtml(prnLimitText(schedule))}</small>
+            <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
+            <div style="text-align:right; margin-top:5px;">
+                <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
+                <button onclick="event.stopPropagation(); administerDose('${escapeHtml(schedule.medId)}','${escapeHtml(schedule.id)}')">Administer</button>
+                ${usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${escapeHtml(schedule.id)}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
+                ${set
+                    ? `<button onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit Set</button>`
+                    : `<button onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify</button>
+                       <button onclick="event.stopPropagation(); deleteSchedule('${escapeHtml(schedule.id)}')">Discontinue</button>`}
+            </div>
+        </div>`;
+    }).join('');
+}
+
 window.openMemberModal = function(id = null) {
     currentEditingMemberId = id;
     const modal = document.getElementById('member-modal');
     const title = document.getElementById('member-modal-title');
-    
+
 
     // Helper function to set value only if element exists
     const safeSet = (elId, value) => {
@@ -1244,12 +1564,14 @@ window.openMemberModal = function(id = null) {
     if (emailReminders) emailReminders.checked = false;
     renderMemberCareLists();
     renderMemberMonitoringProfiles(null);
-    
+
     const activeMedsContainer = document.getElementById('member-active-meds-list');
     if (activeMedsContainer) activeMedsContainer.innerHTML = '';
+    const prnMedsContainer = document.getElementById('member-prn-meds-list');
+    if (prnMedsContainer) prnMedsContainer.innerHTML = '';
     safeSet('m-calendar-color', '#000080');
     setMemberGoalFields(null);
-    
+
     if (id) {
         const m = db.family.find(member => member.id === id);
         if (m) {
@@ -1333,18 +1655,23 @@ window.openMemberModal = function(id = null) {
                     <button type="button" onclick="shiftMemberTimeline(7)">Next 7 Days</button>`;
                 activeMedsContainer.appendChild(timelineControls);
             }
-            const memberOrderSets = db.orderSets.filter(set => set.memberId === id);
+            const memberOrderSets = db.orderSets.filter(set =>
+                set.memberId === id && db.schedules.some(schedule => schedule.orderSetId === set.id)
+            );
             memberOrderSets.forEach(set => {
                 const div = document.createElement('div');
                 div.className = 'sunken-panel';
                 div.style.cssText = "padding:5px; margin-bottom:5px; background:white; border:1px inset gray;";
                 const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id);
-                const itemRows = set.items.map((item, itemIndex) => {
-                    const med = db.inventory.find(inv => inv.id === item.medId);
-                    const schedule = setSchedules[itemIndex] || setSchedules.find(candidate => candidate.medId === item.medId);
-                    return `<div style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, item.doseQty)) : 'Unknown'} | Qty: ${escapeHtml(formatQtyForSchedule(item, med || {}))} | ${escapeHtml(item.freq)} ${escapeHtml(getScheduleTimes(item).join(', ') || 'PRN')}${escapeHtml(prnLimitText(item))}
-                        ${schedule ? `<div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>` : ''}
-                        ${schedule ? `<div style="text-align:right; margin-top:3px;"><button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button></div>` : ''}
+                const itemRows = setSchedules.map(schedule => {
+                    if (schedule.freq === 'PRN') return '';
+                    const med = db.inventory.find(inv => inv.id === schedule.medId);
+                    return `<div style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : 'Unknown'} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med || {}))} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}${escapeHtml(prnLimitText(schedule))}${escapeHtml(scheduleExceptionText(schedule))}
+                        <div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>
+                        <div style="text-align:right; margin-top:3px;">
+                            <button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button>
+                            ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${schedule.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
+                        </div>
                     </div>`;
                 }).join('');
                 div.innerHTML = `
@@ -1362,7 +1689,7 @@ window.openMemberModal = function(id = null) {
                 if (activeMedsContainer) activeMedsContainer.appendChild(div);
             });
 
-            const memberSchedules = db.schedules.filter(s => s.memberId === id && !s.orderSetId);
+            const memberSchedules = db.schedules.filter(s => s.memberId === id && !s.orderSetId && s.freq !== 'PRN');
             memberSchedules.forEach(s => {
                 const med = db.inventory.find(inv => inv.id === s.medId);
                 const div = document.createElement('div');
@@ -1370,18 +1697,19 @@ window.openMemberModal = function(id = null) {
                 div.style.cssText = "padding:5px; margin-bottom:5px; cursor:pointer; background:white; border:1px inset gray;";
                 div.innerHTML = `
                     <strong>${med ? med.name : 'Unknown'} ${med ? formatMedStrength(med) : ''}</strong><br>
-                    <small>Dose: ${med ? escapeHtml(formatPrescribedDose(med, s.doseQty)) : 'Unknown'} | Qty: ${med ? escapeHtml(formatQtyForSchedule(s, med)) : escapeHtml(s.doseQty)} | ${escapeHtml(s.freq)} ${escapeHtml(getScheduleTimes(s).join(', ') || 'PRN')}${escapeHtml(prnLimitText(s))}</small>
+                    <small>Dose: ${med ? escapeHtml(formatPrescribedDose(med, s.doseQty)) : 'Unknown'} | Qty: ${med ? escapeHtml(formatQtyForSchedule(s, med)) : escapeHtml(s.doseQty)} | ${escapeHtml(formatFrequency(s))} ${escapeHtml(getScheduleTimes(s).join(', ') || 'PRN')}${escapeHtml(prnLimitText(s))}${escapeHtml(scheduleExceptionText(s))}</small>
                     <div class="member-med-timeline" data-schedule-id="${s.id}"></div>
                     <div style="text-align:right; margin-top:5px;">
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
-                        ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">Finished Container</button>` : ''}
+                        ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
                     </div>
                 `;
                 div.onclick = () => window.openOrderModifier(s.id);
                 if (activeMedsContainer) activeMedsContainer.appendChild(div);
             });
+            renderMemberPrnMedicationOrders(m.id);
             renderMemberVitalProfile(m.id);
             renderMemberAdministrationLog(m.id);
             renderMemberMedicationTimelines();
@@ -1395,6 +1723,7 @@ window.openMemberModal = function(id = null) {
         if (adminLog) adminLog.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before recording administrations.</div>';
         const memberCalendar = document.getElementById('member-calendar-grid');
         if (memberCalendar) memberCalendar.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before viewing their calendar.</div>';
+        if (prnMedsContainer) prnMedsContainer.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before adding PRN medication orders.</div>';
     }
     
     if (modal) modal.style.display = 'flex';
@@ -1416,9 +1745,12 @@ window.openOrderModifier = function(scheduleId) {
     document.getElementById('mod-freq').value = sched.freq || 'QD';
     document.getElementById('mod-qod-start-date').value = sched.qodStart || sched.startDate || '';
     document.getElementById('mod-interval-hours').value = sched.intervalHours || 8;
+    document.getElementById('mod-interval-weeks').value = sched.intervalWeeks || 2;
+    document.getElementById('mod-times-per-week').value = sched.timesPerWeek || Math.max(sched.weekdays?.length || 0, 1);
     document.getElementById('mod-prn-max-doses').value = sched.prnMaxDoses || '';
     document.getElementById('mod-prn-window-hours').value = sched.prnWindowHours || 24;
     renderFrequencyControls('mod', sched.freq === 'QXH' ? [sched.startTime || getScheduleTimes(sched)[0]] : getScheduleTimes(sched));
+    setWeekdaySelections('mod-weekday-container', sched.weekdays || []);
     document.getElementById('mod-instr').value = sched.instructions || "";
     
     document.getElementById('order-modifier-modal').style.display = 'flex';
@@ -1438,6 +1770,9 @@ window.saveOrderModification = async function() {
         sched.freq = frequencyDetails.freq;
         sched.times = frequencyDetails.times;
         sched.intervalHours = frequencyDetails.intervalHours;
+        sched.intervalWeeks = frequencyDetails.intervalWeeks || null;
+        sched.timesPerWeek = frequencyDetails.timesPerWeek || null;
+        sched.weekdays = frequencyDetails.weekdays || [];
         sched.prnMaxDoses = frequencyDetails.prnMaxDoses || null;
         sched.prnWindowHours = frequencyDetails.prnWindowHours || 24;
         sched.startTime = frequencyDetails.startTime || frequencyDetails.times[0] || "";
@@ -1519,7 +1854,11 @@ window.addInventory = async function() {
         || (formulationDoseUnits[formulation] || formulation);
     const imageInput = document.getElementById('med-image-input');
     const expiry = document.getElementById('med-expiry').value;
+    const barcodeCode = normalizeMedicationCode(document.getElementById('med-barcode-code')?.value) || createMedicationCode();
     if (!name || isNaN(qty)) return alert("Name and Qty required.");
+    if (barcodeCode.length > 100 || !medicationCodeIsAvailable(barcodeCode)) {
+        return alert("Enter a unique QR code containing no more than 100 characters.");
+    }
     
     // --- NEW COMBINATION LOGIC ---
     const isCombo = document.getElementById('is-combination').checked;
@@ -1601,6 +1940,7 @@ window.addInventory = async function() {
         components: components, // Only for combinations    
         minThreshold: parseAmount(document.getElementById('med-threshold').value, 5),
         prescriberId,
+        barcodeCode,
         imagePath: imagePath 
     });
     
@@ -1611,6 +1951,7 @@ window.addInventory = async function() {
     document.getElementById('med-qty').value = '';
     document.getElementById('med-inventory-unit').value = '';
     document.getElementById('med-administration-unit').value = '';
+    document.getElementById('med-barcode-code').value = '';
     document.getElementById('ingredient-list').innerHTML = '';
     document.getElementById('is-combination').checked = false;
     const medPrescriber = document.getElementById('med-prescriber');
@@ -1801,6 +2142,7 @@ window.openMedProfile = function(id) {
     document.getElementById('modal-notes').value = med.notes || "";
     document.getElementById('modal-storage').value = med.storage || "";
     document.getElementById('modal-control-level').value = med.controlLevel || "N/A";
+    document.getElementById('modal-barcode-code').value = med.barcodeCode || createMedicationCode();
     const formulationSelect = document.getElementById('modal-formulation');
     addSelectOptionIfMissing(formulationSelect, med.formulation || 'Other');
     formulationSelect.value = med.formulation || 'Other';
@@ -1832,8 +2174,13 @@ window.saveMedProfile = async function() {
     if (med) {
         // 1. Update text fields
         const updatedName = document.getElementById('modal-med-name').value.trim();
+        const barcodeCode = normalizeMedicationCode(document.getElementById('modal-barcode-code').value);
         if (!updatedName) {
             await appAlert('Medication name is required.');
+            return;
+        }
+        if (barcodeCode.length > 100 || !medicationCodeIsAvailable(barcodeCode, med.id)) {
+            await appAlert('Enter a unique QR code containing no more than 100 characters.');
             return;
         }
         const formulation = document.getElementById('modal-formulation').value;
@@ -1898,6 +2245,7 @@ window.saveMedProfile = async function() {
         med.controlLevel = document.getElementById('modal-control-level').value;
         med.expiry = document.getElementById('modal-expiry').value;
         med.prescriberId = document.getElementById('modal-prescriber')?.value || '';
+        med.barcodeCode = barcodeCode;
         med.formulation = formulation;
         med.isCombination = isCombination;
         med.components = components;
@@ -1955,11 +2303,26 @@ function frequencyOptionsHtml(selected = 'QD') {
         ['Nightly', 'Nightly'],
         ['QOD', 'QOD'],
         ['QW', 'Once Weekly'],
+        ['QXW', 'Every X Weeks'],
+        ['XPW', 'X Times Per Week'],
         ['QXH', 'Every X Hours'],
         ['PRN', 'PRN'],
         ['Monthly', 'Once Monthly']
     ];
     return options.map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+let weekdayPickerId = 0;
+
+function weekdayCheckboxesHtml(className, selectedDays = []) {
+    const selected = new Set((selectedDays || []).map(Number));
+    const pickerId = ++weekdayPickerId;
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        .map((day, index) => {
+            const inputId = `${className}-${pickerId}-${index}`;
+            return `<span class="weekday-option"><input id="${inputId}" class="${className}" type="checkbox" value="${index}" ${selected.has(index) ? 'checked' : ''}><label for="${inputId}">${day}</label></span>`;
+        })
+        .join('');
 }
 
 function medicationOptionsHtml(selected = '') {
@@ -2028,6 +2391,9 @@ window.addOrderSetMedicationRow = function(item = null) {
         <div class="field-row os-qod" style="display:none; margin-top:5px;"><label>QOD Start:</label><input class="os-qod-start" type="date" value="${item?.qodStart || ''}"></div>
         <div class="field-row os-anchor" style="display:none; margin-top:5px;"><label>First dose date:</label><input class="os-anchor-date" type="date" value="${item?.anchorDate || ''}"><span class="form-help">Sets the weekly/monthly dates within the order set window.</span></div>
         <div class="field-row os-interval" style="display:none; margin-top:5px;"><label>Every:</label><input class="os-interval-hours" type="number" min="1" max="24" step="1" value="${item?.intervalHours || 8}" style="width:45px;"><span>hrs</span></div>
+        <div class="field-row os-week-interval" style="display:none; margin-top:5px;"><label>Every:</label><input class="os-interval-weeks" type="number" min="1" max="52" step="1" value="${item?.intervalWeeks || 2}" style="width:45px;"><span>weeks</span></div>
+        <div class="field-row os-weekly-count" style="display:none; margin-top:5px;"><label>Times per week:</label><input class="os-times-per-week" type="number" min="1" max="7" step="1" value="${item?.timesPerWeek || Math.max(item?.weekdays?.length || 0, 1)}" style="width:45px;"></div>
+        <div class="weekday-picker os-weekdays" style="display:none; margin-top:5px;"><span>Days:</span>${weekdayCheckboxesHtml('os-weekday-input', item?.weekdays || [])}</div>
         <div class="field-row os-prn-limit" style="display:none; margin-top:5px;"><label>PRN Max:</label><input class="os-prn-max-doses" type="number" min="1" step="1" style="width:45px;" value="${item?.prnMaxDoses || ''}"><span>doses per</span><input class="os-prn-window-hours" type="number" min="1" max="168" step="1" value="${item?.prnWindowHours || 24}" style="width:45px;"><span>hrs</span></div>
         <div class="field-row-stacked" style="margin-top:5px;"><label>Administration Time(s)</label><div class="os-time-fields"></div></div>
         <div class="field-row-stacked" style="margin-top:5px;"><label>Instructions</label><textarea class="os-instructions" rows="2" style="width:100%; resize:none;">${escapeHtml(item?.instructions || '')}</textarea></div>
@@ -2051,7 +2417,16 @@ function renderOrderSetRowControls(row, existingTimes = null) {
         anchorInput.value = document.getElementById('order-set-start')?.value || localDateKey();
     }
     row.querySelector('.os-interval').style.display = freq === 'QXH' ? 'flex' : 'none';
+    row.querySelector('.os-week-interval').style.display = freq === 'QXW' ? 'flex' : 'none';
+    row.querySelector('.os-weekly-count').style.display = freq === 'XPW' ? 'flex' : 'none';
+    row.querySelector('.os-weekdays').style.display = ['QXW', 'XPW'].includes(freq) ? 'flex' : 'none';
     row.querySelector('.os-prn-limit').style.display = freq === 'PRN' ? 'flex' : 'none';
+    if (['QXW', 'XPW'].includes(freq) && !row.querySelector('.os-weekday-input:checked')) {
+        const startDate = document.getElementById('order-set-start')?.value || localDateKey();
+        const weekday = parseLocal(startDate)?.getDay() ?? new Date().getDay();
+        const checkbox = row.querySelector(`.os-weekday-input[value="${weekday}"]`);
+        if (checkbox) checkbox.checked = true;
+    }
     const timeContainer = row.querySelector('.os-time-fields');
     timeContainer.innerHTML = '';
     if (freq === 'PRN') {
@@ -2077,6 +2452,11 @@ function collectOrderSetItem(row) {
     const freq = row.querySelector('.os-freq').value;
     const rawTimes = Array.from(row.querySelectorAll('.os-time-input')).map(input => input.value).filter(Boolean);
     const intervalHours = freq === 'QXH' ? parseInt(row.querySelector('.os-interval-hours').value, 10) : null;
+    const intervalWeeks = freq === 'QXW' ? parseInt(row.querySelector('.os-interval-weeks').value, 10) : null;
+    const timesPerWeek = freq === 'XPW' ? parseInt(row.querySelector('.os-times-per-week').value, 10) : null;
+    const weekdays = ['QXW', 'XPW'].includes(freq)
+        ? Array.from(row.querySelectorAll('.os-weekday-input:checked')).map(input => parseInt(input.value, 10)).sort()
+        : [];
     const prnMaxDoses = freq === 'PRN' ? parseInt(row.querySelector('.os-prn-max-doses')?.value, 10) : null;
     const prnWindowHours = freq === 'PRN' ? parseInt(row.querySelector('.os-prn-window-hours')?.value, 10) : null;
     if (!medId || !doseQty) {
@@ -2105,6 +2485,20 @@ function collectOrderSetItem(row) {
             return { error: "PRN maximum window must be between 1 and 168 hours." };
         }
     }
+    if (freq === 'QXW') {
+        if (!Number.isInteger(intervalWeeks) || intervalWeeks < 1 || intervalWeeks > 52) {
+            return { error: "Every X Weeks rows need an interval between 1 and 52 weeks." };
+        }
+        if (weekdays.length === 0) return { error: "Every X Weeks rows need at least one selected weekday." };
+    }
+    if (freq === 'XPW') {
+        if (!Number.isInteger(timesPerWeek) || timesPerWeek < 1 || timesPerWeek > 7) {
+            return { error: "Times per week must be between 1 and 7." };
+        }
+        if (weekdays.length !== timesPerWeek) {
+            return { error: `Select exactly ${timesPerWeek} weekday${timesPerWeek === 1 ? '' : 's'} for the X Times Per Week row.` };
+        }
+    }
     if (freq !== 'PRN') {
         const expected = getExpectedTimeCount(freq);
         if (rawTimes.length !== expected) {
@@ -2117,6 +2511,9 @@ function collectOrderSetItem(row) {
         freq,
         times: Array.from(new Set(rawTimes)).sort(),
         intervalHours: null,
+        intervalWeeks,
+        timesPerWeek,
+        weekdays,
         prnMaxDoses: prnMaxDoses || null,
         prnWindowHours: prnWindowHours || 24,
         startTime: rawTimes[0] || '',
@@ -2141,6 +2538,9 @@ function orderSetItemToSchedule(orderSet, item, index) {
         qodStart: item.freq === 'QOD' ? (item.qodStart || orderSet.startDate) : '',
         times: item.times,
         intervalHours: item.intervalHours,
+        intervalWeeks: item.intervalWeeks || null,
+        timesPerWeek: item.timesPerWeek || null,
+        weekdays: item.weekdays || [],
         prnMaxDoses: item.prnMaxDoses || null,
         prnWindowHours: item.prnWindowHours || 24,
         startTime: item.startTime || item.times[0] || '',
@@ -2284,21 +2684,64 @@ window.printOrderSetLabel = function(id) {
     const set = db.orderSets.find(orderSet => orderSet.id === id);
     if (!set) return;
     const member = db.family.find(m => m.id === set.memberId);
-    const rows = set.items.map(item => {
-        const med = db.inventory.find(m => m.id === item.medId);
-        if (!med) return '';
-        const schedule = { ...item, startDate: set.startDate, endDate: set.endDate };
-        const instr = item.instructions ? ` - ${escapeHtml(item.instructions)}` : '';
-        const timing = item.freq === 'PRN' ? 'As Needed' : `${item.freq} ${getScheduleTimes(schedule).join(', ')}`;
-        return `<div class="label-med-row">* ${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}; Qty ${escapeHtml(formatQtyForSchedule(schedule, med))}; ${escapeHtml(timing)}${instr}</div>`;
-    }).join('');
+    const sourceItems = set.memberId
+        ? db.schedules.filter(schedule => schedule.orderSetId === set.id)
+        : set.items.map(item => ({ ...item, startDate: set.startDate, endDate: set.endDate }));
+    const entries = sourceItems.map(schedule => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        if (!med) return null;
+        const timing = schedule.freq === 'PRN'
+            ? 'As needed'
+            : `${formatFrequency(schedule)} at ${getScheduleTimes(schedule).join(', ')}`;
+        const detail = `Qty ${formatQtyForSchedule(schedule, med)} | Dose ${formatPrescribedDose(med, schedule.doseQty)} | ${timing}`;
+        return {
+            med,
+            schedule,
+            detail,
+            instructions: schedule.instructions || '',
+            size: med.name.length + formatLabelMedStrength(med).length + detail.length + String(schedule.instructions || '').length
+        };
+    }).filter(Boolean);
+    if (entries.length === 0) {
+        void appAlert(set.memberId
+            ? 'This assigned order set has no active medication orders to print.'
+            : 'This reusable order set has no medications to print.');
+        return;
+    }
 
-    previewLabelHtml(`
-        <div class="${getLabelClass([set.name, rows], set.items.length + 2)}">
-            <div class="label-title">${escapeHtml(set.name)}</div>
-            <div class="label-small">${escapeHtml(member ? `${member.firstName} ${member.lastName}` : '')} | ${escapeHtml(set.startDate)}-${escapeHtml(set.endDate)}</div>
-            ${rows}
-        </div>`);
+    const pages = [];
+    let page = [];
+    let pageSize = 0;
+    entries.forEach(entry => {
+        if (page.length > 0 && (page.length >= 4 || pageSize + entry.size > 285)) {
+            pages.push(page);
+            page = [];
+            pageSize = 0;
+        }
+        page.push(entry);
+        pageSize += entry.size;
+    });
+    if (page.length) pages.push(page);
+
+    const labels = pages.map((pageEntries, pageIndex) => {
+        const rows = pageEntries.map(entry => `
+            <div class="label-med-row order-set-label-row">
+                <span class="order-set-label-med">${escapeHtml(entry.med.name)} ${escapeHtml(formatLabelMedStrength(entry.med))}</span><br>
+                ${escapeHtml(entry.detail)}
+                ${entry.instructions ? `<br>Note: ${escapeHtml(entry.instructions)}` : ''}
+            </div>`).join('');
+        const memberLine = member
+            ? `${member.firstName} ${member.lastName} | ${set.startDate}-${set.endDate}`
+            : 'Reusable order set';
+        const continuation = pages.length > 1 ? ` | ${pageIndex + 1}/${pages.length}` : '';
+        return `
+            <div class="${getLabelClass([set.name, memberLine, rows], pageEntries.length * 2 + 2)}">
+                <div class="label-title">${escapeHtml(set.name)}${escapeHtml(continuation)}</div>
+                <div class="label-small">${escapeHtml(memberLine)}</div>
+                ${rows}
+            </div>`;
+    });
+    previewLabelHtml(labels.join(''));
 };
 
 window.printOrderSetMedicationLabel = async function(id) {
@@ -2326,12 +2769,14 @@ window.printOrderSetMedicationLabel = async function(id) {
 
 function renderOrderSets() {
     const memberSelect = document.getElementById('order-set-member');
+    const selectedBuilderMember = memberSelect?.value || '';
     if (memberSelect) {
         memberSelect.innerHTML = `<option value="">Reusable template</option>` + db.family
             .slice()
             .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
             .map(m => `<option value="${m.id}">${escapeHtml(memberDisplayName(m))}</option>`)
             .join('');
+        memberSelect.value = selectedBuilderMember;
     }
 
     const startInput = document.getElementById('order-set-start');
@@ -2342,34 +2787,765 @@ function renderOrderSets() {
         addOrderSetMedicationRow();
     }
 
-    const list = document.getElementById('order-set-list');
-    if (!list) return;
-    if (db.orderSets.length === 0) {
-        list.innerHTML = '<div style="padding:6px; font-size:11px;">No order sets saved.</div>';
-        return;
+    const filter = document.getElementById('order-set-member-filter');
+    const selectedFilter = filter?.value || '';
+    if (filter) {
+        filter.innerHTML = '<option value="">All members</option>' + db.family
+            .slice()
+            .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberDisplayName(member))}</option>`)
+            .join('');
+        filter.value = db.family.some(member => member.id === selectedFilter) ? selectedFilter : '';
     }
 
-    list.innerHTML = db.orderSets.map(set => {
+    const templateList = document.getElementById('order-set-template-list');
+    const assignedList = document.getElementById('order-set-assigned-list');
+    if (!templateList || !assignedList) return;
+
+    const orderSetRowHtml = (set, isTemplate) => {
         const member = db.family.find(m => m.id === set.memberId);
-        const assignmentLabel = member ? `${member.lastName}, ${member.firstName}` : 'Reusable template';
         const itemSummary = set.items.map(item => {
             const med = db.inventory.find(m => m.id === item.medId);
             return med ? med.name : 'Unknown';
         }).join(', ');
+        const activeSchedules = db.schedules.filter(schedule => schedule.orderSetId === set.id);
+        const containerActions = activeSchedules.map(schedule => {
+            const med = db.inventory.find(item => item.id === schedule.medId);
+            if (!med || !usesContainerTracking(med)) return '';
+            return `<button onclick="finishTopicalContainer('${escapeHtml(schedule.id)}')" title="${escapeHtml(med.name)}">${escapeHtml(finishedContainerButtonText(med))}: ${escapeHtml(med.name)}</button>`;
+        }).join('');
+        const statusText = isTemplate
+            ? `${set.items.length} medication${set.items.length === 1 ? '' : 's'}`
+            : `${escapeHtml(memberDisplayName(member))} | ${activeSchedules.length} active medication${activeSchedules.length === 1 ? '' : 's'}`;
         return `<div class="med-item-row" style="border-bottom:1px solid #808080;">
             <div style="flex-grow:1;">
-                <strong>${escapeHtml(set.name)}</strong> - ${escapeHtml(assignmentLabel)}<br>
+                <strong>${escapeHtml(set.name)}</strong> - <small>${statusText}</small><br>
                 <small>${escapeHtml(itemSummary)}</small>
             </div>
-            <button onclick="assignOrderSet('${set.id}')">Assign</button>
-            <button onclick="printOrderSetLabel('${set.id}')">Set Label</button>
-            ${member ? `<button onclick="printOrderSetMedicationLabel('${set.id}')">Individual Labels</button>` : ''}
-            ${member ? `<button onclick="administerOrderSet('${set.id}')">Administer</button>` : ''}
-            <button onclick="editOrderSet('${set.id}')">Edit</button>
-            <button onclick="deleteOrderSet('${set.id}')">Delete</button>
+            ${isTemplate ? `<button onclick="assignOrderSet('${escapeHtml(set.id)}')">Assign</button>` : ''}
+            <button onclick="printOrderSetLabel('${escapeHtml(set.id)}')">Set Label</button>
+            ${!isTemplate && activeSchedules.length ? `<button onclick="printOrderSetMedicationLabel('${escapeHtml(set.id)}')">Individual Labels</button>` : ''}
+            ${!isTemplate && activeSchedules.length ? `<button onclick="administerOrderSet('${escapeHtml(set.id)}')">Administer</button>` : ''}
+            ${!isTemplate ? containerActions : ''}
+            <button onclick="editOrderSet('${escapeHtml(set.id)}')">Edit</button>
+            <button onclick="deleteOrderSet('${escapeHtml(set.id)}')">Delete</button>
+        </div>`;
+    };
+
+    const templates = db.orderSets.filter(set => !set.memberId);
+    const assigned = db.orderSets.filter(set => set.memberId && (!filter?.value || set.memberId === filter.value));
+    templateList.innerHTML = templates.length
+        ? templates.map(set => orderSetRowHtml(set, true)).join('')
+        : '<div style="padding:6px; font-size:11px;">No reusable order sets saved.</div>';
+    assignedList.innerHTML = assigned.length
+        ? assigned.map(set => orderSetRowHtml(set, false)).join('')
+        : `<div style="padding:6px; font-size:11px;">${filter?.value ? 'No order sets assigned to this member.' : 'No assigned order sets saved.'}</div>`;
+}
+
+function prepackItemId() {
+    return `prep_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
+    const member = db.family.find(item => item.id === memberId);
+    const byDate = new Map();
+    rows.forEach(row => {
+        if (!row?.instance?.date || !row.med || !row.schedule) return;
+        if (!byDate.has(row.instance.date)) byDate.set(row.instance.date, []);
+        byDate.get(row.instance.date).push({
+            id: prepackItemId(),
+            instanceKey: row.instance.key || scheduleInstanceKey(row.schedule.id, row.instance.date, row.instance.time),
+            scheduleId: row.schedule.id,
+            medId: row.med.id,
+            medName: row.med.name,
+            strength: formatLabelMedStrength(row.med),
+            quantity: formatQtyForSchedule(row.schedule, row.med),
+            dose: formatPrescribedDose(row.med, row.schedule.doseQty),
+            time: row.instance.time,
+            instructions: row.schedule.instructions || '',
+            orderSetId: row.schedule.orderSetId || '',
+            orderSetName: row.schedule.orderSetName || '',
+            barcodeCode: normalizeMedicationCode(row.med.barcodeCode),
+            status: 'pending',
+            scannedCode: ''
+        });
+    });
+    let days = Array.from(byDate.entries())
+        .sort(([first], [second]) => first.localeCompare(second))
+        .map(([date, items]) => ({
+            date,
+            status: 'pending',
+            needsReprint: false,
+            items: items.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.medName.localeCompare(b.medName))
+        }));
+    if (selection?.singleMedication && selection.labelLayout === 'range' && rows.length > 0) {
+        const firstRow = rows[0];
+        const totalQuantity = rows.reduce((sum, row) => sum + parseAmount(row.schedule.doseQty, 0), 0);
+        const aggregateItem = {
+            id: prepackItemId(),
+            instanceKey: `range|${firstRow.schedule.id}|${selection.startDate}|${selection.endDate}|${selection.specificTime || 'all'}`,
+            scheduleId: firstRow.schedule.id,
+            medId: firstRow.med.id,
+            medName: firstRow.med.name,
+            strength: formatLabelMedStrength(firstRow.med),
+            quantity: formatQtyForSchedule({ ...firstRow.schedule, doseQty: totalQuantity }, firstRow.med),
+            dose: formatPrescribedDose(firstRow.med, firstRow.schedule.doseQty),
+            time: selection.startDate === selection.endDate
+                ? selection.startDate
+                : `${selection.startDate} - ${selection.endDate}`,
+            instructions: firstRow.schedule.instructions || '',
+            orderSetId: firstRow.schedule.orderSetId || '',
+            orderSetName: firstRow.schedule.orderSetName || '',
+            barcodeCode: normalizeMedicationCode(firstRow.med.barcodeCode),
+            status: 'pending',
+            scannedCode: ''
+        };
+        days = [{
+            date: aggregateItem.time,
+            status: 'pending',
+            needsReprint: false,
+            items: [aggregateItem]
+        }];
+    }
+    return {
+        memberId,
+        memberName: memberDisplayName(member),
+        sourceLabel,
+        title: `${memberDisplayName(member)} | ${days[0]?.date || selection?.startDate || ''}${days.length > 1 ? ` - ${days[days.length - 1].date}` : (!days.length && selection?.endDate && selection.endDate !== selection.startDate ? ` - ${selection.endDate}` : '')}`,
+        selection: selection || {
+            kind: 'schedule-list',
+            scheduleIds: Array.from(new Set(rows.map(row => row.schedule?.id).filter(Boolean))),
+            startDate: days[0]?.date || '',
+            endDate: days[days.length - 1]?.date || ''
+        },
+        days
+    };
+}
+
+function prepackRowsForSelection(selection) {
+    if (!selection?.startDate || !selection?.endDate) return [];
+    let schedules = [];
+    if (selection.kind === 'member-range') {
+        const excluded = new Set(selection.excludedScheduleIds || []);
+        schedules = db.schedules.filter(schedule =>
+            schedule.memberId === selection.memberId && !excluded.has(schedule.id)
+        );
+    } else {
+        const scheduleIds = new Set(selection.scheduleIds || []);
+        schedules = db.schedules.filter(schedule => scheduleIds.has(schedule.id));
+    }
+    const excludedInstances = new Set(selection.excludedInstanceKeys || []);
+    const rows = [];
+    schedules.forEach(schedule => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        if (!med) return;
+        getScheduleInstancesInRange(schedule, selection.startDate, selection.endDate)
+            .filter(instance => !selection.specificTime || instance.time === selection.specificTime)
+            .filter(instance => !excludedInstances.has(instance.key))
+            .forEach(instance => rows.push({ schedule, med, instance }));
+    });
+    return rows.sort((a, b) =>
+        a.instance.date.localeCompare(b.instance.date) ||
+        timeToMinutes(a.instance.time) - timeToMinutes(b.instance.time) ||
+        a.med.name.localeCompare(b.med.name, undefined, { sensitivity: 'base' })
+    );
+}
+
+function prepackItemFingerprint(item) {
+    return [
+        item.instanceKey,
+        item.medId,
+        item.strength,
+        item.quantity,
+        item.dose,
+        item.time,
+        item.instructions
+    ].join('|');
+}
+
+function reconcilePrepackQueue(queue) {
+    if (!queue?.selection) return false;
+    const rows = prepackRowsForSelection(queue.selection);
+    const fresh = buildPrepackDefinition(queue.memberId, queue.sourceLabel, rows, queue.selection);
+    const previousItems = new Map();
+    queue.days.forEach(day => day.items.forEach(item => {
+        if (item.instanceKey) previousItems.set(item.instanceKey, item);
+    }));
+    const previousDays = new Map(queue.days.map(day => [day.date, day]));
+    let changed = false;
+    fresh.days.forEach(day => {
+        day.items.forEach(item => {
+            const previous = previousItems.get(item.instanceKey);
+            if (previous && prepackItemFingerprint(previous) === prepackItemFingerprint(item)) {
+                item.id = previous.id;
+                item.status = previous.status;
+                item.scannedCode = previous.scannedCode;
+                item.scannedAt = previous.scannedAt;
+                item.verificationMethod = previous.verificationMethod;
+            } else {
+                changed = true;
+            }
+        });
+        const previousDay = previousDays.get(day.date);
+        const oldFingerprints = (previousDay?.items || []).map(prepackItemFingerprint).sort().join('||');
+        const newFingerprints = day.items.map(prepackItemFingerprint).sort().join('||');
+        const dayChanged = oldFingerprints !== newFingerprints;
+        if (dayChanged) changed = true;
+        day.needsReprint = queue.labelsPrinted
+            ? (dayChanged || !!previousDay?.needsReprint)
+            : false;
+    });
+    queue.days.forEach(day => {
+        if (!fresh.days.some(candidate => candidate.date === day.date) && day.items.length > 0) changed = true;
+    });
+    queue.days = fresh.days;
+    queue.memberName = fresh.memberName;
+    queue.title = fresh.title;
+    updatePrepackQueueStatus(queue);
+    return changed;
+}
+
+async function createPrepackQueue(definition, options = {}) {
+    if (!definition.days?.some(day => day.items.length > 0)) return null;
+    const queue = {
+        id: `queue_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        memberId: definition.memberId,
+        memberName: definition.memberName,
+        sourceLabel: definition.sourceLabel,
+        title: definition.title,
+        selection: definition.selection,
+        scheduledFor: options.scheduledFor || '',
+        labelsPrinted: options.labelsPrinted === true,
+        createdAt: new Date().toISOString(),
+        lastPrintedAt: options.labelsPrinted ? new Date().toISOString() : '',
+        currentDayIndex: 0,
+        status: 'pending',
+        completedAt: '',
+        days: definition.days
+    };
+    db.prepackQueues.unshift(queue);
+    activePrepackQueueId = queue.id;
+    await sync();
+    return queue;
+}
+
+async function commitPrepackPrint(definition) {
+    if (definition.existingQueueId) {
+        const queue = db.prepackQueues.find(item => item.id === definition.existingQueueId);
+        if (!queue) return;
+        const dates = new Set(definition.reprintedDates || []);
+        queue.days.forEach(day => {
+            if (dates.has(day.date)) day.needsReprint = false;
+        });
+        queue.labelsPrinted = true;
+        queue.lastPrintedAt = new Date().toISOString();
+        updatePrepackQueueStatus(queue);
+        await sync();
+        return;
+    }
+    await createPrepackQueue(definition, { labelsPrinted: true });
+}
+
+function updatePrepackQueueStatus(queue) {
+    queue.days.forEach(day => {
+        day.status = !day.needsReprint && day.items.every(item => item.status === 'correct')
+            ? 'completed'
+            : 'pending';
+    });
+    const complete = queue.days.length > 0 && queue.days.every(day => day.status === 'completed');
+    queue.status = complete ? 'completed' : 'pending';
+    if (complete && !queue.completedAt) queue.completedAt = new Date().toISOString();
+    if (!complete) queue.completedAt = '';
+}
+
+function prepackStatusMark(item) {
+    if (item.status === 'correct') return '<span class="prepack-mark">&#10003;</span>';
+    if (item.status === 'wrong') return '<span class="prepack-mark">&#10007;</span>';
+    return '<span class="prepack-mark">[ ]</span>';
+}
+
+function prepackWorkspaceHtml(queue) {
+    const dayIndex = Math.max(0, Math.min(parseInt(queue.currentDayIndex, 10) || 0, queue.days.length - 1));
+    queue.currentDayIndex = dayIndex;
+    const day = queue.days[dayIndex];
+    if (!day) {
+        return `<div class="prepack-workspace-header">
+            <div><strong>${escapeHtml(queue.memberName || queue.title)}</strong><br><small>${escapeHtml(queue.sourceLabel || '')}</small></div>
+            <div>
+                ${queue.selection?.singleMedication ? '' : `<button type="button" onclick="addProfileMedicationToPrepack('${escapeHtml(queue.id)}')">Add From Profile</button>
+                <button type="button" onclick="addLastMinutePrepackItem('${escapeHtml(queue.id)}')">Add New Medication</button>`}
+                <button type="button" onclick="deletePrepackQueue('${escapeHtml(queue.id)}')">Delete Queue</button>
+            </div>
+        </div><div class="empty-state">This queue has no medications to prepare.</div>`;
+    }
+    const nextItem = day.items.find(item => item.status !== 'correct');
+    const itemRows = day.items.map(item => {
+        const statusClass = item.status === 'correct'
+            ? 'prepack-item-correct'
+            : (item.status === 'wrong' ? 'prepack-item-wrong' : '');
+        const orderSetText = item.orderSetName ? ` | ${item.orderSetName}` : '';
+        const removeButton = queue.selection?.singleMedication
+            ? ''
+            : `<button type="button" onclick="removePrepackItem('${escapeHtml(queue.id)}','${escapeHtml(day.date)}','${escapeHtml(item.id)}')">Remove</button>`;
+        return `<div class="prepack-item ${statusClass}">
+            ${prepackStatusMark(item)}
+            <div class="prepack-item-copy">
+                <strong>${escapeHtml(item.time)} - ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')}</strong><br>
+                <small>Qty: ${escapeHtml(item.quantity)} | Dose: ${escapeHtml(item.dose)}${escapeHtml(orderSetText)}</small>
+                ${item.status === 'wrong' ? `<div class="prepack-scan-error">Wrong scan: ${escapeHtml(item.scannedCode || 'Unknown code')}</div>` : ''}
+            </div>
+            ${removeButton}
         </div>`;
     }).join('');
+    const dayButtons = queue.days.map((entry, index) => {
+        const classes = [
+            'prepack-day-button',
+            index === dayIndex ? 'active' : '',
+            entry.status === 'completed' ? 'completed' : '',
+            entry.needsReprint ? 'needs-reprint' : ''
+        ].filter(Boolean).join(' ');
+        const dayLabel = entry.date.includes(' - ') ? entry.date : entry.date.slice(5);
+        return `<button type="button" class="${classes}" onclick="selectPrepackDay('${escapeHtml(queue.id)}',${index})">${escapeHtml(dayLabel)}${entry.status === 'completed' ? ' &#10003;' : ''}</button>`;
+    }).join('');
+    const scanner = queue.status === 'completed'
+        ? '<div class="prepack-complete-banner">&#10003; Prepackage complete</div>'
+        : `<div class="prepack-scanner">
+            <label for="prepack-scan-input">Scan medication QR code:</label>
+            <input id="prepack-scan-input" type="text" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();scanPrepackCode('${escapeHtml(queue.id)}')}">
+            <button type="button" onclick="scanPrepackCode('${escapeHtml(queue.id)}')">Verify</button>
+            <button type="button" onclick="markPrepackDayManual('${escapeHtml(queue.id)}')">Prepacked Manually</button>
+            <span>${nextItem ? `Next: ${escapeHtml(nextItem.medName)} at ${escapeHtml(nextItem.time)}` : 'Day complete'}</span>
+        </div>`;
+    const scheduledText = queue.scheduledFor
+        ? `Scheduled: ${queue.scheduledFor.replace('T', ' ')}`
+        : 'Ready when needed';
+    const printButtonText = queue.labelsPrinted ? 'Print Updated Labels' : 'Print Labels';
+    const medicationActions = queue.selection?.singleMedication
+        ? ''
+        : `<button type="button" onclick="addProfileMedicationToPrepack('${escapeHtml(queue.id)}')">Add From Profile</button>
+           <button type="button" onclick="addLastMinutePrepackItem('${escapeHtml(queue.id)}')">Add New Medication</button>`;
+    return `
+        <div class="prepack-workspace-header">
+            <div><strong>${escapeHtml(queue.memberName || queue.title)}</strong><br><small>${escapeHtml(queue.sourceLabel || '')} | ${escapeHtml(scheduledText)}</small></div>
+            <div>
+                ${medicationActions}
+                <button type="button" onclick="printUpdatedPrepackLabels('${escapeHtml(queue.id)}')">${printButtonText}</button>
+                <button type="button" onclick="deletePrepackQueue('${escapeHtml(queue.id)}')">Delete Queue</button>
+            </div>
+        </div>
+        <div class="prepack-day-strip">${dayButtons}</div>
+        ${day.needsReprint ? '<div class="prepack-reprint-warning">Labels for this day need to be reprinted.</div>' : ''}
+        ${scanner}
+        <div class="prepack-items">${itemRows || '<div class="empty-state">No medications queued for this day.</div>'}</div>`;
 }
+
+window.renderPrepackageQueues = function() {
+    const activeList = document.getElementById('prepack-active-list');
+    const completedList = document.getElementById('prepack-completed-list');
+    const workspace = document.getElementById('prepack-workspace');
+    if (!activeList || !completedList || !workspace) return;
+    if (!Array.isArray(db.prepackQueues)) db.prepackQueues = [];
+    db.prepackQueues.forEach(queue => reconcilePrepackQueue(queue));
+
+    const filter = document.getElementById('prepack-member-filter');
+    const selectedFilter = filter?.value || '';
+    if (filter) {
+        filter.innerHTML = '<option value="">All members</option>' + db.family
+            .slice()
+            .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberDisplayName(member))}</option>`)
+            .join('');
+        filter.value = db.family.some(member => member.id === selectedFilter) ? selectedFilter : '';
+    }
+    const visibleQueues = db.prepackQueues.filter(queue => !filter?.value || queue.memberId === filter.value);
+    const active = visibleQueues
+        .filter(queue => queue.status !== 'completed')
+        .sort((a, b) => String(a.scheduledFor || '9999').localeCompare(String(b.scheduledFor || '9999')));
+    const completed = visibleQueues
+        .filter(queue => queue.status === 'completed')
+        .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+    const queueRow = (queue, complete = false) => `
+        <button type="button" class="prepack-queue-row ${complete ? 'completed' : ''} ${queue.id === activePrepackQueueId ? 'selected' : ''}" onclick="selectPrepackQueue('${escapeHtml(queue.id)}')">
+            <strong>${complete ? '&#10003; ' : ''}${escapeHtml(queue.title)}</strong><br>
+            <small>${escapeHtml(queue.sourceLabel || '')}${queue.scheduledFor ? ` | ${escapeHtml(queue.scheduledFor.replace('T', ' '))}` : ''}${!queue.labelsPrinted ? ' | LABELS NOT PRINTED' : ''}${queue.days.some(day => day.needsReprint) ? ' | LABELS NEED REPRINT' : ''}</small>
+        </button>`;
+    activeList.innerHTML = active.length
+        ? active.map(queue => queueRow(queue)).join('')
+        : '<div class="empty-state">No active prepack queues.</div>';
+    completedList.innerHTML = completed.length
+        ? completed.map(queue => queueRow(queue, true)).join('')
+        : '<div class="empty-state">No completed prepackages.</div>';
+
+    const selected = db.prepackQueues.find(queue => queue.id === activePrepackQueueId);
+    workspace.innerHTML = selected
+        ? prepackWorkspaceHtml(selected)
+        : '<div class="empty-state">Select a prepack queue.</div>';
+    setTimeout(() => document.getElementById('prepack-scan-input')?.focus(), 0);
+};
+
+window.selectPrepackQueue = function(queueId) {
+    activePrepackQueueId = queueId;
+    renderPrepackageQueues();
+};
+
+window.selectPrepackDay = function(queueId, dayIndex) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    if (!queue) return;
+    activePrepackQueueId = queue.id;
+    queue.currentDayIndex = dayIndex;
+    renderPrepackageQueues();
+};
+
+window.scanPrepackCode = async function(queueId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    const input = document.getElementById('prepack-scan-input');
+    if (!queue || !input) return;
+    const day = queue.days[queue.currentDayIndex || 0];
+    const item = day?.items.find(candidate => candidate.status !== 'correct');
+    if (!day || !item) return;
+    const scannedCode = normalizeMedicationCode(input.value);
+    if (!scannedCode) return;
+    const med = db.inventory.find(candidate => candidate.id === item.medId);
+    const expectedCode = normalizeMedicationCode(med?.barcodeCode || item.barcodeCode);
+    item.scannedCode = scannedCode;
+    item.scannedAt = new Date().toISOString();
+    item.status = scannedCode === expectedCode ? 'correct' : 'wrong';
+    updatePrepackQueueStatus(queue);
+    if (day.status === 'completed' && queue.status !== 'completed') {
+        const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
+        if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
+    }
+    await sync();
+};
+
+window.markPrepackDayManual = async function(queueId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    const day = queue?.days[queue.currentDayIndex || 0];
+    if (!queue || !day) return;
+    if (!await appConfirm(`Confirm that every medication for ${day.date} was prepacked manually?`, 'Prepacked Manually')) return;
+    day.items.forEach(item => {
+        item.status = 'correct';
+        item.scannedCode = '';
+        item.scannedAt = new Date().toISOString();
+        item.verificationMethod = 'manual';
+    });
+    day.needsReprint = false;
+    updatePrepackQueueStatus(queue);
+    if (queue.status !== 'completed') {
+        const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
+        if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
+    }
+    await sync();
+};
+
+window.removePrepackItem = async function(queueId, date, itemId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    const day = queue?.days.find(item => item.date === date);
+    const item = day?.items.find(candidate => candidate.id === itemId);
+    if (!queue || !day || !item) return;
+    const schedule = db.schedules.find(candidate => candidate.id === item.scheduleId);
+    if (!schedule || !queue.selection) {
+        if (!await appConfirm(`Remove ${item.medName} from this prepack only?`, 'Change Prepack')) return;
+        day.items = day.items.filter(candidate => candidate.id !== itemId);
+        day.needsReprint = queue.labelsPrinted;
+        updatePrepackQueueStatus(queue);
+        activePrepackQueueId = queue.id;
+        await sync();
+        return;
+    }
+
+    const discontinueOption = schedule.prepackAdded
+        ? `<div class="prepack-remove-option prepack-remove-danger">
+            <input id="prepack-remove-order" name="removeAction" type="radio" value="discontinue-order">
+            <label for="prepack-remove-order">Discontinue this new medication order and remove it from the member profile.</label>
+        </div>`
+        : '';
+    const result = await showActionModal(`Remove From Prepack: ${item.medName}`, `
+        <div class="prepack-remove-option">
+            <input id="prepack-remove-dose" name="removeAction" type="radio" value="prepack-dose" checked>
+            <label for="prepack-remove-dose">Remove only this ${escapeHtml(date)} dose from the prepack. Keep the member order unchanged.</label>
+        </div>
+        <div class="prepack-remove-option">
+            <input id="prepack-remove-all" name="removeAction" type="radio" value="prepack-all">
+            <label for="prepack-remove-all">Remove this medication from every date in this prepack. Keep the member order unchanged.</label>
+        </div>
+        ${discontinueOption}
+    `, 'Continue');
+    if (!result?.removeAction) return;
+
+    if (result.removeAction === 'discontinue-order' && schedule.prepackAdded) {
+        db.schedules = db.schedules.filter(candidate => candidate.id !== schedule.id);
+        if (queue.selection.kind === 'schedule-list') {
+            queue.selection.scheduleIds = (queue.selection.scheduleIds || []).filter(id => id !== schedule.id);
+        }
+    } else if (result.removeAction === 'prepack-all') {
+        if (queue.selection.kind === 'member-range') {
+            queue.selection.excludedScheduleIds = Array.from(new Set([
+                ...(queue.selection.excludedScheduleIds || []),
+                schedule.id
+            ]));
+        } else {
+            queue.selection.scheduleIds = (queue.selection.scheduleIds || []).filter(id => id !== schedule.id);
+        }
+    } else if (item.instanceKey) {
+        queue.selection.excludedInstanceKeys = Array.from(new Set([
+            ...(queue.selection.excludedInstanceKeys || []),
+            item.instanceKey
+        ]));
+    }
+    reconcilePrepackQueue(queue);
+    activePrepackQueueId = queue.id;
+    await sync();
+};
+
+window.updatePrepackAddMedication = function() {
+    const body = document.getElementById('action-modal-body');
+    const search = body?.querySelector('[name="medSearch"]');
+    const select = body?.querySelector('[name="medId"]');
+    if (!search || !select) return;
+    const query = search.value.trim().toLowerCase();
+    const matches = db.inventory
+        .filter(med => query && med.name.toLowerCase() === query)
+        .sort((a, b) => formatMedStrength(a).localeCompare(formatMedStrength(b), undefined, { numeric: true, sensitivity: 'base' }));
+    const previous = select.value;
+    select.innerHTML = matches.map(med =>
+        `<option value="${escapeHtml(med.id)}">${escapeHtml(formatMedStrength(med))}</option>`
+    ).join('') || '<option value="">Select a medication first</option>';
+    select.disabled = matches.length === 0;
+    if (matches.some(med => med.id === previous)) select.value = previous;
+    window.calculatePrepackAddDose();
+};
+
+window.calculatePrepackAddDose = function() {
+    const body = document.getElementById('action-modal-body');
+    const medId = body?.querySelector('[name="medId"]')?.value;
+    const doseQty = parseAmount(body?.querySelector('[name="doseQty"]')?.value, 0);
+    const calculated = body?.querySelector('[name="calculatedDose"]');
+    const unit = body?.querySelector('#prepack-add-qty-unit');
+    const med = db.inventory.find(item => item.id === medId);
+    if (calculated) calculated.value = med ? formatPrescribedDose(med, doseQty) : '';
+    if (unit) unit.textContent = med ? (med.administrationUnit || med.formulation || 'units') : '';
+};
+
+window.renderPrepackAddTimes = function() {
+    const body = document.getElementById('action-modal-body');
+    const freq = body?.querySelector('[name="freq"]')?.value || 'QD';
+    const container = body?.querySelector('#prepack-add-times');
+    if (!container) return;
+    const previous = Array.from(container.querySelectorAll('[name="prepackTimes"]')).map(input => input.value);
+    const count = getExpectedTimeCount(freq) || 1;
+    container.innerHTML = Array.from({ length: count }, (_, index) => `
+        <div class="field-row">
+            <label>Dose ${index + 1}:</label>
+            <input name="prepackTimes" type="time" value="${escapeHtml(previous[index] || defaultTimeForIndex(index, freq))}">
+        </div>`).join('');
+};
+
+window.toggleAllPrepackAddDates = function(checked) {
+    document.querySelectorAll('#action-modal-body input[name="prepackDates"]').forEach(input => {
+        input.checked = checked;
+    });
+};
+
+window.addProfileMedicationToPrepack = async function(queueId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    if (!queue || queue.selection?.singleMedication) return;
+    const represented = new Set(queue.days.flatMap(day => day.items.map(item => item.scheduleId)));
+    const candidates = db.schedules
+        .filter(schedule =>
+            schedule.memberId === queue.memberId &&
+            !represented.has(schedule.id) &&
+            getScheduleInstancesInRange(schedule, queue.selection?.startDate, queue.selection?.endDate).length > 0
+        )
+        .sort((a, b) => {
+            const first = db.inventory.find(item => item.id === a.medId)?.name || '';
+            const second = db.inventory.find(item => item.id === b.medId)?.name || '';
+            return first.localeCompare(second, undefined, { sensitivity: 'base' });
+        });
+    if (candidates.length === 0) {
+        await appAlert('Every eligible medication order from this member profile is already included in the prepack.');
+        return;
+    }
+    const choices = candidates.map((schedule, index) => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        const inputId = `prepack-profile-med-${index}`;
+        return `<div class="label-selection-item">
+            <input id="${inputId}" name="scheduleIds" type="checkbox" value="${escapeHtml(schedule.id)}">
+            <label for="${inputId}">${escapeHtml(med?.name || 'Unknown medication')} ${escapeHtml(med ? formatMedStrength(med) : '')} - ${escapeHtml(formatFrequency(schedule))}</label>
+        </div>`;
+    }).join('');
+    const result = await showActionModal('Add Medication From Member Profile', `
+        <div class="sunken-panel label-selection-list">${choices}</div>
+    `, 'Add Selected');
+    if (!result) return;
+    const selectedIds = result.scheduleIds || [];
+    if (selectedIds.length === 0) {
+        await appAlert('Select at least one medication order.');
+        return;
+    }
+    if (queue.selection?.kind === 'member-range') {
+        const selected = new Set(selectedIds);
+        queue.selection.excludedScheduleIds = (queue.selection.excludedScheduleIds || [])
+            .filter(id => !selected.has(id));
+    } else {
+        queue.selection.scheduleIds = Array.from(new Set([...(queue.selection.scheduleIds || []), ...selectedIds]));
+    }
+    reconcilePrepackQueue(queue);
+    activePrepackQueueId = queue.id;
+    await sync();
+};
+
+window.addLastMinutePrepackItem = async function(queueId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    if (!queue || db.inventory.length === 0) return;
+    const selectableDates = dateKeysInRange(queue.selection?.startDate, queue.selection?.endDate);
+    const dateChoices = (selectableDates.length ? selectableDates : queue.days.map(day => day.date)).map((date, index) => {
+        const inputId = `prepack-add-date-${index}`;
+        return `<span class="weekday-option"><input id="${inputId}" name="prepackDates" type="checkbox" value="${escapeHtml(date)}"><label for="${inputId}">${escapeHtml(date)}</label></span>`;
+    }).join('');
+    const inventory = db.inventory
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const medNames = Array.from(new Set(inventory.map(med => med.name)))
+        .map(name => `<option value="${escapeHtml(name)}"></option>`)
+        .join('');
+    const actionWindow = ensureActionModal().querySelector('.window');
+    if (actionWindow) actionWindow.style.width = 'min(720px, calc(100vw - 20px))';
+    const result = await showActionModal('Add Medication to Prepack and Member Profile', `
+        <div class="field-row">
+            <label>Medication:</label>
+            <input name="medSearch" list="prepack-med-options" value="" placeholder="Search medication..." style="width:190px;" oninput="updatePrepackAddMedication()">
+            <datalist id="prepack-med-options">${medNames}</datalist>
+            <label>Strength:</label>
+            <select name="medId" style="width:150px;" onchange="calculatePrepackAddDose()" disabled><option value="">Select a medication first</option></select>
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Quantity:</label><input name="doseQty" type="number" min="0.01" step="any" value="1" style="width:70px;" oninput="calculatePrepackAddDose()">
+            <span id="prepack-add-qty-unit"></span>
+            <label>Calculated dose:</label><input name="calculatedDose" type="text" value="" disabled style="width:150px;">
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Frequency:</label>
+            <select name="freq" onchange="renderPrepackAddTimes()">
+                <option value="QD">Once per selected date</option>
+                <option value="BID">Twice per selected date</option>
+                <option value="TID">Three times per selected date</option>
+                <option value="QID">Four times per selected date</option>
+                <option value="Nightly">Nightly on selected dates</option>
+            </select>
+            <label>Prescriber:</label>
+            <select name="prescriberId" style="width:180px;">${prescriberOptionsHtml('', queue.memberId, false)}</select>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;"><label>Administration time(s):</label><div id="prepack-add-times">
+            <div class="field-row"><label>Dose 1:</label><input name="prepackTimes" type="time" value="08:00"></div>
+        </div></div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <div class="field-row"><label>Affected date(s):</label><button type="button" onclick="toggleAllPrepackAddDates(true)">Select All</button><button type="button" onclick="toggleAllPrepackAddDates(false)">Clear</button></div>
+            <div class="prepack-date-choices">${dateChoices}</div>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;"><label>Instructions:</label><textarea name="instructions" rows="2" style="width:100%; resize:none;"></textarea></div>
+    `, 'Add Medication');
+    if (actionWindow) actionWindow.style.width = '420px';
+    if (!result) return;
+    const med = db.inventory.find(item => item.id === result.medId);
+    const dates = (result.prepackDates || []).slice().sort();
+    const doseQty = parseAmount(result.doseQty, NaN);
+    const submittedTimes = Array.isArray(result.prepackTimes)
+        ? result.prepackTimes
+        : [result.prepackTimes].filter(Boolean);
+    const times = Array.from(new Set(submittedTimes)).filter(Boolean).sort();
+    const expectedTimes = getExpectedTimeCount(result.freq);
+    if (!med || dates.length === 0 || !Number.isFinite(doseQty) || doseQty <= 0 || times.length !== expectedTimes) {
+        await appAlert(`Select a medication, one or more dates, a quantity, and ${expectedTimes} administration time${expectedTimes === 1 ? '' : 's'}. Times may match other medications.`);
+        return;
+    }
+    const schedule = {
+        id: `prepack_schedule_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        memberId: queue.memberId,
+        medId: med.id,
+        doseQty: String(doseQty),
+        prescriberId: result.prescriberId || med.prescriberId || '',
+        freq: result.freq,
+        startDate: dates[0],
+        endDate: dates[dates.length - 1],
+        includedDates: dates,
+        excludedInstances: [],
+        times,
+        instructions: result.instructions || '',
+        prepackAdded: true,
+        isOneTime: false
+    };
+    db.schedules.push(schedule);
+    if (queue.selection?.kind === 'schedule-list') {
+        queue.selection.scheduleIds = Array.from(new Set([...(queue.selection.scheduleIds || []), schedule.id]));
+    } else if (!queue.selection) {
+        queue.selection = {
+            kind: 'schedule-list',
+            scheduleIds: [schedule.id],
+            startDate: dates[0],
+            endDate: dates[dates.length - 1]
+        };
+    }
+    reconcilePrepackQueue(queue);
+    queue.currentDayIndex = Math.max(queue.days.findIndex(day => dates.includes(day.date)), 0);
+    activePrepackQueueId = queue.id;
+    await sync();
+};
+
+function prepackDayLabelHtml(queue, day) {
+    const labelClass = getLabelClass(
+        day.items.map(item => `${item.time} ${item.medName} ${item.strength} ${item.quantity}`),
+        day.items.length + 1
+    );
+    const rows = day.items.length
+        ? day.items.map(item => `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')} (${escapeHtml(item.quantity)})</div>`).join('')
+        : '<div class="label-med-row">No medications in this prepack</div>';
+    return `<div class="${labelClass}">
+        <div class="label-date">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}</div>
+        ${rows}
+    </div>`;
+}
+
+window.printUpdatedPrepackLabels = async function(queueId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    if (!queue) return;
+    reconcilePrepackQueue(queue);
+    const days = queue.labelsPrinted
+        ? queue.days.filter(day => day.needsReprint)
+        : queue.days;
+    if (days.length === 0) {
+        await appAlert('No prepack days currently require updated labels.');
+        return;
+    }
+    let labelHtml = days.map(day => prepackDayLabelHtml(queue, day)).join('');
+    if (queue.selection?.singleMedication && queue.selection.labelLayout === 'range') {
+        const schedule = db.schedules.find(item => item.id === queue.selection.scheduleIds?.[0]);
+        const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+        const member = db.family.find(item => item.id === queue.memberId);
+        const instances = prepackRowsForSelection(queue.selection).map(row => row.instance);
+        if (schedule && med && member && instances.length > 0) {
+            labelHtml = medicationRangeLabelHtml(
+                schedule,
+                med,
+                member,
+                queue.selection.startDate,
+                queue.selection.endDate,
+                instances
+            );
+        }
+    }
+    previewLabelHtml(
+        labelHtml,
+        { existingQueueId: queue.id, reprintedDates: days.map(day => day.date) }
+    );
+};
+
+window.deletePrepackQueue = async function(queueId) {
+    if (!await appConfirm('Delete this prepack queue?', 'Delete Prepack Queue')) return;
+    db.prepackQueues = db.prepackQueues.filter(item => item.id !== queueId);
+    if (activePrepackQueueId === queueId) activePrepackQueueId = null;
+    await sync();
+};
 
 // --- VITALS ---
 function monitoringProfileById(member, monitoringId) {
@@ -2869,7 +4045,7 @@ function renderMemberAdministrationLog(memberId) {
     }
 
     container.innerHTML = entries.map(entry => {
-        const canEdit = entry.scheduleId;
+        const canEdit = entry.scheduleId && entry.doseStatus !== 'container-finished';
         return `
         <div style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding:4px;">
             <b>${escapeHtml(entry.timestamp || '')}</b> - ${escapeHtml(entry.medName || 'Medication')}<br>
@@ -2903,10 +4079,66 @@ function timelineDoseState(schedule, instance) {
 
     const now = new Date();
     const due = new Date(`${instance.date}T${instance.time === 'PRN' ? '00:00' : instance.time}`);
-    if (due < now) return { className: 'timeline-overdue', title: 'Not documented at scheduled time' };
-    if (instance.date === localDateKey(now)) return { className: 'timeline-upcoming', title: 'Upcoming dose' };
-    return { className: 'timeline-future', title: 'Future scheduled dose' };
+    if (due < now) return { className: 'timeline-overdue', title: 'Not documented at scheduled time. Click to document status.' };
+    if (instance.date === localDateKey(now)) return { className: 'timeline-upcoming', title: 'Upcoming dose. Click to document status.' };
+    return { className: 'timeline-future', title: 'Future scheduled dose. Click to document status.' };
 }
+
+window.documentScheduleInstance = async function(scheduleId, scheduledDate, scheduledTime) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+    if (!schedule || !med) return;
+    const key = scheduleInstanceKey(schedule.id, scheduledDate, scheduledTime);
+    const existing = db.history.find(item => item.scheduleInstanceKey === key);
+    if (existing) {
+        await window.editAdministration(existing.id);
+        return;
+    }
+    const isValidInstance = getScheduleInstancesForDate(schedule, scheduledDate)
+        .some(instance => instance.time === scheduledTime);
+    if (!isValidInstance) {
+        await appAlert('This dose is no longer part of the active medication schedule.');
+        return;
+    }
+
+    const defaults = defaultActualDateTime();
+    const result = await showActionModal(`Document Dose: ${med.name}`, `
+        <div class="sunken-panel" style="padding:6px; background:white; font-size:11px;">
+            Scheduled: <strong>${escapeHtml(scheduledDate)} ${escapeHtml(scheduledTime)}</strong>
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Status:</label>
+            <select name="doseStatus">
+                <option value="given">Given as scheduled</option>
+                <option value="late">Given late</option>
+                <option value="early">Given early</option>
+                <option value="skipped">Skipped</option>
+                <option value="missed">Missed / forgotten</option>
+            </select>
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Date documented/taken:</label><input name="actualDate" type="date" value="${defaults.date}">
+            <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Note:</label>
+            <textarea name="doseNote" rows="3" style="width:100%; resize:none;" placeholder="Optional note"></textarea>
+        </div>
+    `, 'Save Status');
+    if (!result) return;
+    if (!result.actualDate || !result.actualTime) {
+        await appAlert('Documented date and time are required.');
+        return;
+    }
+    result.scheduledDate = scheduledDate;
+    result.scheduledTime = scheduledTime;
+    const documented = await administerScheduleRecord(
+        schedule,
+        result,
+        schedule.orderSetName ? `Order Set (${schedule.orderSetName})` : 'Schedule'
+    );
+    if (documented) await sync();
+};
 
 function historyEntryDateKey(entry) {
     const parsed = historyEntryDateTime(entry);
@@ -2947,7 +4179,9 @@ function memberMedicationTimelineHtml(schedule) {
             doses = instances.length
                 ? instances.map(instance => {
                 const state = timelineDoseState(schedule, instance);
-                const click = state.entryId ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"` : '';
+                const click = state.entryId
+                    ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"`
+                    : ` onclick="event.stopPropagation(); documentScheduleInstance('${schedule.id}','${instance.date}','${instance.time}')"`;
                 return `<button type="button" class="timeline-dose ${state.className}" title="${escapeHtml(state.title)}"${click}>${escapeHtml(instance.time)}</button>`;
                 }).join('')
                 : '<span class="timeline-dose" title="No scheduled dose">-</span>';
@@ -3538,6 +4772,9 @@ window.addSchedule = async function() {
         qodStart: frequencyDetails.freq === 'QOD' ? (document.getElementById('qod-start-date').value || startDate) : "",
         times: frequencyDetails.times,
         intervalHours: frequencyDetails.intervalHours,
+        intervalWeeks: frequencyDetails.intervalWeeks || null,
+        timesPerWeek: frequencyDetails.timesPerWeek || null,
+        weekdays: frequencyDetails.weekdays || [],
         prnMaxDoses: frequencyDetails.prnMaxDoses || null,
         prnWindowHours: frequencyDetails.prnWindowHours || 24,
         startTime: frequencyDetails.startTime || frequencyDetails.times[0] || "",
@@ -3559,6 +4796,7 @@ window.addSchedule = async function() {
     if (prnMax) prnMax.value = '';
     const prnWindow = document.getElementById('sched-prn-window-hours');
     if (prnWindow) prnWindow.value = '24';
+    setWeekdaySelections('sched-weekday-container', []);
     renderFrequencyControls('sched');
 };
 
@@ -3627,7 +4865,10 @@ async function confirmPrnDoseLimitOverride(schedule, med, actual, excludeEntryId
         <div style="font-size:11px; margin-bottom:8px;">
             PharmAtlas counts each documented administration as 1 dose of the ordered quantity: ${escapeHtml(formatQtyForSchedule(schedule, med))}.
         </div>
-        <label style="font-size:11px;"><input name="overrideConfirmed" type="checkbox" value="yes"> Confirm override and document the reason in the note.</label>
+        <div class="field-row">
+            <input id="prn-override-confirm" name="overrideConfirmed" type="checkbox" value="yes">
+            <label for="prn-override-confirm" style="font-size:11px;">Confirm override and document the reason in the note.</label>
+        </div>
     `, 'Override', body => ({ overrideConfirmed: body.querySelector('input[name="overrideConfirmed"]')?.checked ? 'yes' : '' }));
     if (!result) return false;
     if (result.overrideConfirmed !== 'yes') {
@@ -3853,8 +5094,8 @@ window.finishTopicalContainer = async function(scheduleId) {
     if (!schedule || !med || !usesContainerTracking(med)) return;
 
     const defaults = defaultActualDateTime();
-    const result = await showActionModal(`Finish Container: ${med.name}`, `
-        <div style="font-size:11px; margin-bottom:8px;">Mark a container as finished. This is the only action that reduces inventory while this medication is tracked by whole container.</div>
+    const result = await showActionModal(`${finishedContainerButtonText(med)}: ${med.name}`, `
+        <div style="font-size:11px; margin-bottom:8px;">Mark the bottle or container as finished. Inventory will be reduced and this medication order will be discontinued automatically.</div>
         <div class="field-row">
             <label>Date:</label><input name="actualDate" type="date" value="${defaults.date}">
             <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
@@ -3885,12 +5126,21 @@ window.finishTopicalContainer = async function(scheduleId) {
         timestamp: `${result.actualDate} ${result.actualTime}`,
         memberId: schedule.memberId,
         memberName: memberDisplayName(db.family.find(member => member.id === schedule.memberId)),
+        medId: med.id,
         medName: med.name,
         scheduleId: schedule.id,
         doseStatus: 'container-finished',
+        sourceLabel: schedule.orderSetName ? `Order Set (${schedule.orderSetName})` : 'Schedule',
+        stockDelta: containers,
+        stockLogDetail: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished`,
         details: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished; container inventory reduced${result.note ? `; Note: ${result.note}` : ''}`
     });
+    db.schedules = db.schedules.filter(item => item.id !== schedule.id);
     await sync();
+    const memberModal = document.getElementById('member-modal');
+    if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
+        openMemberModal(schedule.memberId);
+    }
 };
 
 window.administerOrderSet = async function(orderSetId) {
@@ -4256,7 +5506,7 @@ window.addIngredientRow = function() {
 function inventorySearchText(med) {
     return [
         med.name,
-        formatMedStrength(med),
+        formatLabelMedStrength(med),
         formatInventoryUnits(med),
         inventoryUnitFor(med),
         med.expiry,
@@ -4391,6 +5641,7 @@ sortedInventory.forEach(med => {
     }
     renderCalendar();
     renderOrderSets();
+    renderPrepackageQueues();
     renderVitals();
     renderInventoryStatus();
     renderVitalDashboard();
@@ -4492,7 +5743,7 @@ function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
         : '';
     const labelClass = getLabelClass([
         med.name,
-        formatMedStrength(med),
+        formatLabelMedStrength(med),
         formatPrescribedDose(med, schedule.doseQty),
         formatQtyForSchedule(schedule, med),
         `${member.firstName} ${member.lastName}`,
@@ -4502,12 +5753,43 @@ function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
     return `
         <div class="${labelClass}">
             <div class="label-date">${escapeHtml(header)}</div>
-            <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</div>
+            <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
             <div class="label-small">Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
             <div class="label-small"><b>Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}</b></div>
             <div class="label-small">Member: ${escapeHtml(`${member.firstName} ${member.lastName}`)}</div>
             ${instructionLine}
         </div>`;
+}
+
+function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances) {
+    const totalQuantity = instances.reduce((sum) => sum + parseAmount(schedule.doseQty, 0), 0);
+    const scheduledTimes = Array.from(new Set(instances.map(instance => instance.time)))
+        .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+    const instructionLine = schedule.instructions
+        ? `<div class="label-small"><b>Instructions:</b> ${escapeHtml(schedule.instructions)}</div>`
+        : '';
+    const totalQtyText = formatQtyForSchedule({ ...schedule, doseQty: totalQuantity }, med);
+    const scheduleText = schedule.freq === 'PRN'
+        ? 'As needed'
+        : `${formatFrequency(schedule)}${scheduledTimes.length ? ` at ${scheduledTimes.join(', ')}` : ''}`;
+    const labelClass = getLabelClass([
+        med.name,
+        formatLabelMedStrength(med),
+        formatPrescribedDose(med, schedule.doseQty),
+        totalQtyText,
+        scheduleText,
+        memberDisplayName(member),
+        schedule.instructions
+    ], schedule.instructions ? 7 : 6);
+    return `<div class="${labelClass}">
+        <div class="label-date">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}</div>
+        <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
+        <div class="label-small">Dose each time: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
+        <div class="label-small"><b>Total Qty: ${escapeHtml(totalQtyText)}</b></div>
+        <div class="label-small">${escapeHtml(scheduleText)}</div>
+        <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>
+        ${instructionLine}
+    </div>`;
 }
 
 window.printSingleLabel = async function(scheduleId) {
@@ -4569,6 +5851,13 @@ window.printSingleLabel = async function(scheduleId) {
                 ${doseModeOptions}
             </select>
         </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Container label layout:</label>
+            <select name="labelLayout" style="width:280px;">
+                <option value="daily">One label for each date</option>
+                <option value="range">One label for the entire selected date range</option>
+            </select>
+        </div>
         <div id="individual-label-time-row" class="field-row" style="display:none; margin-top:8px;">
             <label>Scheduled time:</label>
             <select name="labelSpecificTime">${timeOptions}</select>
@@ -4604,7 +5893,9 @@ window.printSingleLabel = async function(scheduleId) {
     }
 
     let labels = [];
-    if (result.labelDoseMode === 'all') {
+    if (result.labelLayout === 'range') {
+        labels = [medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances)];
+    } else if (result.labelDoseMode === 'all') {
         const byDate = instances.reduce((acc, instance) => {
             if (!acc[instance.date]) acc[instance.date] = [];
             acc[instance.date].push(instance.time);
@@ -4620,17 +5911,36 @@ window.printSingleLabel = async function(scheduleId) {
     if (labels.length > 100 && !await appConfirm(`This will create ${labels.length} labels. Continue?`, 'Large Label Print Job')) {
         return;
     }
-    previewLabelHtml(labels.join(''));
+    const prepackRows = instances.map(instance => ({ schedule: s, med, instance }));
+    previewLabelHtml(
+        labels.join(''),
+        buildPrepackDefinition(
+            s.memberId,
+            `Individual medication labels: ${med.name}`,
+            prepackRows,
+            {
+                kind: 'schedule-list',
+                scheduleIds: [s.id],
+                startDate,
+                endDate,
+                specificTime: result.labelDoseMode === 'specific' ? result.labelSpecificTime : '',
+                labelLayout: result.labelLayout || 'daily',
+                singleMedication: true
+            }
+        )
+    );
 };
 
 window.printInventoryLabel = function(medId) {
     const med = db.inventory.find(m => m.id === medId);
     if (!med) return;
+    if (!med.barcodeCode) med.barcodeCode = createMedicationCode();
+    const qrDataUrl = medicationQrDataUrl(med.barcodeCode);
 
     const notesLine = med.notes ? `<div class="label-small"><b>Notes:</b> ${escapeHtml(med.notes)}</div>` : '';
     const labelClass = getLabelClass([
         med.name,
-        formatMedStrength(med),
+        formatLabelMedStrength(med),
         med.stock,
         inventoryUnitFor(med),
         med.storage,
@@ -4640,12 +5950,16 @@ window.printInventoryLabel = function(medId) {
     ], med.notes ? 6 : 5);
 
     previewLabelHtml(`
-        <div class="${labelClass}">
-            <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</div>
-            <div class="label-small">On hand: ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}</div>
-            <div class="label-small">Storage: ${escapeHtml(med.storage || 'N/A')}</div>
-            <div class="label-small">Exp: ${escapeHtml(med.expiry || 'N/A')} | Ctrl: ${escapeHtml(med.controlLevel || 'N/A')}</div>
-            ${notesLine}
+        <div class="${labelClass} inventory-qr-label">
+            <div class="inventory-qr-copy">
+                <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
+                <div class="label-small">On hand: ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}</div>
+                <div class="label-small">Storage: ${escapeHtml(med.storage || 'N/A')}</div>
+                <div class="label-small">Exp: ${escapeHtml(med.expiry || 'N/A')} | Ctrl: ${escapeHtml(med.controlLevel || 'N/A')}</div>
+                ${notesLine}
+                <div class="label-small label-code">${escapeHtml(med.barcodeCode)}</div>
+            </div>
+            ${qrDataUrl ? `<img class="inventory-label-qr" src="${qrDataUrl}" alt="Medication QR code">` : ''}
         </div>`);
 };
 
@@ -4653,34 +5967,133 @@ window.printInventoryLabel = function(medId) {
 
 
 
-window.printDateRangeLabels = function(memberId, startDate, endDate) {
+window.toggleLabelOrderSetGroup = function(groupKey, checked) {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    body.querySelectorAll(`input[data-label-group="${groupKey}"]`).forEach(input => {
+        input.checked = checked;
+    });
+};
+
+window.syncLabelOrderSetGroup = function(groupKey) {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const parent = body.querySelector(`#label-order-set-${groupKey}`);
+    const children = Array.from(body.querySelectorAll(`input[data-label-group="${groupKey}"]`));
+    if (!parent || children.length === 0) return;
+    parent.checked = children.every(input => input.checked);
+    parent.indeterminate = children.some(input => input.checked) && !parent.checked;
+};
+
+function labelScheduleChoiceHtml(schedule, inputId, groupKey = '') {
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    if (!med) return '';
+    const groupAttributes = groupKey
+        ? ` data-label-group="${groupKey}" onchange="syncLabelOrderSetGroup('${groupKey}')"`
+        : '';
+    return `<div class="label-selection-item">
+        <input id="${inputId}" name="scheduleIds" type="checkbox" value="${escapeHtml(schedule.id)}" checked${groupAttributes}>
+        <label for="${inputId}">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} - ${escapeHtml(formatFrequency(schedule))}</label>
+    </div>`;
+}
+
+async function chooseDateRangeLabelSchedules(memberId, startDate, endDate) {
+    const schedules = db.schedules
+        .filter(schedule => schedule.memberId === memberId && getScheduleInstancesInRange(schedule, startDate, endDate).length > 0)
+        .sort((a, b) => {
+            const first = db.inventory.find(item => item.id === a.medId)?.name || '';
+            const second = db.inventory.find(item => item.id === b.medId)?.name || '';
+            return first.localeCompare(second, undefined, { sensitivity: 'base' });
+        });
+    if (schedules.length === 0) {
+        await appAlert('No scheduled medications were found in this date range.');
+        return null;
+    }
+
+    const grouped = new Map();
+    const standalone = [];
+    schedules.forEach(schedule => {
+        if (!schedule.orderSetId) {
+            standalone.push(schedule);
+            return;
+        }
+        if (!grouped.has(schedule.orderSetId)) grouped.set(schedule.orderSetId, []);
+        grouped.get(schedule.orderSetId).push(schedule);
+    });
+
+    const orderSetGroups = Array.from(grouped.entries()).map(([orderSetId, setSchedules], groupIndex) => {
+        const set = db.orderSets.find(item => item.id === orderSetId);
+        const groupKey = String(groupIndex);
+        const children = setSchedules
+            .map((schedule, itemIndex) => labelScheduleChoiceHtml(schedule, `label-set-${groupIndex}-med-${itemIndex}`, groupKey))
+            .join('');
+        return `<div class="label-selection-group">
+            <div class="label-selection-heading">
+                <input id="label-order-set-${groupKey}" type="checkbox" checked onchange="toggleLabelOrderSetGroup('${groupKey}', this.checked)">
+                <label for="label-order-set-${groupKey}"><strong>Order Set: ${escapeHtml(set?.name || setSchedules[0]?.orderSetName || 'Unnamed')}</strong></label>
+            </div>
+            <div class="label-selection-children">${children}</div>
+        </div>`;
+    }).join('');
+    const standaloneRows = standalone
+        .map((schedule, index) => labelScheduleChoiceHtml(schedule, `label-standalone-${index}`))
+        .join('');
+    const result = await showActionModal('Choose Medications for Date-Range Labels', `
+        <div style="font-size:11px; margin-bottom:6px;">Uncheck any medication or complete order set that should be excluded from the daily labels.</div>
+        <div class="sunken-panel label-selection-list">
+            ${orderSetGroups}
+            ${standaloneRows ? `<div class="label-selection-group"><strong>Individual Medication Orders</strong>${standaloneRows}</div>` : ''}
+        </div>
+    `, 'Preview Labels');
+    if (!result) return null;
+    const selectedIds = result.scheduleIds || [];
+    if (selectedIds.length === 0) {
+        await appAlert('Select at least one medication to include on the labels.');
+        return null;
+    }
+    return new Set(selectedIds);
+}
+
+window.printDateRangeLabels = async function(memberId, startDate, endDate) {
     const mem = db.family.find(f => f.id === memberId);
     if (!mem) return;
 
     const start = parseLocal(startDate);
     const end = parseLocal(endDate);
     if (!start || !end || end < start) return alert("Enter a valid date range.");
+    const includedScheduleIds = await chooseDateRangeLabelSchedules(memberId, startDate, endDate);
+    if (!includedScheduleIds) return;
+    const excludedScheduleIds = db.schedules
+        .filter(schedule =>
+            schedule.memberId === memberId &&
+            getScheduleInstancesInRange(schedule, startDate, endDate).length > 0 &&
+            !includedScheduleIds.has(schedule.id)
+        )
+        .map(schedule => schedule.id);
 
     let labelCount = 0;
     let labelsHtml = '';
+    const prepackRows = [];
     const cursor = new Date(start);
 
     while (cursor <= end) {
         const yyyymmdd = localDateKey(cursor);
 
-        const doseRows = collectMemberScheduleDoseRows(memberId, yyyymmdd, yyyymmdd);
+        const doseRows = collectMemberScheduleDoseRows(memberId, yyyymmdd, yyyymmdd)
+            .filter(row => includedScheduleIds.has(row.schedule.id));
+        prepackRows.push(...doseRows);
 
         labelCount++;
         const labelClass = getLabelClass(
-            doseRows.map(row => `${row.instance.time} ${row.med.name} ${formatMedStrength(row.med)} ${formatQtyForSchedule(row.schedule, row.med)}`),
+            doseRows.map(row => `${row.instance.time} ${row.med.name} ${formatLabelMedStrength(row.med)} ${formatQtyForSchedule(row.schedule, row.med)}`),
             doseRows.length + 1
         );
         const medRowsHtml = doseRows.length > 0
             ? doseRows.map(row => {
                 return `<div class="label-med-row">
-                <b>${escapeHtml(row.instance.time)}</b>: ${escapeHtml(row.med.name)} ${escapeHtml(formatMedStrength(row.med))} (${escapeHtml(formatQtyForSchedule(row.schedule, row.med))})</div>`;
+                <b>${escapeHtml(row.instance.time)}</b>: ${escapeHtml(row.med.name)} ${escapeHtml(formatLabelMedStrength(row.med))} (${escapeHtml(formatQtyForSchedule(row.schedule, row.med))})</div>`;
             }).join('')
-            : '<div class="label-med-row">No scheduled medications</div>';
+            : '<div class="label-med-row">No included medications scheduled</div>';
 
         labelsHtml += `
             <div class="${labelClass}">
@@ -4691,7 +6104,21 @@ window.printDateRangeLabels = function(memberId, startDate, endDate) {
     }
 
     if (labelCount > 0) {
-        previewLabelHtml(labelsHtml);
+        previewLabelHtml(
+            labelsHtml,
+            buildPrepackDefinition(
+                memberId,
+                `Daily labels: ${localDateKey(start)} - ${localDateKey(end)}`,
+                prepackRows,
+                {
+                    kind: 'member-range',
+                    memberId,
+                    startDate: localDateKey(start),
+                    endDate: localDateKey(end),
+                    excludedScheduleIds
+                }
+            )
+        );
     } else {
         alert("No scheduled medications found for that date range.");
     }

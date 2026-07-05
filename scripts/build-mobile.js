@@ -7,7 +7,8 @@ const files = [
   'index.html',
   'style.css',
   'renderer.js',
-  'mobile-api.js'
+  'mobile-api.js',
+  'vendor/qrcode.js'
 ];
 
 function emptyDir(dir) {
@@ -25,7 +26,9 @@ function emptyDir(dir) {
 emptyDir(outDir);
 
 for (const file of files) {
-  fs.copyFileSync(path.join(root, file), path.join(outDir, file));
+  const destination = path.join(outDir, file);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(path.join(root, file), destination);
 }
 
 console.log(`Mobile web build written to ${outDir}`);
