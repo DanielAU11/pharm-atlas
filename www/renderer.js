@@ -5931,10 +5931,7 @@ window.printSingleLabel = async function(scheduleId) {
     );
 };
 
-window.printInventoryLabel = function(medId) {
-    const med = db.inventory.find(m => m.id === medId);
-    if (!med) return;
-    if (!med.barcodeCode) med.barcodeCode = createMedicationCode();
+function inventoryLabelHtml(med) {
     const qrDataUrl = medicationQrDataUrl(med.barcodeCode);
 
     const notesLine = med.notes ? `<div class="label-small"><b>Notes:</b> ${escapeHtml(med.notes)}</div>` : '';
@@ -5949,7 +5946,7 @@ window.printInventoryLabel = function(medId) {
         med.notes
     ], med.notes ? 6 : 5);
 
-    previewLabelHtml(`
+    return `
         <div class="${labelClass} inventory-qr-label">
             <div class="inventory-qr-copy">
                 <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
@@ -5960,7 +5957,70 @@ window.printInventoryLabel = function(medId) {
                 <div class="label-small label-code">${escapeHtml(med.barcodeCode)}</div>
             </div>
             ${qrDataUrl ? `<img class="inventory-label-qr" src="${qrDataUrl}" alt="Medication QR code">` : ''}
-        </div>`);
+        </div>`;
+}
+
+window.printInventoryLabel = async function(medId) {
+    const med = db.inventory.find(m => m.id === medId);
+    if (!med) return;
+    if (!med.barcodeCode) {
+        med.barcodeCode = createMedicationCode();
+        await window.api.save(db);
+    }
+    previewLabelHtml(inventoryLabelHtml(med));
+};
+
+window.toggleAllInventoryLabelChoices = function(checked) {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    body.querySelectorAll('input[name="inventoryMedIds"]').forEach(input => {
+        input.checked = checked;
+    });
+};
+
+window.printAllInventoryLabels = async function() {
+    const inventory = db.inventory
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    if (inventory.length === 0) {
+        await appAlert('There are no inventory items to print.');
+        return;
+    }
+
+    const choices = inventory.map((med, index) => {
+        const inputId = `inventory-label-choice-${index}`;
+        return `<div class="label-selection-item">
+            <input id="${inputId}" name="inventoryMedIds" type="checkbox" value="${escapeHtml(med.id)}" checked>
+            <label for="${inputId}">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}</label>
+        </div>`;
+    }).join('');
+
+    const result = await showActionModal('Print Inventory Labels', `
+        <div style="font-size:11px; margin-bottom:6px;">Deselect any inventory items that should not be printed.</div>
+        <div class="field-row" style="margin-bottom:6px;">
+            <button type="button" onclick="toggleAllInventoryLabelChoices(true)">Select All</button>
+            <button type="button" onclick="toggleAllInventoryLabelChoices(false)">Deselect All</button>
+        </div>
+        <div class="sunken-panel label-selection-list">${choices}</div>
+    `, 'Preview Labels');
+    if (!result) return;
+
+    const selectedIds = new Set(result.inventoryMedIds || []);
+    const selectedMeds = inventory.filter(med => selectedIds.has(med.id));
+    if (selectedMeds.length === 0) {
+        await appAlert('Select at least one inventory item to print.');
+        return;
+    }
+
+    let codesAdded = false;
+    selectedMeds.forEach(med => {
+        if (med.barcodeCode) return;
+        med.barcodeCode = createMedicationCode();
+        codesAdded = true;
+    });
+    if (codesAdded) await window.api.save(db);
+
+    previewLabelHtml(selectedMeds.map(inventoryLabelHtml).join(''));
 };
 
 
