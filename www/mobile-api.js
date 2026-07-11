@@ -3,7 +3,7 @@
 
     const dbKey = 'pharmatlas-db';
     const imagePrefix = 'pharmatlas-image:';
-    const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [] };
+    const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [] };
 
     function getMimeType(fileName) {
         const lower = String(fileName || '').toLowerCase();
@@ -72,6 +72,15 @@
             const safeName = fileName || `PharmAtlas_Report_${Date.now()}.html`;
             downloadTextFile(safeName.replace(/\.pdf$/i, '.html'), html, 'text/html');
             return `${safeName.replace(/\.pdf$/i, '.html')} downloaded`;
+        },
+
+        async emailPdfReport({ html, fileName, to, subject, body }) {
+            const safeName = fileName || `PharmAtlas_Report_${Date.now()}.html`;
+            downloadTextFile(safeName.replace(/\.pdf$/i, '.html'), html, 'text/html');
+            const encodedSubject = encodeURIComponent(subject || '');
+            const encodedBody = encodeURIComponent(`${body || ''}\n\nThe report file was downloaded separately because email attachments require the desktop app.`);
+            window.location.href = `mailto:${encodeURIComponent(to || '')}?subject=${encodedSubject}&body=${encodedBody}`;
+            return { success: true };
         }
     };
 })();

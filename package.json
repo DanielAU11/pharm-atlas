@@ -1,6 +1,9 @@
 {
   "name": "pharm-atlas",
-  "version": "1.0.0",
+  "productName": "PharmAtlas",
+  "version": "1.0.5",
+  "description": "A retro desktop medication scheduler, inventory tracker, and vitals log.",
+  "author": "Daniel Uribe",
   "main": "main.js",
   "devDependencies": {
     "@electron-forge/cli": "^7.11.1",
@@ -28,6 +31,7 @@
     "@capacitor/core": "^8.4.1",
     "@capacitor/ios": "^8.4.1",
     "electron-squirrel-startup": "^1.0.1",
-    "nodemailer": "^8.0.2"
+    "nodemailer": "^8.0.2",
+    "qrcode-generator": "^1.4.4"
   }
 }

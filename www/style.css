@@ -1,3 +1,52 @@
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #c0c0c0;
+    overflow: hidden;
+}
+
+body {
+    display: flex;
+}
+
+.app-window {
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-window > .window-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.tabs {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-panel-window {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.app-panel-window > .window-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
 /* Custom spacing for the 98 look */
 .med-item-row {
     display: flex;
@@ -16,14 +65,43 @@
     padding: 0;
 }
 
+.form-help {
+    color: #444444;
+    font-size: 10px;
+}
+
+.medication-profile-window {
+    width: min(680px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+}
+
+.medication-profile-window > .window-body {
+    max-height: calc(100vh - 62px);
+    overflow: auto;
+}
+
 fieldset {
     margin-bottom: 15px;
 }
 
+.weekday-picker {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.weekday-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    white-space: nowrap;
+}
+
 .vital-chart-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(430px, max-content));
+    gap: 10px;
+    align-items: start;
 }
 
 .vital-chart {
@@ -51,6 +129,21 @@ fieldset {
     vertical-align: middle;
 }
 
+.goal-swatch {
+    background: #008000;
+}
+
+.legend-diamond {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin: 0 5px 0 7px;
+    background: #000080;
+    border: 1px solid #000000;
+    transform: rotate(45deg);
+    vertical-align: middle;
+}
+
 .inventory-status-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -59,10 +152,54 @@ fieldset {
 
 .inventory-status-box {
     border: 2px inset #ffffff;
-    background: #ffffff;
-    padding: 6px;
-    min-height: 78px;
+    background: linear-gradient(#ffffff, #efefef);
+    padding: 8px;
+    min-height: 92px;
     font-size: 11px;
+}
+
+.inventory-status-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dotted #808080;
+    padding-bottom: 5px;
+}
+
+.inventory-status-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 20px;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+    font-weight: bold;
+}
+
+.inventory-status-count {
+    margin-left: auto;
+    min-width: 24px;
+    padding: 1px 5px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    text-align: center;
+    font-weight: bold;
+}
+
+.inventory-status-low .inventory-status-mark {
+    color: #805000;
+    background: #fff0a8;
+}
+
+.inventory-status-expired .inventory-status-mark {
+    color: #ffffff;
+    background: #a00000;
+}
+
+.inventory-status-soon .inventory-status-mark {
+    color: #003c80;
+    background: #c8e0ff;
 }
 
 .inventory-status-box ul {
@@ -75,8 +212,664 @@ fieldset {
     color: #008000;
 }
 
+.medline-button,
+.dailymed-button {
+    font-weight: bold;
+}
+
+.medline-green { color: #16733b; }
+.medline-blue { color: #1b5f9e; }
+.dailymed-orange { color: #bd5b00; }
+.dailymed-red { color: #8d2518; }
+
+.pubmed-button {
+    color: #245c9b;
+    font-weight: bold;
+}
+
+.image-dropzone {
+    min-height: 50px;
+    margin-top: 4px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    color: #404040;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.image-dropzone img {
+    max-width: 86px;
+    max-height: 62px;
+    object-fit: contain;
+}
+
+#panel-inventory .inventory-photo-row {
+    display: grid;
+    grid-template-columns: 44px 190px minmax(240px, 320px) 1fr;
+    align-items: center;
+    column-gap: 8px;
+}
+
+#med-image-dropzone {
+    grid-column: 3;
+    width: 100%;
+    box-sizing: border-box;
+    justify-self: end;
+    margin-top: 0;
+}
+
+#med-image-dropzone span,
+#modal-image-dropzone span {
+    margin-left: 8px;
+}
+
+#panel-schedules {
+    grid-template-columns: minmax(420px, 0.82fr) minmax(360px, 1fr);
+    align-items: start;
+    gap: 10px;
+}
+
+.schedule-entry-column fieldset {
+    margin-right: 0;
+}
+
+.schedule-instructions {
+    width: min(620px, 100%);
+    resize: none;
+}
+
+.schedule-side-panels {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 0;
+    min-width: 0;
+}
+
+.schedule-side-panels fieldset {
+    min-width: 0;
+}
+
+.schedule-med-preview {
+    min-height: 120px;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 8px;
+    align-items: start;
+}
+
+.schedule-med-photo {
+    width: 92px;
+    height: 92px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.schedule-med-photo img {
+    max-width: 88px;
+    max-height: 88px;
+    object-fit: contain;
+}
+
+.schedule-med-no-photo,
+.empty-state {
+    color: #404040;
+    font-size: 11px;
+    padding: 4px;
+}
+
+.schedule-med-details {
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.pending-order-list {
+    min-height: 250px;
+    max-height: 54vh;
+    overflow: auto;
+    background: #fffef0;
+    border-color: #808080 #ffffff #ffffff #808080;
+    padding: 6px;
+    box-sizing: border-box;
+}
+
+.pending-order-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 640px;
+    min-height: 58px;
+    box-sizing: border-box;
+    padding: 7px;
+    margin-bottom: 6px;
+    border-left: 8px solid #0a64ad;
+    border-top: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+    font-size: 11px;
+    background: linear-gradient(90deg, #e8f3ff 0, #ffffff 38%);
+}
+
+.pending-order-row:last-child {
+    margin-bottom: 0;
+}
+
+.pending-order-row:nth-child(3n + 2) {
+    border-left-color: #008040;
+    background: linear-gradient(90deg, #e8fff1 0, #ffffff 38%);
+}
+
+.pending-order-row:nth-child(3n) {
+    border-left-color: #b56b00;
+    background: linear-gradient(90deg, #fff4dc 0, #ffffff 38%);
+}
+
+.pending-order-check {
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+    min-height: 14px;
+    margin-top: 2px;
+}
+
+.pending-order-copy {
+    flex: 1 1 auto;
+    min-width: 360px;
+    max-width: none;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
+
+.pending-order-meta,
+.pending-order-note {
+    display: block;
+    margin-top: 2px;
+}
+
+.pending-order-title {
+    display: block;
+    font-weight: bold;
+    font-size: 12px;
+    color: #001a70;
+}
+
+.pending-order-title em {
+    font-style: normal;
+    color: #404040;
+}
+
+.pending-order-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.pending-order-chips span {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid #808080;
+    background: #f7f7f7;
+    color: #000000;
+}
+
+.pending-order-meta {
+    color: #004000;
+}
+
+.pending-order-note {
+    color: #404040;
+}
+
+.pending-order-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    align-items: start;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+.pending-order-actions button {
+    min-width: 66px;
+}
+
+.prepack-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(90px, 1fr));
+    gap: 6px;
+    margin: 8px 0;
+}
+
+.prepack-choice {
+    display: block;
+    padding: 7px;
+    border: 2px outset #ffffff;
+    background: #dcdcdc;
+    cursor: pointer;
+    text-align: center;
+}
+
+.prepack-choice input {
+    margin-right: 4px;
+    min-height: 0;
+    width: auto;
+    vertical-align: middle;
+}
+
+.prepack-choice span {
+    display: block;
+    margin-top: 3px;
+    font-size: 10px;
+    color: #404040;
+}
+
+.prepack-choice:has(input:checked) {
+    background: #d8ecff;
+    color: #000080;
+    border-style: inset;
+    font-weight: bold;
+}
+
+@media (max-width: 760px) {
+    .pending-order-row {
+        min-width: 560px;
+    }
+
+    .pending-order-actions {
+        justify-content: flex-end;
+    }
+}
+
+.timeline-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 6px 0;
+    font-size: 11px;
+}
+
+.med-timeline {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(54px, 1fr));
+    gap: 3px;
+    margin-top: 6px;
+    overflow-x: auto;
+}
+
+.timeline-day {
+    min-width: 54px;
+    border: 1px inset #ffffff;
+    background: #e8e8e8;
+    padding: 2px;
+    text-align: center;
+}
+
+.timeline-date {
+    display: block;
+    font-size: 9px;
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+
+.timeline-dose {
+    display: block;
+    width: 100%;
+    min-height: 15px;
+    margin: 1px 0;
+    padding: 1px 2px;
+    border: 1px solid #555555;
+    font-size: 9px;
+    line-height: 11px;
+    color: #000000;
+    background: #d9d9d9;
+    cursor: pointer;
+}
+
+.timeline-dose.timeline-given {
+    background: #75b975;
+    border-color: #236323;
+}
+
+.timeline-dose.timeline-overdue,
+.timeline-dose.timeline-not-given {
+    background: #ea7b7b;
+    border-color: #941f1f;
+}
+
+.timeline-dose.timeline-upcoming {
+    background: #f3c875;
+    border-color: #9a6500;
+}
+
+.timeline-dose.timeline-future {
+    background: #a8c4e8;
+    border-color: #365c8f;
+}
+
+.profile-notification-options {
+    margin-top: 8px;
+    padding: 6px;
+    max-width: 330px;
+}
+
+.notification-toggle-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+    gap: 6px;
+}
+
+.notification-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    font-size: 11px;
+}
+
+.notification-toggle label {
+    white-space: nowrap;
+}
+
+.notification-toggle input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.order-set-filter-row {
+    justify-content: flex-end;
+    margin: 4px 0 8px;
+}
+
+.order-set-list {
+    min-height: 110px;
+    max-height: 230px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.prepack-filter-row {
+    justify-content: flex-end;
+    margin-bottom: 6px;
+}
+
+.prepack-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 30%) minmax(0, 1fr);
+    gap: 8px;
+}
+
+.prepack-layout fieldset {
+    min-width: 0;
+}
+
+.prepack-queue-list {
+    height: 430px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.prepack-completed-list {
+    min-height: 80px;
+    max-height: 180px;
+    overflow-y: auto;
+    background: #ffffff;
+}
+
+.prepack-queue-row {
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    padding: 7px 8px;
+    text-align: left;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.prepack-queue-row small {
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.prepack-queue-row.selected {
+    outline: 2px solid #000080;
+    outline-offset: -3px;
+}
+
+.prepack-queue-row.completed,
+.prepack-complete-banner {
+    background: #c8f0c8;
+    color: #005000;
+}
+
+.prepack-workspace {
+    min-height: 430px;
+}
+
+.prepack-workspace-header,
+.prepack-scanner,
+.prepack-day-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.prepack-workspace-header {
+    justify-content: space-between;
+    border-bottom: 1px solid #808080;
+    padding-bottom: 6px;
+}
+
+.prepack-day-strip {
+    margin: 8px 0;
+}
+
+.prepack-day-button {
+    min-width: 60px;
+}
+
+.prepack-day-button.active {
+    font-weight: bold;
+    outline: 2px solid #000080;
+}
+
+.prepack-day-button.completed {
+    background: #c8f0c8;
+    color: #005000;
+}
+
+.prepack-day-button.needs-reprint,
+.prepack-reprint-warning {
+    background: #fff0a8;
+    color: #700000;
+}
+
+.prepack-scanner {
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #c0c0c0;
+}
+
+.prepack-scanner input {
+    width: min(320px, 100%);
+    font-family: monospace;
+}
+
+.prepack-complete-banner,
+.prepack-reprint-warning {
+    padding: 7px;
+    margin: 6px 0;
+    border: 1px solid #808080;
+    font-weight: bold;
+}
+
+.prepack-items {
+    margin-top: 8px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.prepack-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 48px;
+    padding: 5px;
+    border-bottom: 1px dotted #808080;
+}
+
+.prepack-item-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.prepack-mark {
+    width: 24px;
+    flex: 0 0 24px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.prepack-item-correct {
+    background: #c8f0c8;
+    color: #005000;
+}
+
+.prepack-item-wrong {
+    background: #ffd0d0;
+    color: #a00000;
+}
+
+.prepack-item-added .prepack-item-copy strong {
+    color: #b85a00;
+}
+
+.prepack-added-badge {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 0 4px;
+    border: 1px solid #b85a00;
+    background: #fff0a8;
+    color: #b85a00;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.prepack-scan-error {
+    margin-top: 2px;
+    font-weight: bold;
+}
+
+.prepack-date-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.prepack-remove-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 6px 2px;
+    border-bottom: 1px dotted #808080;
+}
+
+.prepack-remove-option label {
+    flex: 1;
+}
+
+.prepack-remove-danger {
+    color: #b00000;
+    font-weight: bold;
+}
+
+.empty-state {
+    padding: 8px;
+    font-size: 11px;
+}
+
+.label-selection-list {
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 6px;
+    background: #ffffff;
+}
+
+.label-selection-group {
+    border-bottom: 1px dotted #808080;
+    padding: 4px 2px;
+}
+
+.label-selection-heading,
+.label-selection-item {
+    display: flex;
+    align-items: center;
+    min-height: 20px;
+}
+
+.label-selection-children {
+    margin-left: 22px;
+}
+
+.calendar-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 6px;
+    font-size: 11px;
+}
+
+.calendar-header {
+    background: #c0c0c0;
+    border: 1px outset #ffffff;
+    text-align: center;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px;
+}
+
+.calendar-day {
+    background: #ffffff;
+    border: 1px inset #808080;
+    min-height: 80px;
+    padding: 2px;
+    font-size: 9px;
+    overflow-y: auto;
+}
+
+.calendar-dose {
+    border-bottom: 1px dotted #808080;
+    padding: 1px 0;
+    color: #000000;
+    cursor: pointer;
+}
+
+.calendar-dose i { color: #0000aa; }
+
+.member-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(72px, 1fr));
+    gap: 2px;
+    background: #808080;
+    border: 2px inset #ffffff;
+    padding: 2px;
+    overflow-x: auto;
+}
+
 .drug-info-frame {
-    height: 300px;
+    height: clamp(520px, calc(100vh - 250px), 760px);
     background: #ffffff;
 }
 
@@ -98,7 +891,7 @@ fieldset {
 }
 
 .member-profile-window {
-    width: min(900px, calc(100vw - 32px));
+    width: min(1120px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
     display: flex;
     flex-direction: column;
@@ -111,7 +904,58 @@ fieldset {
 }
 
 #member-active-meds-list {
-    max-height: 120px !important;
+    height: min(460px, 48vh);
+    min-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.member-active-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 4px;
+    margin-bottom: 5px;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+}
+
+#member-completed-meds-list {
+    max-height: 260px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 2px inset #ffffff;
+}
+
+.completed-med-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px;
+    border-bottom: 1px dotted #808080;
+    background: #ffffff;
+}
+
+.completed-med-row:last-child {
+    border-bottom: 0;
+}
+
+.completed-order-set {
+    background: #f3f3f3;
+}
+
+.completed-med-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 170px;
+}
+
+#member-prn-meds-list {
+    max-height: 300px;
+    overflow-y: auto;
 }
 
 #member-admin-log {
@@ -136,6 +980,15 @@ fieldset {
     width: 420px;
 }
 
+/* Keep the retro bitmap face consistent in preview and physical output. */
+#label-preview-content .label-page,
+#label-preview-content .label-page *,
+#print-area .label-page,
+#print-area .label-page * {
+    font-family: "Pixelated MS Sans Serif", "MS Sans Serif", Tahoma, sans-serif !important;
+    letter-spacing: 0 !important;
+}
+
 #label-preview-content {
     max-height: 65vh;
     overflow: auto;
@@ -145,7 +998,7 @@ fieldset {
 
 #label-preview-content .label-page {
     width: 2.25in;
-    min-height: 1.25in;
+    height: 1.25in;
     background: #ffffff;
     color: #000000;
     padding: 0.05in;
@@ -162,11 +1015,27 @@ fieldset {
     margin-bottom: 1px;
 }
 
+#label-preview-content .label-date-with-icon,
+#print-area .label-date-with-icon {
+    position: relative;
+    padding-right: 16px;
+}
+
+#label-preview-content .label-shift-icon,
+#print-area .label-shift-icon {
+    position: absolute;
+    right: 1px;
+    top: -1px;
+    font-size: 10pt;
+    line-height: 1;
+}
+
 #label-preview-content .label-title {
     font-size: 11pt;
     font-weight: bold;
     line-height: 1;
     margin-top: 2px;
+    overflow-wrap: anywhere;
 }
 
 #label-preview-content .label-small,
@@ -175,6 +1044,44 @@ fieldset {
     line-height: 1.05;
     margin-top: 1px;
     word-wrap: break-word;
+    overflow-wrap: anywhere;
+}
+
+#label-preview-content .order-set-label-row,
+#print-area .order-set-label-row {
+    border-top: 1px dotted #808080;
+    padding-top: 1px;
+    margin-top: 1px;
+}
+
+#label-preview-content .order-set-label-med,
+#print-area .order-set-label-med {
+    font-weight: bold;
+}
+
+.inventory-qr-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.03in;
+}
+
+.inventory-qr-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+.inventory-label-qr {
+    width: 0.62in;
+    height: 0.62in;
+    flex: 0 0 0.62in;
+    image-rendering: pixelated;
+}
+
+.label-code {
+    margin-top: 2px;
+    font-family: monospace !important;
+    font-size: 5.5pt !important;
+    overflow-wrap: anywhere;
 }
 
 #label-preview-content .label-compact .label-title { font-size: 10pt; }
@@ -184,6 +1091,16 @@ fieldset {
 #label-preview-content .label-dense .label-title { font-size: 9pt; }
 #label-preview-content .label-dense .label-small,
 #label-preview-content .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+#label-preview-content .label-ultra-dense { padding: 0.035in; }
+#label-preview-content .label-ultra-dense .label-date { font-size: 6.8pt; }
+#label-preview-content .label-ultra-dense .label-title { font-size: 7.8pt; line-height: 0.92; }
+#label-preview-content .label-ultra-dense .label-small,
+#label-preview-content .label-ultra-dense .label-med-row { font-size: 6.25pt; line-height: 0.88; }
+#label-preview-content .label-micro { padding: 0.025in; }
+#label-preview-content .label-micro .label-date { font-size: 6pt; }
+#label-preview-content .label-micro .label-title { font-size: 6.8pt; line-height: 0.86; }
+#label-preview-content .label-micro .label-small,
+#label-preview-content .label-micro .label-med-row { font-size: 5.35pt; line-height: 0.82; }
 
 /* Ensure the red text for low stock stands out */
 .low-stock-text {
@@ -196,6 +1113,245 @@ fieldset {
     left: -10000px;
     top: 0;
     width: 2.25in;
+}
+
+@media screen and (max-width: 760px) {
+    * {
+        box-sizing: border-box;
+    }
+
+    html {
+        -webkit-text-size-adjust: 100%;
+        min-height: 100%;
+        background-color: #c0c0c0;
+        overflow-x: hidden;
+    }
+
+    body {
+        box-sizing: border-box;
+        min-height: 100vh;
+        width: 100vw;
+        margin: 0 !important;
+        padding-top: max(46px, calc(env(safe-area-inset-top) + 8px)) !important;
+        padding-right: env(safe-area-inset-right) !important;
+        padding-bottom: env(safe-area-inset-bottom) !important;
+        padding-left: env(safe-area-inset-left) !important;
+        background-color: #c0c0c0 !important;
+        font-size: 13px;
+        overflow-x: hidden;
+    }
+
+    body > .window {
+        width: 100% !important;
+        max-width: none;
+        min-height: calc(100vh - max(46px, calc(env(safe-area-inset-top) + 8px)) - env(safe-area-inset-bottom));
+        margin: 0 auto !important;
+        overflow: hidden;
+        border-left: 0;
+        border-right: 0;
+    }
+
+    .window-body {
+        width: 100%;
+        min-width: 0;
+        padding: 8px;
+        font-size: 13px;
+        overflow-x: hidden;
+    }
+
+    .tabs,
+    .window[role="tabpanel"],
+    .window[role="tabpanel"] > .window-body,
+    fieldset {
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: hidden;
+    }
+
+    menu[role="tablist"] {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 2px;
+        max-width: 100%;
+        margin: 4px 0 0;
+        padding: 0 0 3px 3px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+        scrollbar-width: none;
+    }
+
+    menu[role="tablist"]::-webkit-scrollbar {
+        display: none;
+    }
+
+    menu[role="tablist"] li[role="tab"] {
+        flex: 0 0 auto;
+        min-height: 26px;
+    }
+
+    menu[role="tablist"] a {
+        display: inline-block;
+        padding: 5px 7px;
+        font-size: 13px;
+    }
+
+    .title-bar {
+        min-height: 24px;
+    }
+
+    .title-bar-text {
+        font-size: 14px;
+    }
+
+    .field-row {
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .field-row-stacked,
+    .field-row-stacked input,
+    .field-row-stacked textarea {
+        max-width: 100%;
+    }
+
+    input,
+    select,
+    textarea {
+        max-width: 100%;
+        font-size: 16px;
+        min-height: 28px;
+    }
+
+    button {
+        max-width: 100%;
+        font-size: 14px;
+        min-height: 30px;
+    }
+
+    button {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    fieldset {
+        margin-bottom: 12px;
+        padding: 9px;
+    }
+
+    #calendar-grid {
+        grid-template-columns: repeat(7, minmax(46px, 1fr)) !important;
+        gap: 2px !important;
+        overflow: hidden;
+    }
+
+    #calendar-grid > div {
+        min-width: 0;
+        font-size: 10px !important;
+    }
+
+    #history-log {
+        height: 130px !important;
+    }
+
+    .inventory-status-grid,
+    .vital-chart-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #panel-schedules {
+        grid-template-columns: 1fr !important;
+    }
+
+    .schedule-side-panels {
+        grid-template-columns: 1fr;
+    }
+
+    #panel-inventory fieldset:first-child .field-row {
+        display: grid;
+        grid-template-columns: 86px minmax(0, 1fr);
+        align-items: center;
+        column-gap: 8px;
+        row-gap: 7px;
+    }
+
+    #panel-inventory fieldset:first-child .field-row input:not([type="checkbox"]),
+    #panel-inventory fieldset:first-child .field-row select {
+        width: 100% !important;
+        min-width: 0;
+    }
+
+    #panel-inventory fieldset:first-child .field-row button {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+    }
+
+    #panel-inventory .inventory-photo-row {
+        grid-template-columns: 86px minmax(0, 1fr);
+    }
+
+    #med-image-dropzone {
+        grid-column: 1 / -1;
+    }
+
+    #panel-inventory fieldset:first-child .field-row input[type="checkbox"] {
+        justify-self: start;
+    }
+
+    #panel-inventory fieldset:first-child .field-row input[type="checkbox"] + label {
+        grid-column: 2;
+    }
+
+    #panel-inventory .sunken-panel,
+    #panel-vitals .sunken-panel,
+    #panel-schedules .sunken-panel {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #panel-inventory table,
+    #panel-vitals table {
+        min-width: 620px;
+    }
+
+    .drug-info-frame {
+        height: 360px;
+    }
+
+    .member-profile-window {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 28px);
+    }
+
+    .medication-profile-window {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 28px);
+    }
+
+    .med-profile-top {
+        flex-wrap: wrap;
+    }
+
+    .member-profile-body {
+        max-height: calc(100vh - 80px);
+    }
+
+    .med-timeline {
+        grid-template-columns: repeat(7, minmax(60px, 1fr));
+    }
+
+    .prepack-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .prepack-queue-list {
+        height: 180px;
+    }
+
+    .prepack-workspace {
+        min-height: 360px;
+    }
 }
 
 @media print {
@@ -237,11 +1393,12 @@ fieldset {
         page-break-after: always !important;
         page-break-before: avoid !important;
     }
+    .inventory-qr-label { display: flex !important; }
     #print-area .label-page:last-of-type { page-break-after: avoid !important; }
     .label-date { font-weight: bold; border-bottom: 1px solid black; font-size: 8pt; margin-bottom: 1px; }
-    .label-title { font-size: 11pt; font-weight: bold; line-height: 1.0; margin-top: 2px; }
-    .label-small { font-size: 9pt; line-height: 1.05; margin-top: 1px; word-wrap: break-word; }
-    .label-med-row { font-size: 9pt; margin-bottom: 1px; word-wrap: break-word; line-height: 0.9; }
+    .label-title { font-size: 11pt; font-weight: bold; line-height: 1.0; margin-top: 2px; overflow-wrap: anywhere; }
+    .label-small { font-size: 9pt; line-height: 1.05; margin-top: 1px; word-wrap: break-word; overflow-wrap: anywhere; }
+    .label-med-row { font-size: 9pt; margin-bottom: 1px; word-wrap: break-word; overflow-wrap: anywhere; line-height: 0.9; }
     .label-compact .label-title { font-size: 10pt; }
     .label-compact .label-small,
     .label-compact .label-med-row { font-size: 8pt; line-height: 1.0; }
@@ -249,4 +1406,14 @@ fieldset {
     .label-dense .label-title { font-size: 9pt; }
     .label-dense .label-small,
     .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+    .label-ultra-dense { padding: 0.035in !important; }
+    .label-ultra-dense .label-date { font-size: 6.8pt; }
+    .label-ultra-dense .label-title { font-size: 7.8pt; line-height: 0.92; }
+    .label-ultra-dense .label-small,
+    .label-ultra-dense .label-med-row { font-size: 6.25pt; line-height: 0.88; }
+    .label-micro { padding: 0.025in !important; }
+    .label-micro .label-date { font-size: 6pt; }
+    .label-micro .label-title { font-size: 6.8pt; line-height: 0.86; }
+    .label-micro .label-small,
+    .label-micro .label-med-row { font-size: 5.35pt; line-height: 0.82; }
 }

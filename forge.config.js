@@ -4,12 +4,23 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
   packagerConfig: {
     asar: true,
+    icon: './assets/pngegg',
+    executableName: 'PharmAtlas',
+    win32metadata: {
+      CompanyName: 'PharmAtlas',
+      FileDescription: 'PharmAtlas',
+      OriginalFilename: 'PharmAtlas.exe',
+      ProductName: 'PharmAtlas',
+      InternalName: 'PharmAtlas',
+    },
   },
   rebuildConfig: {},
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
-      config: {},
+      config: {
+        setupIcon: './assets/pngegg.ico',
+      },
     },
     {
       name: '@electron-forge/maker-zip',
