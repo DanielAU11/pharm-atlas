@@ -227,6 +227,267 @@ fieldset {
     font-weight: bold;
 }
 
+.image-dropzone {
+    min-height: 50px;
+    margin-top: 4px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    color: #404040;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.image-dropzone img {
+    max-width: 86px;
+    max-height: 62px;
+    object-fit: contain;
+}
+
+#panel-inventory .inventory-photo-row {
+    display: grid;
+    grid-template-columns: 44px 190px minmax(240px, 320px) 1fr;
+    align-items: center;
+    column-gap: 8px;
+}
+
+#med-image-dropzone {
+    grid-column: 3;
+    width: 100%;
+    box-sizing: border-box;
+    justify-self: end;
+    margin-top: 0;
+}
+
+#med-image-dropzone span,
+#modal-image-dropzone span {
+    margin-left: 8px;
+}
+
+#panel-schedules {
+    grid-template-columns: minmax(420px, 0.82fr) minmax(360px, 1fr);
+    align-items: start;
+    gap: 10px;
+}
+
+.schedule-entry-column fieldset {
+    margin-right: 0;
+}
+
+.schedule-instructions {
+    width: min(620px, 100%);
+    resize: none;
+}
+
+.schedule-side-panels {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 0;
+    min-width: 0;
+}
+
+.schedule-side-panels fieldset {
+    min-width: 0;
+}
+
+.schedule-med-preview {
+    min-height: 120px;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 8px;
+    align-items: start;
+}
+
+.schedule-med-photo {
+    width: 92px;
+    height: 92px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.schedule-med-photo img {
+    max-width: 88px;
+    max-height: 88px;
+    object-fit: contain;
+}
+
+.schedule-med-no-photo,
+.empty-state {
+    color: #404040;
+    font-size: 11px;
+    padding: 4px;
+}
+
+.schedule-med-details {
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.pending-order-list {
+    min-height: 250px;
+    max-height: 54vh;
+    overflow: auto;
+    background: #fffef0;
+    border-color: #808080 #ffffff #ffffff #808080;
+    padding: 6px;
+    box-sizing: border-box;
+}
+
+.pending-order-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 640px;
+    min-height: 58px;
+    box-sizing: border-box;
+    padding: 7px;
+    margin-bottom: 6px;
+    border-left: 8px solid #0a64ad;
+    border-top: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+    font-size: 11px;
+    background: linear-gradient(90deg, #e8f3ff 0, #ffffff 38%);
+}
+
+.pending-order-row:last-child {
+    margin-bottom: 0;
+}
+
+.pending-order-row:nth-child(3n + 2) {
+    border-left-color: #008040;
+    background: linear-gradient(90deg, #e8fff1 0, #ffffff 38%);
+}
+
+.pending-order-row:nth-child(3n) {
+    border-left-color: #b56b00;
+    background: linear-gradient(90deg, #fff4dc 0, #ffffff 38%);
+}
+
+.pending-order-check {
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+    min-height: 14px;
+    margin-top: 2px;
+}
+
+.pending-order-copy {
+    flex: 1 1 auto;
+    min-width: 360px;
+    max-width: none;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
+
+.pending-order-meta,
+.pending-order-note {
+    display: block;
+    margin-top: 2px;
+}
+
+.pending-order-title {
+    display: block;
+    font-weight: bold;
+    font-size: 12px;
+    color: #001a70;
+}
+
+.pending-order-title em {
+    font-style: normal;
+    color: #404040;
+}
+
+.pending-order-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.pending-order-chips span {
+    display: inline-block;
+    padding: 1px 5px;
+    border: 1px solid #808080;
+    background: #f7f7f7;
+    color: #000000;
+}
+
+.pending-order-meta {
+    color: #004000;
+}
+
+.pending-order-note {
+    color: #404040;
+}
+
+.pending-order-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    align-items: start;
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+.pending-order-actions button {
+    min-width: 66px;
+}
+
+.prepack-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(90px, 1fr));
+    gap: 6px;
+    margin: 8px 0;
+}
+
+.prepack-choice {
+    display: block;
+    padding: 7px;
+    border: 2px outset #ffffff;
+    background: #dcdcdc;
+    cursor: pointer;
+    text-align: center;
+}
+
+.prepack-choice input {
+    margin-right: 4px;
+    min-height: 0;
+    width: auto;
+    vertical-align: middle;
+}
+
+.prepack-choice span {
+    display: block;
+    margin-top: 3px;
+    font-size: 10px;
+    color: #404040;
+}
+
+.prepack-choice:has(input:checked) {
+    background: #d8ecff;
+    color: #000080;
+    border-style: inset;
+    font-weight: bold;
+}
+
+@media (max-width: 760px) {
+    .pending-order-row {
+        min-width: 560px;
+    }
+
+    .pending-order-actions {
+        justify-content: flex-end;
+    }
+}
+
 .timeline-controls {
     display: flex;
     align-items: center;
@@ -754,6 +1015,21 @@ fieldset {
     margin-bottom: 1px;
 }
 
+#label-preview-content .label-date-with-icon,
+#print-area .label-date-with-icon {
+    position: relative;
+    padding-right: 16px;
+}
+
+#label-preview-content .label-shift-icon,
+#print-area .label-shift-icon {
+    position: absolute;
+    right: 1px;
+    top: -1px;
+    font-size: 10pt;
+    line-height: 1;
+}
+
 #label-preview-content .label-title {
     font-size: 11pt;
     font-weight: bold;
@@ -984,6 +1260,14 @@ fieldset {
         grid-template-columns: 1fr;
     }
 
+    #panel-schedules {
+        grid-template-columns: 1fr !important;
+    }
+
+    .schedule-side-panels {
+        grid-template-columns: 1fr;
+    }
+
     #panel-inventory fieldset:first-child .field-row {
         display: grid;
         grid-template-columns: 86px minmax(0, 1fr);
@@ -1001,6 +1285,14 @@ fieldset {
     #panel-inventory fieldset:first-child .field-row button {
         grid-column: 1 / -1;
         justify-self: stretch;
+    }
+
+    #panel-inventory .inventory-photo-row {
+        grid-template-columns: 86px minmax(0, 1fr);
+    }
+
+    #med-image-dropzone {
+        grid-column: 1 / -1;
     }
 
     #panel-inventory fieldset:first-child .field-row input[type="checkbox"] {
