@@ -33,16 +33,18 @@ let memberTimelineStart = null;
 let dashboardCalendarStart = localDateKey();
 let memberCalendarStart = localDateKey();
 let activePrepackQueueId = null;
+let prepackScanTimer = null;
 
 window.addEventListener('DOMContentLoaded', async () => {
     const loadedData = await window.api.load();
     db = { ...emptyDb, ...loadedData };
     const medicationCodesAdded = ensureMedicationCodes();
+    const completionStatesAdded = updateScheduleCompletionStates();
     renderAll();
     renderFrequencyControls('sched');
     updateInventoryEntryMode();
     checkSchedules();
-    if (medicationCodesAdded) await window.api.save(db);
+    if (medicationCodesAdded || completionStatesAdded) await window.api.save(db);
 });
 
 // Helper: Convert file to Base64 for saving
@@ -224,6 +226,62 @@ function isScheduleDueOnDate(schedule, dateStr) {
     }
 
     return true;
+}
+
+function isScheduleArchived(schedule) {
+    return ['completed', 'discontinued'].includes(schedule?.status);
+}
+
+function scheduleEndDateTime(schedule) {
+    if (!schedule?.endDate || schedule.endDate === 'Ongoing') return null;
+    const times = getScheduleTimes(schedule);
+    if (times.length > 0) {
+        const latest = times.slice().sort((a, b) => timeToMinutes(b) - timeToMinutes(a))[0];
+        return new Date(`${schedule.endDate}T${latest}`);
+    }
+    const end = parseLocal(schedule.endDate);
+    if (!end) return null;
+    end.setHours(23, 59, 59, 999);
+    return end;
+}
+
+function scheduleHasFinished(schedule, now = new Date()) {
+    if (!schedule || schedule.status === 'discontinued') return false;
+    if (schedule.status === 'completed') return true;
+    const end = scheduleEndDateTime(schedule);
+    return !!end && end < now;
+}
+
+function markScheduleCompleted(schedule, completedAt = new Date().toISOString()) {
+    if (!schedule || isScheduleArchived(schedule)) return false;
+    schedule.status = 'completed';
+    schedule.completedAt = completedAt;
+    return true;
+}
+
+function updateScheduleCompletionStates(now = new Date()) {
+    let changed = false;
+    db.schedules.forEach(schedule => {
+        if (scheduleHasFinished(schedule, now)) {
+            changed = markScheduleCompleted(schedule, now.toISOString()) || changed;
+        }
+    });
+    db.orderSets.forEach(set => {
+        if (!set.memberId) return;
+        const schedules = db.schedules.filter(schedule => schedule.orderSetId === set.id);
+        const complete = schedules.length > 0 && schedules.every(isScheduleArchived);
+        if (complete && set.status !== 'completed') {
+            set.status = 'completed';
+            set.completedAt = now.toISOString();
+            changed = true;
+        }
+        if (!complete && set.status === 'completed') {
+            set.status = '';
+            set.completedAt = '';
+            changed = true;
+        }
+    });
+    return changed;
 }
 
 function getScheduleTimes(schedule) {
@@ -725,7 +783,7 @@ function collectMemberScheduleDoseRows(memberId, startDate, endDate) {
     const end = parseLocal(endDate);
     if (!memberId || !start || !end || end < start) return [];
 
-    const memberSchedules = db.schedules.filter(schedule => schedule.memberId === memberId);
+    const memberSchedules = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule));
     const rows = [];
     const cursor = new Date(start);
     while (cursor <= end) {
@@ -1483,6 +1541,7 @@ window.switchTab = function(tabName) {
 };
 
 async function sync() {
+    updateScheduleCompletionStates();
     await window.api.save(db);
     renderAll();
     const memberModal = document.getElementById('member-modal');
@@ -1510,7 +1569,7 @@ window.removeMember = async function(id) {
 function renderMemberPrnMedicationOrders(memberId) {
     const container = document.getElementById('member-prn-meds-list');
     if (!container) return;
-    const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq === 'PRN');
+    const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq === 'PRN' && !isScheduleArchived(schedule));
     if (schedules.length === 0) {
         container.innerHTML = '<div style="font-size:11px; padding:5px;">No PRN medication orders.</div>';
         return;
@@ -1535,6 +1594,53 @@ function renderMemberPrnMedicationOrders(memberId) {
             </div>
         </div>`;
     }).join('');
+}
+
+function completedScheduleSummaryHtml(schedule) {
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    const statusText = schedule.status === 'discontinued' ? 'Discontinued' : 'Completed';
+    return `<div class="completed-med-row">
+        <div>
+            <strong>${escapeHtml(med?.name || 'Unknown medication')} ${escapeHtml(med ? formatMedStrength(med) : '')}</strong><br>
+            <small>${escapeHtml(statusText)} | ${escapeHtml(schedule.startDate || '')} - ${escapeHtml(schedule.endDate || 'Ongoing')} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : escapeHtml(schedule.doseQty || '')} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}</small>
+            <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
+        </div>
+        <div class="completed-med-actions">
+            <button type="button" onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify / Extend</button>
+            ${med ? `<button type="button" onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>` : ''}
+        </div>
+    </div>`;
+}
+
+function renderCompletedMedicationOrders(memberId) {
+    const container = document.getElementById('member-completed-meds-list');
+    if (!container) return;
+    const completedSets = db.orderSets
+        .filter(set => set.memberId === memberId && set.status === 'completed')
+        .sort((a, b) => String(b.completedAt || b.endDate || '').localeCompare(String(a.completedAt || a.endDate || '')));
+    const completedSingles = db.schedules
+        .filter(schedule => schedule.memberId === memberId && !schedule.orderSetId && isScheduleArchived(schedule))
+        .sort((a, b) => String(b.completedAt || b.endDate || '').localeCompare(String(a.completedAt || a.endDate || '')));
+
+    const setHtml = completedSets.map(set => {
+        const setSchedules = db.schedules.filter(schedule => schedule.orderSetId === set.id);
+        return `<div class="completed-med-row completed-order-set">
+            <div>
+                <strong>${escapeHtml(set.name)}</strong><br>
+                <small>Completed | ${escapeHtml(set.startDate || '')} - ${escapeHtml(set.endDate || 'Ongoing')}</small>
+                <div style="margin-top:4px;">${setSchedules.map(completedScheduleSummaryHtml).join('')}</div>
+            </div>
+            <div class="completed-med-actions">
+                <button type="button" onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit / Extend Set</button>
+                <button type="button" onclick="event.stopPropagation(); printOrderSetLabel('${escapeHtml(set.id)}')">Set Label</button>
+            </div>
+        </div>`;
+    }).join('');
+
+    const singlesHtml = completedSingles.map(completedScheduleSummaryHtml).join('');
+    container.innerHTML = setHtml || singlesHtml
+        ? `${setHtml}${singlesHtml}`
+        : '<div class="empty-state">No completed medication orders.</div>';
 }
 
 window.openMemberModal = function(id = null) {
@@ -1567,6 +1673,8 @@ window.openMemberModal = function(id = null) {
 
     const activeMedsContainer = document.getElementById('member-active-meds-list');
     if (activeMedsContainer) activeMedsContainer.innerHTML = '';
+    const completedMedsContainer = document.getElementById('member-completed-meds-list');
+    if (completedMedsContainer) completedMedsContainer.innerHTML = '';
     const prnMedsContainer = document.getElementById('member-prn-meds-list');
     if (prnMedsContainer) prnMedsContainer.innerHTML = '';
     safeSet('m-calendar-color', '#000080');
@@ -1604,7 +1712,7 @@ window.openMemberModal = function(id = null) {
             // 3. Populate Active Meds
             if (activeMedsContainer) {
                 const printControls = document.createElement('div');
-                printControls.className = 'field-row';
+                printControls.className = 'field-row member-active-toolbar';
                 printControls.style.cssText = "justify-content:flex-end; margin-bottom:5px;";
                 const startLabel = document.createElement('label');
                 startLabel.innerText = 'From:';
@@ -1656,13 +1764,13 @@ window.openMemberModal = function(id = null) {
                 activeMedsContainer.appendChild(timelineControls);
             }
             const memberOrderSets = db.orderSets.filter(set =>
-                set.memberId === id && db.schedules.some(schedule => schedule.orderSetId === set.id)
+                set.memberId === id && set.status !== 'completed' && db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule))
             );
             memberOrderSets.forEach(set => {
                 const div = document.createElement('div');
                 div.className = 'sunken-panel';
                 div.style.cssText = "padding:5px; margin-bottom:5px; background:white; border:1px inset gray;";
-                const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id);
+                const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id && !isScheduleArchived(candidate));
                 const itemRows = setSchedules.map(schedule => {
                     if (schedule.freq === 'PRN') return '';
                     const med = db.inventory.find(inv => inv.id === schedule.medId);
@@ -1689,7 +1797,7 @@ window.openMemberModal = function(id = null) {
                 if (activeMedsContainer) activeMedsContainer.appendChild(div);
             });
 
-            const memberSchedules = db.schedules.filter(s => s.memberId === id && !s.orderSetId && s.freq !== 'PRN');
+            const memberSchedules = db.schedules.filter(s => s.memberId === id && !s.orderSetId && s.freq !== 'PRN' && !isScheduleArchived(s));
             memberSchedules.forEach(s => {
                 const med = db.inventory.find(inv => inv.id === s.medId);
                 const div = document.createElement('div');
@@ -1709,6 +1817,13 @@ window.openMemberModal = function(id = null) {
                 div.onclick = () => window.openOrderModifier(s.id);
                 if (activeMedsContainer) activeMedsContainer.appendChild(div);
             });
+            if (activeMedsContainer && activeMedsContainer.children.length <= 2) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.textContent = 'No active scheduled medication orders.';
+                activeMedsContainer.appendChild(empty);
+            }
+            renderCompletedMedicationOrders(m.id);
             renderMemberPrnMedicationOrders(m.id);
             renderMemberVitalProfile(m.id);
             renderMemberAdministrationLog(m.id);
@@ -1779,6 +1894,8 @@ window.saveOrderModification = async function() {
         sched.instructions = document.getElementById('mod-instr').value;
         sched.qodStart = sched.freq === 'QOD' ? (document.getElementById('mod-qod-start-date').value || sched.startDate) : "";
         sched.isOneTime = sched.freq === 'ONCE' || (sched.startDate === sched.endDate && sched.endDate !== "Ongoing");
+        sched.status = '';
+        sched.completedAt = '';
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
         openMemberModal(sched.memberId); // Refresh member profile
@@ -2592,7 +2709,7 @@ window.saveOrderSet = async function() {
         return;
     }
 
-    const orderSet = { id: editId || Date.now().toString(), memberId, name, startDate, endDate, items };
+    const orderSet = { id: editId || Date.now().toString(), memberId, name, startDate, endDate, items, status: '', completedAt: '' };
     const existingIndex = db.orderSets.findIndex(set => set.id === orderSet.id);
     if (existingIndex >= 0) db.orderSets[existingIndex] = orderSet;
     else db.orderSets.push(orderSet);
@@ -2808,7 +2925,7 @@ function renderOrderSets() {
             const med = db.inventory.find(m => m.id === item.medId);
             return med ? med.name : 'Unknown';
         }).join(', ');
-        const activeSchedules = db.schedules.filter(schedule => schedule.orderSetId === set.id);
+        const activeSchedules = db.schedules.filter(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule));
         const containerActions = activeSchedules.map(schedule => {
             const med = db.inventory.find(item => item.id === schedule.medId);
             if (!med || !usesContainerTracking(med)) return '';
@@ -2833,7 +2950,7 @@ function renderOrderSets() {
     };
 
     const templates = db.orderSets.filter(set => !set.memberId);
-    const assigned = db.orderSets.filter(set => set.memberId && (!filter?.value || set.memberId === filter.value));
+    const assigned = db.orderSets.filter(set => set.memberId && set.status !== 'completed' && (!filter?.value || set.memberId === filter.value));
     templateList.innerHTML = templates.length
         ? templates.map(set => orderSetRowHtml(set, true)).join('')
         : '<div style="padding:6px; font-size:11px;">No reusable order sets saved.</div>';
@@ -2849,6 +2966,7 @@ function prepackItemId() {
 function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
     const member = db.family.find(item => item.id === memberId);
     const byDate = new Map();
+    const addedScheduleIds = new Set(selection?.addedScheduleIds || []);
     rows.forEach(row => {
         if (!row?.instance?.date || !row.med || !row.schedule) return;
         if (!byDate.has(row.instance.date)) byDate.set(row.instance.date, []);
@@ -2865,6 +2983,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
             instructions: row.schedule.instructions || '',
             orderSetId: row.schedule.orderSetId || '',
             orderSetName: row.schedule.orderSetName || '',
+            isPrepackAdded: row.schedule.prepackAdded === true || addedScheduleIds.has(row.schedule.id),
             barcodeCode: normalizeMedicationCode(row.med.barcodeCode),
             status: 'pending',
             scannedCode: ''
@@ -2896,6 +3015,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
             instructions: firstRow.schedule.instructions || '',
             orderSetId: firstRow.schedule.orderSetId || '',
             orderSetName: firstRow.schedule.orderSetName || '',
+            isPrepackAdded: firstRow.schedule.prepackAdded === true || addedScheduleIds.has(firstRow.schedule.id),
             barcodeCode: normalizeMedicationCode(firstRow.med.barcodeCode),
             status: 'pending',
             scannedCode: ''
@@ -2928,11 +3048,11 @@ function prepackRowsForSelection(selection) {
     if (selection.kind === 'member-range') {
         const excluded = new Set(selection.excludedScheduleIds || []);
         schedules = db.schedules.filter(schedule =>
-            schedule.memberId === selection.memberId && !excluded.has(schedule.id)
+            schedule.memberId === selection.memberId && !excluded.has(schedule.id) && !isScheduleArchived(schedule)
         );
     } else {
         const scheduleIds = new Set(selection.scheduleIds || []);
-        schedules = db.schedules.filter(schedule => scheduleIds.has(schedule.id));
+        schedules = db.schedules.filter(schedule => scheduleIds.has(schedule.id) && !isScheduleArchived(schedule));
     }
     const excludedInstances = new Set(selection.excludedInstanceKeys || []);
     const rows = [];
@@ -2959,7 +3079,8 @@ function prepackItemFingerprint(item) {
         item.quantity,
         item.dose,
         item.time,
-        item.instructions
+        item.instructions,
+        item.isPrepackAdded ? 'added' : ''
     ].join('|');
 }
 
@@ -3064,6 +3185,13 @@ function prepackStatusMark(item) {
     return '<span class="prepack-mark">[ ]</span>';
 }
 
+function prepackScannerInputHtml(queueId) {
+    const escapedId = escapeHtml(queueId);
+    return `<input id="prepack-scan-input" type="text" autocomplete="off"
+        oninput="schedulePrepackScan('${escapedId}')"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();scanPrepackCode('${escapedId}')}">`;
+}
+
 function prepackWorkspaceHtml(queue) {
     const dayIndex = Math.max(0, Math.min(parseInt(queue.currentDayIndex, 10) || 0, queue.days.length - 1));
     queue.currentDayIndex = dayIndex;
@@ -3083,14 +3211,15 @@ function prepackWorkspaceHtml(queue) {
         const statusClass = item.status === 'correct'
             ? 'prepack-item-correct'
             : (item.status === 'wrong' ? 'prepack-item-wrong' : '');
+        const addedClass = item.isPrepackAdded ? 'prepack-item-added' : '';
         const orderSetText = item.orderSetName ? ` | ${item.orderSetName}` : '';
         const removeButton = queue.selection?.singleMedication
             ? ''
             : `<button type="button" onclick="removePrepackItem('${escapeHtml(queue.id)}','${escapeHtml(day.date)}','${escapeHtml(item.id)}')">Remove</button>`;
-        return `<div class="prepack-item ${statusClass}">
+        return `<div class="prepack-item ${statusClass} ${addedClass}">
             ${prepackStatusMark(item)}
             <div class="prepack-item-copy">
-                <strong>${escapeHtml(item.time)} - ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')}</strong><br>
+                <strong>${escapeHtml(item.time)} - ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')}</strong>${item.isPrepackAdded ? ' <span class="prepack-added-badge">Added</span>' : ''}<br>
                 <small>Qty: ${escapeHtml(item.quantity)} | Dose: ${escapeHtml(item.dose)}${escapeHtml(orderSetText)}</small>
                 ${item.status === 'wrong' ? `<div class="prepack-scan-error">Wrong scan: ${escapeHtml(item.scannedCode || 'Unknown code')}</div>` : ''}
             </div>
@@ -3111,8 +3240,7 @@ function prepackWorkspaceHtml(queue) {
         ? '<div class="prepack-complete-banner">&#10003; Prepackage complete</div>'
         : `<div class="prepack-scanner">
             <label for="prepack-scan-input">Scan medication QR code:</label>
-            <input id="prepack-scan-input" type="text" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();scanPrepackCode('${escapeHtml(queue.id)}')}">
-            <button type="button" onclick="scanPrepackCode('${escapeHtml(queue.id)}')">Verify</button>
+            ${prepackScannerInputHtml(queue.id)}
             <button type="button" onclick="markPrepackDayManual('${escapeHtml(queue.id)}')">Prepacked Manually</button>
             <span>${nextItem ? `Next: ${escapeHtml(nextItem.medName)} at ${escapeHtml(nextItem.time)}` : 'Day complete'}</span>
         </div>`;
@@ -3129,6 +3257,7 @@ function prepackWorkspaceHtml(queue) {
             <div><strong>${escapeHtml(queue.memberName || queue.title)}</strong><br><small>${escapeHtml(queue.sourceLabel || '')} | ${escapeHtml(scheduledText)}</small></div>
             <div>
                 ${medicationActions}
+                <button type="button" onclick="editPrepackDateRange('${escapeHtml(queue.id)}')">Edit Date Range</button>
                 <button type="button" onclick="printUpdatedPrepackLabels('${escapeHtml(queue.id)}')">${printButtonText}</button>
                 <button type="button" onclick="deletePrepackQueue('${escapeHtml(queue.id)}')">Delete Queue</button>
             </div>
@@ -3157,11 +3286,22 @@ window.renderPrepackageQueues = function() {
             .join('');
         filter.value = db.family.some(member => member.id === selectedFilter) ? selectedFilter : '';
     }
-    const visibleQueues = db.prepackQueues.filter(queue => !filter?.value || queue.memberId === filter.value);
-    const active = visibleQueues
+    const completedFilter = document.getElementById('prepack-completed-member-filter');
+    const selectedCompletedFilter = completedFilter?.value || '';
+    if (completedFilter) {
+        completedFilter.innerHTML = '<option value="">All members</option>' + db.family
+            .slice()
+            .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberDisplayName(member))}</option>`)
+            .join('');
+        completedFilter.value = db.family.some(member => member.id === selectedCompletedFilter) ? selectedCompletedFilter : '';
+    }
+    const active = db.prepackQueues
+        .filter(queue => !filter?.value || queue.memberId === filter.value)
         .filter(queue => queue.status !== 'completed')
         .sort((a, b) => String(a.scheduledFor || '9999').localeCompare(String(b.scheduledFor || '9999')));
-    const completed = visibleQueues
+    const completed = db.prepackQueues
+        .filter(queue => !completedFilter?.value || queue.memberId === completedFilter.value)
         .filter(queue => queue.status === 'completed')
         .sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
     const queueRow = (queue, complete = false) => `
@@ -3196,6 +3336,20 @@ window.selectPrepackDay = function(queueId, dayIndex) {
     renderPrepackageQueues();
 };
 
+window.schedulePrepackScan = function(queueId) {
+    clearTimeout(prepackScanTimer);
+    prepackScanTimer = setTimeout(() => {
+        const input = document.getElementById('prepack-scan-input');
+        const queue = db.prepackQueues.find(item => item.id === queueId);
+        const day = queue?.days?.[queue.currentDayIndex || 0];
+        const nextItem = day?.items.find(candidate => candidate.status !== 'correct');
+        const med = nextItem && db.inventory.find(candidate => candidate.id === nextItem.medId);
+        const expectedLength = normalizeMedicationCode(med?.barcodeCode || nextItem?.barcodeCode).length;
+        const typedLength = normalizeMedicationCode(input?.value).length;
+        if (typedLength >= Math.min(Math.max(expectedLength, 1), 4)) window.scanPrepackCode(queueId);
+    }, 180);
+};
+
 window.scanPrepackCode = async function(queueId) {
     const queue = db.prepackQueues.find(item => item.id === queueId);
     const input = document.getElementById('prepack-scan-input');
@@ -3210,11 +3364,45 @@ window.scanPrepackCode = async function(queueId) {
     item.scannedCode = scannedCode;
     item.scannedAt = new Date().toISOString();
     item.status = scannedCode === expectedCode ? 'correct' : 'wrong';
+    if (item.status === 'correct') item.verificationMethod = 'scan';
+    input.value = '';
     updatePrepackQueueStatus(queue);
     if (day.status === 'completed' && queue.status !== 'completed') {
         const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
         if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
     }
+    await sync();
+};
+
+window.editPrepackDateRange = async function(queueId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    if (!queue?.selection) return;
+    const currentStart = queue.selection.startDate || queue.days[0]?.date || localDateKey();
+    const currentEnd = queue.selection.endDate || queue.days[queue.days.length - 1]?.date || currentStart;
+    const result = await showActionModal('Edit Prepack Date Range', `
+        <div class="field-row">
+            <label>From:</label><input name="startDate" type="date" value="${escapeHtml(currentStart)}">
+            <label>To:</label><input name="endDate" type="date" value="${escapeHtml(currentEnd)}">
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Prepack date:</label><input name="prepackDate" type="date" value="${escapeHtml((queue.scheduledFor || '').slice(0, 10))}">
+            <label>Time:</label><input name="prepackTime" type="time" value="${escapeHtml((queue.scheduledFor || '').slice(11, 16))}">
+        </div>
+        <div class="form-help" style="margin-top:8px;">Labels will be marked for reprint if the updated range changes the queued doses.</div>
+    `, 'Save Range');
+    if (!result) return;
+    if (!result.startDate || !result.endDate || result.endDate < result.startDate) {
+        await appAlert('Enter a valid prepack date range.');
+        return;
+    }
+    queue.selection.startDate = result.startDate;
+    queue.selection.endDate = result.endDate;
+    queue.scheduledFor = result.prepackDate
+        ? `${result.prepackDate}T${result.prepackTime || '08:00'}`
+        : '';
+    queue.currentDayIndex = 0;
+    reconcilePrepackQueue(queue);
+    activePrepackQueueId = queue.id;
     await sync();
 };
 
@@ -3278,6 +3466,7 @@ window.removePrepackItem = async function(queueId, date, itemId) {
         if (queue.selection.kind === 'schedule-list') {
             queue.selection.scheduleIds = (queue.selection.scheduleIds || []).filter(id => id !== schedule.id);
         }
+        queue.selection.addedScheduleIds = (queue.selection.addedScheduleIds || []).filter(id => id !== schedule.id);
     } else if (result.removeAction === 'prepack-all') {
         if (queue.selection.kind === 'member-range') {
             queue.selection.excludedScheduleIds = Array.from(new Set([
@@ -3287,6 +3476,7 @@ window.removePrepackItem = async function(queueId, date, itemId) {
         } else {
             queue.selection.scheduleIds = (queue.selection.scheduleIds || []).filter(id => id !== schedule.id);
         }
+        queue.selection.addedScheduleIds = (queue.selection.addedScheduleIds || []).filter(id => id !== schedule.id);
     } else if (item.instanceKey) {
         queue.selection.excludedInstanceKeys = Array.from(new Set([
             ...(queue.selection.excludedInstanceKeys || []),
@@ -3354,6 +3544,7 @@ window.addProfileMedicationToPrepack = async function(queueId) {
     const candidates = db.schedules
         .filter(schedule =>
             schedule.memberId === queue.memberId &&
+            !isScheduleArchived(schedule) &&
             !represented.has(schedule.id) &&
             getScheduleInstancesInRange(schedule, queue.selection?.startDate, queue.selection?.endDate).length > 0
         )
@@ -3390,6 +3581,7 @@ window.addProfileMedicationToPrepack = async function(queueId) {
     } else {
         queue.selection.scheduleIds = Array.from(new Set([...(queue.selection.scheduleIds || []), ...selectedIds]));
     }
+    queue.selection.addedScheduleIds = Array.from(new Set([...(queue.selection.addedScheduleIds || []), ...selectedIds]));
     reconcilePrepackQueue(queue);
     activePrepackQueueId = queue.id;
     await sync();
@@ -3787,13 +3979,16 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         return;
     }
 
-    const min = Math.min(...allValues);
-    const max = Math.max(...allValues);
+    const rawMin = Math.min(...allValues);
+    const rawMax = Math.max(...allValues);
+    const rawSpread = Math.max(rawMax - rawMin, 1);
+    const min = Math.max(0, rawMin - rawSpread * 0.12);
+    const max = rawMax + rawSpread * 0.12;
     const spread = Math.max(max - min, 1);
-    const leftPad = options.type === 'med-monitor' ? 72 : 42;
-    const rightPad = 14;
-    const topPad = 16;
-    const bottomPad = 22;
+    const leftPad = options.type === 'med-monitor' ? 86 : 58;
+    const rightPad = 20;
+    const topPad = 24;
+    const bottomPad = 34;
     const readingTimes = readings.map(reading => readingDateTime(reading)?.getTime()).filter(Number.isFinite);
     const adherenceTimes = (options.adherenceEntries || [])
         .map(entry => parseHistoryTimestamp(entry.timestamp)?.getTime())
@@ -3809,25 +4004,47 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         return Number.isFinite(time) ? xForTime(time) : (leftPad + width - rightPad) / 2;
     };
     const yFor = value => height - bottomPad - ((value - min) / spread) * (height - topPad - bottomPad);
+    const axisLabel = value => {
+        if (Math.abs(value) >= 100 || Math.abs(value - Math.round(value)) < 0.05) return String(Math.round(value));
+        return value.toFixed(1);
+    };
 
-    ctx.strokeStyle = '#c0c0c0';
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.fillStyle = '#444444';
+    ctx.font = '9px MS Sans Serif, Arial';
+    ctx.textAlign = 'right';
+    for (let tick = 0; tick <= 4; tick++) {
+        const value = min + (spread * tick / 4);
+        const y = yFor(value);
+        ctx.beginPath();
+        ctx.moveTo(leftPad, y);
+        ctx.lineTo(width - rightPad, y);
+        ctx.stroke();
+        ctx.fillText(axisLabel(value), leftPad - 7, y + 3);
+    }
+
+    ctx.strokeStyle = '#707070';
+    ctx.lineWidth = 1.25;
     ctx.beginPath();
     ctx.moveTo(leftPad, topPad);
     ctx.lineTo(leftPad, height - bottomPad);
     ctx.lineTo(width - rightPad, height - bottomPad);
     ctx.stroke();
+    ctx.lineWidth = 1;
 
     if (options.type === 'glucose') {
         const y70 = yFor(70);
         ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(leftPad, y70);
         ctx.lineTo(width - rightPad, y70);
         ctx.stroke();
+        ctx.lineWidth = 1;
         ctx.fillStyle = '#ff0000';
         ctx.font = '9px MS Sans Serif, Arial';
         ctx.textAlign = 'right';
-        ctx.fillText('70', leftPad - 6, y70 - 3);
+        ctx.fillText('70', leftPad - 7, y70 - 4);
         ctx.textAlign = 'left';
     }
     if (options.type === 'med-monitor') {
@@ -3855,6 +4072,7 @@ function drawVitalChart(canvas, readings, series, options = {}) {
     pointsBySeries.forEach(item => {
         ctx.strokeStyle = item.color;
         ctx.fillStyle = item.color;
+        ctx.lineWidth = 1.8;
         ctx.beginPath();
         item.values.forEach((point, idx) => {
             const x = xFor(point.index);
@@ -3863,11 +4081,16 @@ function drawVitalChart(canvas, readings, series, options = {}) {
             else ctx.lineTo(x, y);
         });
         ctx.stroke();
+        ctx.lineWidth = 1;
         item.values.forEach(point => {
             const x = xFor(point.index);
             const y = yFor(point.value);
             ctx.fillStyle = isChartPointOutOfRange(options.type, item.key, point.value, options.member, options) ? '#ff0000' : item.color;
-            ctx.fillRect(x - 2, y - 2, 4, 4);
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.stroke();
         });
     });
 
@@ -3888,11 +4111,8 @@ function drawVitalChart(canvas, readings, series, options = {}) {
 
     ctx.fillStyle = '#000000';
     ctx.font = '9px MS Sans Serif, Arial';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${formatAmount(max)}`, leftPad - 6, topPad + 3);
-    ctx.fillText(`${formatAmount(min)}`, leftPad - 6, height - bottomPad);
     ctx.textAlign = 'left';
-    ctx.fillText(options.unit || '', leftPad, 10);
+    ctx.fillText(options.unit || '', leftPad, 14);
     if (readings.length > 0) {
         ctx.fillText(readings[0].date.slice(5), leftPad, height - 4);
         ctx.fillText(readings[readings.length - 1].date.slice(5), Math.max(leftPad, width - 42), height - 4);
@@ -4015,7 +4235,7 @@ function renderMemberVitalCharts(memberId, container) {
         panel.innerHTML = `
             <div style="font-size:11px; font-weight:bold;">${escapeHtml(chart.title)}</div>
             <div class="vital-chart-meta">${first.date} to ${last.date} (${readings.length} readings${chart.medId ? `, ${adherenceEntries.length} linked doses` : ''})</div>
-            <canvas width="380" height="150" class="vital-chart"></canvas>
+            <canvas width="460" height="190" class="vital-chart"></canvas>
             <div class="vital-legend">${legend}${monitoringLegend}<span><span class="legend-swatch" style="background:#ff0000;"></span>Out of goal</span></div>
         `;
         grid.appendChild(panel);
@@ -4261,9 +4481,9 @@ function renderInventoryStatus() {
     if (!container) return;
 
     const groups = getInventoryStatusGroups();
-    const section = (title, items) => `
-        <div class="inventory-status-box">
-            <strong>${title}: ${items.length}</strong>
+    const section = (title, items, className, mark) => `
+        <div class="inventory-status-box ${className}">
+            <div class="inventory-status-heading"><span class="inventory-status-mark">${mark}</span><strong>${title}</strong><span class="inventory-status-count">${items.length}</span></div>
             ${items.length
                 ? `<ul>${items.slice(0, 8).map(inventoryStatusItemHtml).join('')}${items.length > 8 ? `<li>+${items.length - 8} more</li>` : ''}</ul>`
                 : '<div class="status-ok">None</div>'}
@@ -4271,9 +4491,9 @@ function renderInventoryStatus() {
 
     container.innerHTML = `
         <div class="inventory-status-grid">
-            ${section('Low meds', groups.low)}
-            ${section('Expired meds', groups.expired)}
-            ${section('Expiring in 15 days', groups.expiringSoon)}
+            ${section('Low meds', groups.low, 'inventory-status-low', '!')}
+            ${section('Expired meds', groups.expired, 'inventory-status-expired', 'X')}
+            ${section('Expiring in 15 days', groups.expiringSoon, 'inventory-status-soon', '15')}
         </div>`;
 }
 
@@ -4308,7 +4528,6 @@ function reportShell(title, bodyHtml) {
         <style>${reportStyles()}</style>
     </head>
     <body>
-        <h1>${escapeHtml(title)}</h1>
         <div class="muted">Generated ${escapeHtml(new Date().toLocaleString())}</div>
         ${bodyHtml}
     </body>
@@ -4352,7 +4571,7 @@ async function emailReportPdf(title, bodyHtml, filenamePrefix, to, message) {
             fileName: reportPdfFileName(filenamePrefix),
             to,
             subject: title,
-            body: message || `${title}\n\nGenerated by PharmAtlas.`
+            body: message || title
         });
         if (result?.success) {
             await appAlert(`PDF report sent to ${to}.`);
@@ -4400,7 +4619,7 @@ window.generateInventoryPdfReport = async function() {
             <thead><tr><th>Name</th><th>Strength</th><th>Qty On Hand</th><th>Alert At</th><th>Expiry</th><th>Storage</th><th>Control</th><th>Notes</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="8">No inventory entered.</td></tr>'}</tbody>
         </table>`;
-    await saveReportPdf('PharmAtlas Current Inventory Report', body, 'PharmAtlas_Inventory');
+    await saveReportPdf('Current Inventory Report', body, 'Current_Inventory');
 };
 
 function memberScheduleReportBody(member, startDate, endDate) {
@@ -4470,9 +4689,9 @@ window.generateMemberSchedulePdfReport = async function(memberId = currentEditin
     if (!startDate || !endDate || endDate < startDate) return alert("Enter a valid schedule date range.");
 
     await saveReportPdf(
-        `PharmAtlas Medication Schedule - ${member.firstName} ${member.lastName}`,
+        `Medication Schedule - ${member.firstName} ${member.lastName}`,
         memberScheduleReportBody(member, startDate, endDate),
-        `PharmAtlas_Schedule_${member.lastName}_${member.firstName}`
+        `Medication_Schedule_${member.lastName}_${member.firstName}`
     );
 };
 
@@ -4481,8 +4700,8 @@ window.emailMemberSchedulePdfReport = async function(memberId = currentEditingMe
     if (!member) return appAlert("Open a saved member profile before emailing a schedule PDF.");
     if (!startDate || !endDate || endDate < startDate) return appAlert("Enter a valid schedule date range.");
 
-    const title = `PharmAtlas Medication Schedule - ${member.firstName} ${member.lastName}`;
-    const defaultMessage = `Attached is the medication schedule for ${member.firstName} ${member.lastName} from ${startDate} to ${endDate}.\n\nGenerated by PharmAtlas.`;
+    const title = `Medication Schedule - ${member.firstName} ${member.lastName}`;
+    const defaultMessage = `Attached is the medication schedule for ${member.firstName} ${member.lastName} from ${startDate} to ${endDate}.`;
     const result = await showActionModal('Email Schedule PDF', `
         <div class="field-row-stacked">
             <label>Email address:</label>
@@ -4504,7 +4723,7 @@ window.emailMemberSchedulePdfReport = async function(memberId = currentEditingMe
     await emailReportPdf(
         title,
         memberScheduleReportBody(member, startDate, endDate),
-        `PharmAtlas_Schedule_${member.lastName}_${member.firstName}`,
+        `Medication_Schedule_${member.lastName}_${member.firstName}`,
         email,
         result.message
     );
@@ -4538,14 +4757,18 @@ function memberVitalsReportBody(member) {
         .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
 
     const charts = getVitalChartConfigs(member);
-    const chartsHtml = charts.map(chart => {
-        const chartReadings = memberReadings.filter(reading => readingMatchesChart(reading, chart));
-        return vitalChartReportHtml(member, chart, chartReadings);
+    const chartsWithReadings = charts
+        .map(chart => ({
+            chart,
+            readings: memberReadings.filter(reading => readingMatchesChart(reading, chart))
+        }))
+        .filter(entry => entry.readings.length > 0);
+    const chartsHtml = chartsWithReadings.map(({ chart, readings }) => {
+        return vitalChartReportHtml(member, chart, readings);
     }).join('');
 
-    const logSections = charts.map(chart => {
-        const rows = memberReadings
-            .filter(reading => readingMatchesChart(reading, chart))
+    const logSections = chartsWithReadings.map(({ chart, readings }) => {
+        const rows = readings
             .map(reading => {
                 const alertClass = isVitalOutOfRange(reading, member) ? ' class="alert"' : '';
                 return `<tr${alertClass}>
@@ -4578,9 +4801,9 @@ window.generateMemberVitalsPdfReport = async function(memberId = currentEditingM
     }
 
     await saveReportPdf(
-        `PharmAtlas Monitoring Report - ${member.firstName} ${member.lastName}`,
+        `Monitoring Report - ${member.firstName} ${member.lastName}`,
         memberVitalsReportBody(member),
-        `PharmAtlas_Monitoring_${member.lastName}_${member.firstName}`
+        `Monitoring_${member.lastName}_${member.firstName}`
     );
 };
 
@@ -4605,8 +4828,8 @@ window.emailMemberVitalsPdfReport = async function(memberId = currentEditingMemb
     const providerOptions = providers
         .map(provider => `<option value="${escapeHtml(provider.id)}" ${provider.id === defaultProvider?.id ? 'selected' : ''}>${escapeHtml(prescriberDisplayName(provider))}${provider.email ? ` - ${escapeHtml(provider.email)}` : ' - no email saved'}</option>`)
         .join('');
-    const title = `PharmAtlas Monitoring Report - ${member.firstName} ${member.lastName}`;
-    const defaultMessage = `Attached is the monitored vital signs and therapeutic lab report for ${member.firstName} ${member.lastName}.\n\nGenerated by PharmAtlas.`;
+    const title = `Monitoring Report - ${member.firstName} ${member.lastName}`;
+    const defaultMessage = `Attached is the monitored vital signs and therapeutic lab report for ${member.firstName} ${member.lastName}.`;
     const result = await showActionModal('Send Monitoring Report to Provider', `
         <div class="field-row-stacked">
             <label>Provider profile:</label>
@@ -4634,7 +4857,7 @@ window.emailMemberVitalsPdfReport = async function(memberId = currentEditingMemb
     await emailReportPdf(
         title,
         memberVitalsReportBody(member),
-        `PharmAtlas_Monitoring_${member.lastName}_${member.firstName}`,
+        `Monitoring_${member.lastName}_${member.firstName}`,
         email,
         result.message
     );
@@ -4934,9 +5157,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${overrideText}${noteText}`
     });
 
-    if (sched.isOneTime) {
-        db.schedules = db.schedules.filter(s => s.id !== sched.id);
-    }
+    if (sched.isOneTime) markScheduleCompleted(sched);
     return true;
 }
 
@@ -5064,6 +5285,10 @@ window.administerDose = async function(medId, scheduleId) {
     const med = db.inventory.find(m => m.id === medId);
     const sched = db.schedules.find(s => s.id === scheduleId);
     if (!med || !sched) return;
+    if (isScheduleArchived(sched)) {
+        await appAlert('This medication order is completed or discontinued. Modify or extend it before documenting new administrations.');
+        return;
+    }
 
     const actual = sched.freq === 'PRN'
         ? await requestActualAdministration(`Administer: ${med.name}`, `
@@ -5135,7 +5360,7 @@ window.finishTopicalContainer = async function(scheduleId) {
         stockLogDetail: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished`,
         details: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished; container inventory reduced${result.note ? `; Note: ${result.note}` : ''}`
     });
-    db.schedules = db.schedules.filter(item => item.id !== schedule.id);
+    markScheduleCompleted(schedule);
     await sync();
     const memberModal = document.getElementById('member-modal');
     if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
@@ -5147,7 +5372,7 @@ window.administerOrderSet = async function(orderSetId) {
     const set = db.orderSets.find(orderSet => orderSet.id === orderSetId);
     if (!set) return;
 
-    const schedules = db.schedules.filter(schedule => schedule.orderSetId === orderSetId);
+    const schedules = db.schedules.filter(schedule => schedule.orderSetId === orderSetId && !isScheduleArchived(schedule));
     if (schedules.length === 0) {
         await appAlert("No active schedules were found for this order set.");
         return;
@@ -5227,7 +5452,9 @@ window.deleteSchedule = async function(id) {
     const medLabel = med ? `${med.name} ${formatMedStrength(med)}` : 'this order';
     if (!await appConfirm(`Discontinue ${medLabel}?`, 'Discontinue Order')) return;
 
-    db.schedules = db.schedules.filter(s => s.id !== id);
+    schedule.status = 'discontinued';
+    schedule.completedAt = new Date().toISOString();
+    if (!schedule.endDate || schedule.endDate === 'Ongoing') schedule.endDate = localDateKey();
     await sync();
 
     const memberModal = document.getElementById('member-modal');
@@ -5293,8 +5520,10 @@ function calendarMedicationColor(schedule, dateStr, time) {
     if (currentEntry) return '#000000';
 
     const due = new Date(`${dateStr}T${time}`);
-    if (due < new Date()) return '#cc0000';
-    return '#d26a00';
+    const now = new Date();
+    if (due < now) return '#cc0000';
+    const minutesUntilDue = (due.getTime() - now.getTime()) / 60000;
+    return minutesUntilDue <= 60 ? '#d26a00' : '#000000';
 }
 
 function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarStart, memberId = null, rangeLabelId = 'dashboard-calendar-range') {
@@ -5324,7 +5553,7 @@ function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarS
 
         const todaysMeds = [];
         db.schedules.forEach(schedule => {
-            if ((!memberId || schedule.memberId === memberId) && isScheduleDueOnDate(schedule, dateStr)) {
+            if (!isScheduleArchived(schedule) && (!memberId || schedule.memberId === memberId) && isScheduleDueOnDate(schedule, dateStr)) {
                 getScheduleTimes(schedule).forEach(time => todaysMeds.push({ ...schedule, specificTime: time }));
             }
         });
@@ -5629,7 +5858,7 @@ sortedInventory.forEach(med => {
     const schedList = document.getElementById('schedule-list');
     if (schedList) {
         schedList.innerHTML = '';
-        db.schedules.forEach(s => {
+        db.schedules.filter(schedule => !isScheduleArchived(schedule)).forEach(s => {
             const p = db.family.find(f => f.id === s.memberId);
             const m = db.inventory.find(i => i.id === s.medId);
             schedList.innerHTML += `<div class="med-item-row" style="padding:5px; border-bottom:1px solid #808080;">
@@ -6059,7 +6288,7 @@ function labelScheduleChoiceHtml(schedule, inputId, groupKey = '') {
 
 async function chooseDateRangeLabelSchedules(memberId, startDate, endDate) {
     const schedules = db.schedules
-        .filter(schedule => schedule.memberId === memberId && getScheduleInstancesInRange(schedule, startDate, endDate).length > 0)
+        .filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule) && getScheduleInstancesInRange(schedule, startDate, endDate).length > 0)
         .sort((a, b) => {
             const first = db.inventory.find(item => item.id === a.medId)?.name || '';
             const second = db.inventory.find(item => item.id === b.medId)?.name || '';

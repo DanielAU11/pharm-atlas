@@ -53,9 +53,8 @@
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
-                        <legend>Recent Activity Log</legend>
-                        <div id="history-log" class="tree-view" style="height: 120px; overflow-y: scroll; background: white;"></div>
-                        <button onclick="clearHistory()" style="margin-top:5px;">Clear Log</button>
+                        <legend>Monitoring Trends</legend>
+                        <div id="vitals-dashboard"></div>
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
@@ -71,8 +70,9 @@
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
-                        <legend>Monitoring Trends</legend>
-                        <div id="vitals-dashboard"></div>
+                        <legend>Recent Activity Log</legend>
+                        <div id="history-log" class="tree-view" style="height: 120px; overflow-y: scroll; background: white;"></div>
+                        <button onclick="clearHistory()" style="margin-top:5px;">Clear Log</button>
                     </fieldset>
         
                 </div>
@@ -194,6 +194,12 @@
                     </div>
                     <fieldset>
                         <legend>Completed Prepackages</legend>
+                        <div class="field-row prepack-filter-row">
+                            <label for="prepack-completed-member-filter">Member:</label>
+                            <select id="prepack-completed-member-filter" onchange="renderPrepackageQueues()">
+                                <option value="">All members</option>
+                            </select>
+                        </div>
                         <div id="prepack-completed-list" class="sunken-panel prepack-completed-list"></div>
                     </fieldset>
                 </div>
@@ -614,7 +620,7 @@
                     <button type="button" onclick="addModalIngredientRow()">+ Add Ingredient</button>
                 </div>
                 <div class="field-row" style="margin-top:6px;">
-                    <label>Alert at:</label><input id="modal-threshold" type="number" min="0" step="any" style="width:60px;">
+                    <label>Low stock alert qty:</label><input id="modal-threshold" type="number" min="0" step="any" style="width:60px;">
                     <label>Track inventory as:</label>
                     <select id="modal-inventory-behavior" onchange="updateMedProfileMode()">
                         <option value="per-dose">Individual dose units</option>
@@ -741,6 +747,11 @@
             <fieldset style="margin-top:10px;">
                 <legend>Active Medication Orders</legend>
                 <div id="member-active-meds-list"></div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Completed Medication Orders</legend>
+                <div id="member-completed-meds-list"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">

@@ -1,7 +1,7 @@
 {
   "name": "pharm-atlas",
   "productName": "PharmAtlas",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A retro desktop medication scheduler, inventory tracker, and vitals log.",
   "author": "Daniel Uribe",
   "main": "main.js",

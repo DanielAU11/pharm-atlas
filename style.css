@@ -99,7 +99,7 @@ fieldset {
 
 .vital-chart-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(360px, max-content));
+    grid-template-columns: repeat(auto-fit, minmax(430px, max-content));
     gap: 10px;
     align-items: start;
 }
@@ -152,10 +152,54 @@ fieldset {
 
 .inventory-status-box {
     border: 2px inset #ffffff;
-    background: #ffffff;
-    padding: 6px;
-    min-height: 78px;
+    background: linear-gradient(#ffffff, #efefef);
+    padding: 8px;
+    min-height: 92px;
     font-size: 11px;
+}
+
+.inventory-status-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px dotted #808080;
+    padding-bottom: 5px;
+}
+
+.inventory-status-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 20px;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+    font-weight: bold;
+}
+
+.inventory-status-count {
+    margin-left: auto;
+    min-width: 24px;
+    padding: 1px 5px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    text-align: center;
+    font-weight: bold;
+}
+
+.inventory-status-low .inventory-status-mark {
+    color: #805000;
+    background: #fff0a8;
+}
+
+.inventory-status-expired .inventory-status-mark {
+    color: #ffffff;
+    background: #a00000;
+}
+
+.inventory-status-soon .inventory-status-mark {
+    color: #003c80;
+    background: #c8e0ff;
 }
 
 .inventory-status-box ul {
@@ -324,8 +368,15 @@ fieldset {
     display: block;
     width: 100%;
     min-height: 44px;
-    padding: 5px 7px;
+    padding: 7px 8px;
     text-align: left;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.prepack-queue-row small {
+    font-size: 11px;
+    line-height: 1.25;
 }
 
 .prepack-queue-row.selected {
@@ -437,6 +488,21 @@ fieldset {
 .prepack-item-wrong {
     background: #ffd0d0;
     color: #a00000;
+}
+
+.prepack-item-added .prepack-item-copy strong {
+    color: #b85a00;
+}
+
+.prepack-added-badge {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 0 4px;
+    border: 1px solid #b85a00;
+    background: #fff0a8;
+    color: #b85a00;
+    font-size: 10px;
+    font-weight: bold;
 }
 
 .prepack-scan-error {
@@ -564,7 +630,7 @@ fieldset {
 }
 
 .member-profile-window {
-    width: min(900px, calc(100vw - 32px));
+    width: min(1120px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
     display: flex;
     flex-direction: column;
@@ -577,10 +643,53 @@ fieldset {
 }
 
 #member-active-meds-list {
-    height: min(400px, 42vh);
-    min-height: 280px;
+    height: min(460px, 48vh);
+    min-height: 320px;
     overflow-y: auto;
     padding-right: 4px;
+}
+
+.member-active-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 4px;
+    margin-bottom: 5px;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+}
+
+#member-completed-meds-list {
+    max-height: 260px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 2px inset #ffffff;
+}
+
+.completed-med-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px;
+    border-bottom: 1px dotted #808080;
+    background: #ffffff;
+}
+
+.completed-med-row:last-child {
+    border-bottom: 0;
+}
+
+.completed-order-set {
+    background: #f3f3f3;
+}
+
+.completed-med-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: flex-end;
+    gap: 4px;
+    min-width: 170px;
 }
 
 #member-prn-meds-list {
