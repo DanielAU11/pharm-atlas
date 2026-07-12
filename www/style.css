@@ -441,6 +441,184 @@ fieldset {
     min-width: 66px;
 }
 
+.schedule-medications-button {
+    background: #008000 !important;
+    color: #ffffff !important;
+    font-weight: bold;
+}
+
+.linked-med-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 5px;
+    border: 1px solid #008000;
+    background: #e8ffe8;
+    color: #006000;
+    font-weight: bold;
+    line-height: 1.2;
+}
+
+.linked-med-details {
+    margin-top: 4px;
+    font-size: 11px;
+}
+
+.linked-med-details summary {
+    cursor: pointer;
+    color: #006000;
+    font-weight: bold;
+}
+
+.linked-med-list {
+    margin: 3px 0 0 18px;
+    padding: 3px 5px;
+    border-left: 3px solid #008000;
+    background: #f5fff5;
+}
+
+.pending-link-chip .linked-med-badge {
+    margin-left: 0;
+}
+
+.link-rule-row,
+.order-set-med-row .field-row {
+    align-items: flex-start;
+}
+
+.link-choice-panel {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto;
+    gap: 4px;
+    align-items: stretch;
+    width: 280px;
+    min-height: 26px;
+    padding: 2px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    font-size: 11px;
+    box-sizing: border-box;
+}
+
+.link-choice-summary {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.link-choice-chip {
+    display: inline-block;
+    max-width: 130px;
+    padding: 1px 4px;
+    border: 1px solid #008000;
+    background: #e8ffe8;
+    color: #005000;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.link-choice-chip.pending-link-choice {
+    border-color: #b45f00;
+    background: #fff0d0;
+    color: #b45f00;
+}
+
+.link-choice-button {
+    min-width: 64px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.link-choice-empty {
+    color: #404040;
+    padding-left: 3px;
+}
+
+.link-picker-list {
+    background: #ffffff;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 5px;
+}
+
+.link-picker-item {
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    gap: 6px;
+    align-items: center;
+    padding: 5px;
+    border-bottom: 1px dotted #c0c0c0;
+    background: #ffffff;
+    color: #000000;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.25;
+    min-width: 0;
+}
+
+.link-picker-item:last-child {
+    border-bottom: 0;
+}
+
+.link-picker-item input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.link-picker-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    font-weight: bold;
+    color: #008000;
+    line-height: 1;
+}
+
+.link-picker-item input:checked + .link-picker-check::after {
+    content: "✓";
+}
+
+.link-picker-item:has(input:checked),
+.link-picker-item.checked {
+    background: #e8ffe8;
+}
+
+.link-picker-item input:checked + .link-picker-check::after {
+    content: "\2713";
+}
+
+.link-picker-item label {
+    display: block;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+    cursor: pointer;
+    margin: 0;
+}
+
+.link-picker-item.pending-link-choice {
+    background: #fffaf0;
+}
+
+.link-picker-item.pending-link-choice label {
+    color: #b45f00;
+    font-weight: bold;
+}
+
+.link-picker-item.pending-link-choice.checked,
+.link-picker-item.pending-link-choice:has(input:checked) {
+    background: #ffe6bd;
+}
+
 .prepack-choice-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(90px, 1fr));

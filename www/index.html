@@ -26,7 +26,7 @@
                 <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')">Dashboard</a></li>
                 <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')">Schedule Medications</a></li>
                 <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')">Prepackage Meds</a></li>
-                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Order Sets</a></li>
+                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Regimens</a></li>
                 <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Monitoring</a></li>
                 <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')">Inventory</a></li>
                 <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')">Drug/Vaccine Information</a></li>
@@ -40,7 +40,7 @@
                 <!-- 1. DASHBOARD -->
                 <div id="panel-dashboard">
                     <fieldset>
-                        <legend>Medication Calendar</legend>
+                        <legend>Medication Schedule Calendar</legend>
                         <div class="calendar-controls">
                             <button type="button" onclick="shiftDashboardCalendar(-7)">Previous 7 Days</button>
                             <strong id="dashboard-calendar-range"></strong>
@@ -85,7 +85,7 @@
                         <legend>Prescription Entry</legend>
                         <div class="field-row">
                             <label>Who:</label>
-                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); renderPendingScheduleOrders();"></select>
+                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); renderPendingScheduleOrders(); renderScheduleLinkOptions();"></select>
                             <label>Medication:</label>
                             <input list="med-options" id="med-search-input" oninput="updateSchedStrength()" style="width:120px;" placeholder="Search...">
                             <datalist id="med-options"></datalist>
@@ -170,6 +170,15 @@
                             <label>Additional Instructions:</label>
                             <textarea id="sched-instructions" rows="2" class="schedule-instructions"></textarea>
                         </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Link to:</label><div id="sched-link-target" class="link-choice-panel"></div>
+                            <label>Meaning:</label>
+                            <select id="sched-link-mode">
+                                <option value="">None</option>
+                                <option value="together">Must take together</option>
+                                <option value="choose-one">Choose only one</option>
+                            </select>
+                        </div>
                         <div class="field-row" style="justify-content: flex-end; margin-top:10px;">
                             <button onclick="addSchedule()">Add to Pending</button>
                         </div>
@@ -187,7 +196,7 @@
                             <div id="pending-schedule-list" class="sunken-panel pending-order-list"></div>
                             <div class="field-row" style="justify-content:flex-end; margin-top:6px;">
                                 <button type="button" onclick="clearPendingScheduleOrders()">Remove All</button>
-                                <button type="button" onclick="finalizePendingScheduleOrders()">Schedule Medications</button>
+                                <button type="button" class="schedule-medications-button" onclick="finalizePendingScheduleOrders()">Schedule Medications</button>
                             </div>
                         </fieldset>
                     </div>
@@ -225,10 +234,10 @@
                     </fieldset>
                 </div>
 
-                <!-- 3. ORDER SETS -->
+                <!-- 3. REGIMENS -->
                 <div id="panel-order-sets" style="display: none;">
                     <fieldset>
-                        <legend>Order Set Builder</legend>
+                        <legend>Regimen Builder</legend>
                         <input type="hidden" id="order-set-edit-id">
                         <div class="field-row">
                             <label>Who:</label><select id="order-set-member"></select>
@@ -240,7 +249,7 @@
                         <div class="field-row" style="justify-content:space-between; margin-top:8px;">
                             <button onclick="addOrderSetMedicationRow()">+ Add Medication</button>
                             <span>
-                                <button onclick="saveOrderSet()">Save Order Set</button>
+                                <button onclick="saveOrderSet()">Save Regimen</button>
                                 <button onclick="clearOrderSetBuilder()">Clear</button>
                             </span>
                         </div>
@@ -252,11 +261,11 @@
                         </select>
                     </div>
                     <fieldset>
-                        <legend>Reusable Order Sets</legend>
+                        <legend>Reusable Regimens</legend>
                         <div id="order-set-template-list" class="sunken-panel order-set-list"></div>
                     </fieldset>
                     <fieldset>
-                        <legend>Assigned Order Sets</legend>
+                        <legend>Assigned Regimens</legend>
                         <div id="order-set-assigned-list" class="sunken-panel order-set-list"></div>
                     </fieldset>
                 </div>
@@ -533,7 +542,7 @@
                 <!-- 4. FAMILY -->
                 <div id="panel-family" style="display: none;">
                      <fieldset>
-                         <legend>Family Registry</legend>
+                         <legend>Family Member Registry</legend>
                          <div class="field-row">
                             <button onclick="openMemberModal()">+ Add New Person</button>
                         </div>
@@ -757,6 +766,18 @@
                     <label>Dia Min:</label><input id="m-bp-dia-low" type="number" style="width:55px;">
                     <label>Dia Max:</label><input id="m-bp-dia-high" type="number" style="width:55px;">
                 </div>
+                <div class="field-row" style="margin-top:6px;">
+                    <label>Heart Rate Goals:</label>
+                    <label>Min:</label><input id="m-hr-low" type="number" style="width:55px;">
+                    <label>Max:</label><input id="m-hr-high" type="number" style="width:55px;">
+                    <span>bpm</span>
+                </div>
+                <div class="field-row" style="margin-top:6px;">
+                    <label>Weight Goals:</label>
+                    <label>Low:</label><input id="m-weight-low" type="number" step="0.1" style="width:60px;">
+                    <label>High:</label><input id="m-weight-high" type="number" step="0.1" style="width:60px;">
+                    <select id="m-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select>
+                </div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
@@ -768,22 +789,22 @@
             </fieldset>
 
             <fieldset style="margin-top:10px;">
-                <legend>Active Medication Orders</legend>
+                <legend>Active Medications</legend>
                 <div id="member-active-meds-list"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
-                <legend>PRN Medication Orders</legend>
+                <legend>PRN Medications</legend>
                 <div id="member-prn-meds-list"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
-                <legend>Completed Medication Orders</legend>
+                <legend>Completed Medication Schedules</legend>
                 <div id="member-completed-meds-list"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
-                <legend>Medication Calendar</legend>
+                <legend>Medication Schedule Calendar</legend>
                 <div class="calendar-controls">
                     <button type="button" onclick="shiftMemberCalendar(-7)">Previous 7 Days</button>
                     <strong id="member-calendar-range"></strong>
@@ -857,6 +878,7 @@
                 <span class="weekday-option"><input id="mod-weekday-6" type="checkbox" value="6"><label for="mod-weekday-6">Sat</label></span>
             </div>
             <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span></div>
+            <div class="field-row link-rule-row"><label>Link to</label><div id="mod-link-target" class="link-choice-panel"></div><label>Meaning</label><select id="mod-link-mode"><option value="">None</option><option value="together">Must take together</option><option value="choose-one">Choose only one</option></select></div>
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
             <div class="field-row-stacked"><label>Instructions</label><textarea id="mod-instr" rows="3"></textarea></div>
             <div style="text-align:right; margin-top:10px;">
