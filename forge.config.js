@@ -4,7 +4,7 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
   packagerConfig: {
     asar: true,
-    icon: './assets/pngegg',
+    icon: './assets/pharmatlas',
     executableName: 'PharmAtlas',
     win32metadata: {
       CompanyName: 'PharmAtlas',
@@ -19,7 +19,7 @@ module.exports = {
     {
       name: '@electron-forge/maker-squirrel',
       config: {
-        setupIcon: './assets/pngegg.ico',
+        setupIcon: './assets/pharmatlas.ico',
       },
     },
     {

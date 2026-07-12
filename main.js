@@ -31,7 +31,7 @@ if (!hasSingleInstanceLock) {
     });
 }
 
-app.setAppUserModelId('PharmAtlas');
+app.setAppUserModelId(app.isPackaged ? 'com.squirrel.pharm-atlas.PharmAtlas' : 'PharmAtlas');
 
 const dataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
 const dbPath = path.join(dataDir, 'db.json');
@@ -67,7 +67,7 @@ function createWindow() {
     const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
-    const appIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'pngegg.ico'));
+    const appIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'pharmatlas.ico'));
 
     win = new BrowserWindow({
         width: width,
