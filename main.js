@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
@@ -31,7 +31,7 @@ if (!hasSingleInstanceLock) {
     });
 }
 
-app.setAppUserModelId('com.squirrel.pharm_atlas.PharmAtlas');
+app.setAppUserModelId('PharmAtlas');
 
 const dataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
 const dbPath = path.join(dataDir, 'db.json');
@@ -67,11 +67,12 @@ function createWindow() {
     const { screen } = require('electron');
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
+    const appIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'pngegg.ico'));
 
     win = new BrowserWindow({
         width: width,
         height: height,
-        icon: path.join(__dirname, 'assets', 'pngegg.ico'),
+        icon: appIcon,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
