@@ -85,7 +85,7 @@
                         <legend>Prescription Entry</legend>
                         <div class="field-row">
                             <label>Who:</label>
-                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); renderPendingScheduleOrders(); renderScheduleLinkOptions();"></select>
+                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); updateSchedStrength(); renderPendingScheduleOrders(); renderScheduleLinkOptions();"></select>
                             <label>Medication:</label>
                             <input list="med-options" id="med-search-input" oninput="updateSchedStrength()" style="width:120px;" placeholder="Search...">
                             <datalist id="med-options"></datalist>
@@ -326,6 +326,14 @@
                             <label>Prescriber:</label>
                             <select id="med-prescriber" style="width:220px;"></select>
                         </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label for="med-assignment-mode">Assign to:</label>
+                            <select id="med-assignment-mode" onchange="updateMedicationAssignmentMode('med')" style="width:150px;">
+                                <option value="all">All members</option>
+                                <option value="selected">Selected members</option>
+                            </select>
+                            <div id="med-assigned-members" class="member-assignment-list"></div>
+                        </div>
                         <div class="field-row inventory-photo-row">
                             <label>Photo:</label>
                             <input id="med-image-input" type="file" accept="image/*" />
@@ -462,6 +470,7 @@
                                         <th>Qty</th>
                                         <th>Alert</th>
                                         <th>Exp Date</th>
+                                        <th>Assigned</th>
                                         <th>Actions</th>
                                         
                                     </tr>
@@ -604,6 +613,14 @@
                         <label>Prescriber:</label>
                         <select id="modal-prescriber" style="width:150px;"></select>
                     </div>
+                    <div class="field-row">
+                        <label for="modal-assignment-mode">Assign to:</label>
+                        <select id="modal-assignment-mode" onchange="updateMedicationAssignmentMode('modal')" style="width:150px;">
+                            <option value="all">All members</option>
+                            <option value="selected">Selected members</option>
+                        </select>
+                    </div>
+                    <div id="modal-assigned-members" class="member-assignment-list"></div>
                     <div class="field-row">
                         <label for="modal-barcode-code">QR code:</label>
                         <input id="modal-barcode-code" type="text" style="width:170px;">

@@ -234,6 +234,13 @@ function dateKeysInRange(startDate, endDate) {
     return dates;
 }
 
+function addDaysKey(dateStr, days) {
+    const date = parseLocal(dateStr);
+    if (!date) return '';
+    date.setDate(date.getDate() + days);
+    return localDateKey(date);
+}
+
 function timeToMinutes(time) {
     if (!time) return null;
     const [hours, minutes] = time.split(':').map(Number);
@@ -259,6 +266,202 @@ function generateIntervalTimes(startTime, intervalHours) {
         times.push(minutesToTime(start + elapsed));
     }
     return times;
+}
+
+function dateTimeFromParts(dateStr, timeStr) {
+    if (!dateStr || !timeStr) return null;
+    const date = parseLocal(dateStr);
+    const minutes = timeToMinutes(timeStr);
+    if (!date || minutes === null) return null;
+    date.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+    return date;
+}
+
+function dateTimeParts(date) {
+    return {
+        date: localDateKey(date),
+        time: `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+    };
+}
+
+function intervalAnchorDateTime(schedule, useRolling = true) {
+    if (!schedule || schedule.freq !== 'QXH') return null;
+    const rolling = useRolling && schedule.rollingAnchorDate && schedule.rollingAnchorTime
+        ? dateTimeFromParts(schedule.rollingAnchorDate, schedule.rollingAnchorTime)
+        : null;
+    return rolling || dateTimeFromParts(schedule.startDate, schedule.startTime || schedule.times?.[0]);
+}
+
+function latestIntervalAnchorFromHistory(schedule) {
+    if (!schedule || schedule.freq !== 'QXH') return null;
+    return db.history
+        .filter(entry => entry.scheduleId === schedule.id && ['late', 'early'].includes(entry.doseStatus || 'given'))
+        .map(entry => historyEntryDateTime(entry))
+        .filter(parts => parts.date && parts.time)
+        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0] || null;
+}
+
+function effectiveIntervalRollingAnchor(schedule) {
+    if (!schedule || schedule.freq !== 'QXH') return null;
+    const savedAnchor = schedule.rollingAnchorDate && schedule.rollingAnchorTime
+        ? { date: schedule.rollingAnchorDate, time: schedule.rollingAnchorTime }
+        : null;
+    const historyAnchor = latestIntervalAnchorFromHistory(schedule);
+    const latest = [savedAnchor, historyAnchor]
+        .filter(Boolean)
+        .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0];
+    return latest ? dateTimeFromParts(latest.date, latest.time) : null;
+}
+
+function intervalInstancesBetween(schedule, from, through, stopBefore = null) {
+    const interval = parseInt(schedule?.intervalHours, 10);
+    const anchor = intervalAnchorDateTime(schedule, false);
+    if (!anchor || !Number.isInteger(interval) || interval < 1 || interval > 24) return [];
+
+    const stepMs = interval * 60 * 60 * 1000;
+    let cursor = new Date(anchor);
+    if (cursor < from) {
+        const steps = Math.max(0, Math.ceil((from - cursor) / stepMs));
+        cursor = new Date(cursor.getTime() + (steps * stepMs));
+    }
+
+    const instances = [];
+    const hardStop = stopBefore && stopBefore < through ? stopBefore : through;
+    while (cursor <= hardStop) {
+        if (!stopBefore || cursor < stopBefore) instances.push(new Date(cursor));
+        cursor = new Date(cursor.getTime() + stepMs);
+    }
+    return instances;
+}
+
+function rollingIntervalInstancesBetween(schedule, from, through) {
+    const interval = parseInt(schedule?.intervalHours, 10);
+    const originalAnchor = intervalAnchorDateTime(schedule, false);
+    const rollingAnchor = effectiveIntervalRollingAnchor(schedule);
+    const anchor = rollingAnchor || intervalAnchorDateTime(schedule, true);
+    if (!anchor || !Number.isInteger(interval) || interval < 1 || interval > 24) return [];
+
+    const isUsingRollingAnchor = !!(rollingAnchor && anchor.getTime() === rollingAnchor.getTime());
+    const instances = [];
+    if (rollingAnchor && originalAnchor && rollingAnchor > originalAnchor && from < rollingAnchor) {
+        instances.push(...intervalInstancesBetween(schedule, from, through, rollingAnchor));
+    }
+
+    const stepMs = interval * 60 * 60 * 1000;
+    let cursor = new Date(isUsingRollingAnchor ? anchor.getTime() + stepMs : anchor.getTime());
+    if (cursor < from) {
+        const steps = Math.max(0, Math.ceil((from - cursor) / stepMs));
+        cursor = new Date(cursor.getTime() + (steps * stepMs));
+    }
+    while (cursor <= through) {
+        instances.push(new Date(cursor));
+        cursor = new Date(cursor.getTime() + stepMs);
+    }
+
+    const byKey = new Map();
+    instances.forEach(date => {
+        const parts = dateTimeParts(date);
+        byKey.set(`${parts.date}|${parts.time}`, date);
+    });
+    return Array.from(byKey.values()).sort((a, b) => a - b);
+}
+
+function intervalPreviewHistoryRows(schedule, dateKey) {
+    if (!schedule) return [];
+    return db.history
+        .filter(entry => entry.scheduleId === schedule.id && historyEntryDateKey(entry) === dateKey && isGivenStatus(entry.doseStatus || 'given'))
+        .map(entry => ({
+            date: dateKey,
+            time: historyEntryDateTime(entry).time,
+            administered: true,
+            entryId: entry.id
+        }));
+}
+
+function getIntervalPreviewRows(prefix) {
+    const startDate = document.getElementById(prefix === 'mod' ? 'mod-start' : 'sched-start')?.value || localDateKey();
+    const endValue = document.getElementById(prefix === 'mod' ? 'mod-end' : 'sched-end')?.value || '';
+    const intervalHours = parseInt(document.getElementById(prefix === 'mod' ? 'mod-interval-hours' : 'sched-interval-hours')?.value, 10);
+    const startTime = document.querySelector(`#${prefix === 'mod' ? 'mod-time-fields' : 'sched-time-fields'} .${prefix}-time-input`)?.value;
+    if (!startDate || !startTime || !Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24) return { dates: [], rows: [] };
+
+    const today = localDateKey();
+    const isModifier = prefix === 'mod';
+    const previewStartKey = isModifier ? addDaysKey(today, -1) : startDate;
+    const previewEndKey = isModifier ? addDaysKey(today, 2) : addDaysKey(startDate, 2);
+    const scheduleStart = isModifier && startDate < today ? today : startDate;
+    const previewEnd = parseLocal(previewEndKey);
+    const endDate = endValue ? parseLocal(endValue) : null;
+    const through = endDate && endDate < previewEnd ? endDate : previewEnd;
+    through.setHours(23, 59, 59, 999);
+
+    const scheduleId = document.getElementById('mod-sched-id')?.value || '';
+    const existingSchedule = isModifier ? db.schedules.find(item => item.id === scheduleId) : null;
+    const historyAnchor = latestIntervalAnchorFromHistory(existingSchedule);
+    const schedule = {
+        id: scheduleId || 'preview',
+        freq: 'QXH',
+        startDate: scheduleStart,
+        endDate: endValue || 'Ongoing',
+        startTime,
+        times: [startTime],
+        intervalHours,
+        rollingAnchorDate: existingSchedule?.rollingAnchorDate || historyAnchor?.date || '',
+        rollingAnchorTime: existingSchedule?.rollingAnchorTime || historyAnchor?.time || ''
+    };
+    const from = dateTimeFromParts(scheduleStart, startTime);
+    const previewDates = dateKeysInRange(previewStartKey, localDateKey(through));
+    const generatedRows = rollingIntervalInstancesBetween(schedule, from, through)
+        .filter(date => {
+            const parts = dateTimeParts(date);
+            return isScheduleDueOnDate(schedule, parts.date);
+        })
+        .map(date => {
+            const parts = dateTimeParts(date);
+            const instance = { ...parts, key: scheduleInstanceKey(scheduleId || 'preview', parts.date, parts.time) };
+            const documented = existingSchedule ? findHistoryForScheduleInstance(existingSchedule, instance) : null;
+            return { ...parts, administered: !!documented && isGivenStatus(documented.doseStatus || 'given'), entryId: documented?.id || '' };
+        });
+    const yesterdayRows = isModifier ? intervalPreviewHistoryRows(existingSchedule, previewStartKey) : [];
+    const rowKeys = new Set();
+    const rows = [...yesterdayRows, ...generatedRows].filter(row => {
+        const key = `${row.date}|${row.time}`;
+        if (rowKeys.has(key)) return false;
+        rowKeys.add(key);
+        return true;
+    });
+    return { dates: previewDates, rows };
+}
+
+function renderIntervalPreview(prefix) {
+    const preview = document.getElementById(`${prefix}-interval-preview`);
+    if (!preview) return;
+    const { dates, rows } = getIntervalPreviewRows(prefix);
+    if (dates.length === 0) {
+        preview.innerHTML = '<div class="interval-preview-empty">Enter a start date, start time, and interval to preview doses.</div>';
+        return;
+    }
+    const grouped = dates.reduce((map, date) => {
+        map.set(date, []);
+        return map;
+    }, new Map());
+    rows.forEach(item => {
+        if (!grouped.has(item.date)) grouped.set(item.date, []);
+        grouped.get(item.date).push(item);
+    });
+    preview.innerHTML = `
+        <table class="interval-preview-table">
+            <thead><tr><th>Date</th><th>Administration times</th></tr></thead>
+            <tbody>${Array.from(grouped.entries()).map(([date, times]) => {
+                const displayTimes = times.length
+                    ? times
+                        .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
+                        .map(item => `<span class="${item.administered ? 'interval-preview-administered' : ''}">${escapeHtml(item.time)}</span>`)
+                        .join(', ')
+                    : '<span class="interval-preview-empty">-</span>';
+                return `<tr><td>${escapeHtml(date)}</td><td>${displayTimes}</td></tr>`;
+            }).join('')}</tbody>
+        </table>`;
 }
 
 function weekStartDate(dateStr) {
@@ -407,6 +610,10 @@ function formatFrequency(schedule) {
         const count = parseInt(schedule.timesPerWeek, 10) || schedule.weekdays?.length || 1;
         return `${count} time${count === 1 ? '' : 's'} per week${selectedDays ? ` on ${selectedDays}` : ''}${selectedDates}`;
     }
+    if (schedule.freq === 'QXH') {
+        const interval = parseInt(schedule.intervalHours, 10);
+        return Number.isInteger(interval) && interval > 0 ? `Q${interval}H${selectedDates}` : `Every X Hours${selectedDates}`;
+    }
     return `${schedule.freq || ''}${selectedDates}`;
 }
 
@@ -507,6 +714,18 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
         const label = freq === 'QXH' ? 'Start time:' : `Dose ${i + 1}:`;
         row.innerHTML = `<label>${label}</label><input class="${prefix}-time-input" type="time" value="${times[i] || defaultTimeForIndex(i, freq)}">`;
         container.appendChild(row);
+    }
+    if (freq === 'QXH') {
+        const preview = document.createElement('div');
+        preview.id = `${prefix}-interval-preview`;
+        preview.className = 'interval-preview sunken-panel';
+        container.appendChild(preview);
+        const update = () => renderIntervalPreview(prefix);
+        container.querySelector(`.${prefix}-time-input`)?.addEventListener('input', update);
+        document.getElementById(ids.intervalHours)?.addEventListener('input', update);
+        document.getElementById(prefix === 'mod' ? 'mod-start' : 'sched-start')?.addEventListener('input', update);
+        document.getElementById(prefix === 'mod' ? 'mod-end' : 'sched-end')?.addEventListener('input', update);
+        renderIntervalPreview(prefix);
     }
 };
 
@@ -881,6 +1100,25 @@ function isScheduleInstanceDocumented(scheduleId, date, time) {
 
 function getScheduleInstancesForDate(schedule, dateStr) {
     if (!schedule || !isScheduleDueOnDate(schedule, dateStr)) return [];
+    if (schedule.freq === 'QXH') {
+        const dayStart = parseLocal(dateStr);
+        const dayEnd = parseLocal(dateStr);
+        if (!dayStart || !dayEnd) return [];
+        dayStart.setHours(0, 0, 0, 0);
+        dayEnd.setHours(23, 59, 59, 999);
+        const scheduleStart = dateTimeFromParts(schedule.startDate, schedule.startTime || schedule.times?.[0]);
+        const from = scheduleStart && scheduleStart > dayStart ? scheduleStart : dayStart;
+        return rollingIntervalInstancesBetween(schedule, from, dayEnd)
+            .map(dateTimeParts)
+            .filter(instance => instance.date === dateStr && isScheduleDueOnDate(schedule, instance.date))
+            .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
+            .map(instance => ({
+                date: instance.date,
+                time: instance.time,
+                key: scheduleInstanceKey(schedule.id, instance.date, instance.time)
+            }))
+            .filter(instance => !(schedule.excludedInstances || []).includes(instance.key));
+    }
     const times = getScheduleTimes(schedule);
     if (times.length === 0) {
         return [{ date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }];
@@ -1278,7 +1516,17 @@ async function requestScheduledDoseDocumentation(schedule, title) {
         await appAlert("That scheduled dose instance has already been documented.");
         return null;
     }
+    normalizeScheduledDoseActualTime(result);
     return result;
+}
+
+function normalizeScheduledDoseActualTime(actual) {
+    const status = actual?.doseStatus || 'given';
+    if (['given', 'skipped', 'missed'].includes(status) && actual.scheduledDate && actual.scheduledTime) {
+        actual.actualDate = actual.scheduledDate;
+        actual.actualTime = actual.scheduledTime;
+    }
+    return actual;
 }
 
 function formatActualTimestamp(actual) {
@@ -1295,6 +1543,58 @@ function memberOptionsHtml(selected = '') {
         .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
         .map(member => `<option value="${member.id}" ${member.id === selected ? 'selected' : ''}>${escapeHtml(memberDisplayName(member))}</option>`)
         .join('');
+}
+
+function assignedMemberIds(med) {
+    return Array.isArray(med?.assignedMemberIds) ? med.assignedMemberIds.filter(Boolean) : [];
+}
+
+function medicationAssignedToMember(med, memberId) {
+    const assigned = assignedMemberIds(med);
+    return assigned.length === 0 || assigned.includes(memberId);
+}
+
+function medicationAssignmentText(med) {
+    const assigned = assignedMemberIds(med);
+    if (assigned.length === 0) return 'All members';
+    const names = assigned
+        .map(id => db.family.find(member => member.id === id))
+        .filter(Boolean)
+        .map(memberDisplayName);
+    return names.length ? names.join(', ') : 'Selected members';
+}
+
+function renderMedicationAssignmentControls(prefix, selectedIds = null) {
+    const mode = document.getElementById(`${prefix}-assignment-mode`);
+    const container = document.getElementById(`${prefix}-assigned-members`);
+    if (!mode || !container) return;
+    const currentSelected = selectedIds || Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+    if (selectedIds) mode.value = selectedIds.length ? 'selected' : 'all';
+    container.innerHTML = db.family.length
+        ? db.family
+            .slice()
+            .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(member => {
+                const inputId = `${prefix}-assigned-${member.id}`;
+                return `<span class="member-assignment-option">
+                    <input id="${escapeHtml(inputId)}" type="checkbox" value="${escapeHtml(member.id)}" ${currentSelected.includes(member.id) ? 'checked' : ''}>
+                    <label for="${escapeHtml(inputId)}">${escapeHtml(memberDisplayName(member))}</label>
+                </span>`;
+            }).join('')
+        : '<span class="form-help">Add members before assigning inventory.</span>';
+    container.style.display = mode.value === 'selected' ? 'flex' : 'none';
+}
+
+window.updateMedicationAssignmentMode = function(prefix) {
+    renderMedicationAssignmentControls(prefix);
+};
+
+function collectMedicationAssignment(prefix) {
+    const mode = document.getElementById(`${prefix}-assignment-mode`)?.value || 'all';
+    if (mode !== 'selected') return [];
+    return Array.from(document.querySelectorAll(`#${prefix}-assigned-members input[type="checkbox"]:checked`))
+        .map(input => input.value)
+        .filter(Boolean);
 }
 
 function prescriberDisplayName(prescriber) {
@@ -1804,6 +2104,26 @@ function scheduleLinkChoices(memberId, excludeId = '') {
     return [...committed, ...pending];
 }
 
+function scheduleLinkChoicesForModifier(schedule) {
+    if (!schedule) return [];
+    const activeChoices = scheduleLinkChoices(schedule.memberId, schedule.id);
+    const activeIds = new Set(activeChoices.map(choice => choice.id));
+    const linkedArchivedChoices = linkedSchedulesFor(
+        schedule,
+        db.schedules.filter(candidate => candidate.memberId === schedule.memberId && candidate.id !== schedule.id)
+    )
+        .filter(linked => !activeIds.has(linked.id))
+        .map(linked => ({
+            id: linked.id,
+            group: linked.linkGroup || linkGroupFromTarget(linked.id),
+            mode: linked.linkMode || '',
+            label: `${scheduleMedicationLabel(linked)} [completed]`,
+            isPending: false,
+            isArchived: true
+        }));
+    return [...activeChoices, ...linkedArchivedChoices];
+}
+
 function renderLinkChoicePanel(panel, choices, selected = [], pickerAction = '') {
     if (!panel) return;
     const choiceIds = new Set(choices.map(choice => choice.id));
@@ -1877,7 +2197,8 @@ window.openScheduleLinkPicker = async function() {
 window.openModifierLinkPicker = async function() {
     const panel = document.getElementById('mod-link-target');
     if (!panel) return;
-    const choices = scheduleLinkChoices(panel.dataset.memberId || '', panel.dataset.excludeId || '');
+    const schedule = db.schedules.find(item => item.id === (panel.dataset.excludeId || ''));
+    const choices = schedule ? scheduleLinkChoicesForModifier(schedule) : scheduleLinkChoices(panel.dataset.memberId || '', panel.dataset.excludeId || '');
     const selected = await chooseLinkedMedications('Choose Linked Medications', choices, selectedOptionValues(panel));
     if (selected === null) return;
     renderLinkChoicePanel(panel, choices, selected, 'openModifierLinkPicker()');
@@ -1922,6 +2243,8 @@ function applyLinkedScheduleTiming(source, target) {
         'weekdays',
         'qodStart',
         'startTime',
+        'rollingAnchorDate',
+        'rollingAnchorTime',
         'isOneTime'
     ];
     timingFields.forEach(field => {
@@ -1930,6 +2253,24 @@ function applyLinkedScheduleTiming(source, target) {
     });
     target.status = '';
     target.completedAt = '';
+}
+
+function removeScheduleLinkReferences(scheduleIds) {
+    const removed = new Set(Array.isArray(scheduleIds) ? scheduleIds : [scheduleIds]);
+    db.schedules.forEach(schedule => {
+        const previousRules = scheduleLinkRules(schedule);
+        const hadRemovedTarget = previousRules.some(rule => rule.targetId && removed.has(rule.targetId));
+        const nextTargetIds = uniqueValues(schedule.linkTargetIds || (schedule.linkTargetId ? [schedule.linkTargetId] : []))
+            .filter(targetId => !removed.has(targetId));
+        schedule.linkTargetIds = nextTargetIds;
+        schedule.linkTargetId = nextTargetIds[0] || '';
+        schedule.linkRules = previousRules
+            .filter(rule => !rule.targetId || !removed.has(rule.targetId));
+        if (hadRemovedTarget && schedule.linkMode && nextTargetIds.length === 0 && schedule.linkRules.length === 0) {
+            schedule.linkMode = '';
+            schedule.linkGroup = '';
+        }
+    });
 }
 
 let activeAdminOrderSetSchedules = [];
@@ -2094,20 +2435,31 @@ function renderMemberPrnMedicationOrders(memberId) {
     }).join('');
 }
 
-function completedScheduleSummaryHtml(schedule) {
+function completedScheduleSummaryHtml(schedule, candidates = null) {
     const med = db.inventory.find(item => item.id === schedule.medId);
     const statusText = schedule.status === 'discontinued' ? 'Discontinued' : 'Completed';
+    const linked = linkedSchedulesFor(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId));
+    const modifyAction = linked.length > 0
+        ? `<button type="button" onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify / Extend Linked</button>`
+        : `<button type="button" onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify / Extend</button>`;
+    const linkedRemoveAction = linked.length > 0
+        ? `<button type="button" onclick="event.stopPropagation(); removeCompletedLinkedSchedules('${escapeHtml(schedule.id)}')">Remove All Linked Meds</button>`
+        : '';
     return `<div class="completed-med-row">
-        <div>
-            <strong>${escapeHtml(med?.name || 'Unknown medication')} ${escapeHtml(med ? formatMedStrength(med) : '')}</strong><br>
-            <small>${escapeHtml(statusText)} | ${escapeHtml(schedule.startDate || '')} - ${escapeHtml(schedule.endDate || 'Ongoing')} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : escapeHtml(schedule.doseQty || '')} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}</small>
-            <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
+        <div class="completed-med-header">
+            <div class="completed-med-main">
+                <strong>${escapeHtml(med?.name || 'Unknown medication')} ${escapeHtml(med ? formatMedStrength(med) : '')}</strong><br>
+                <small class="completed-med-summary">${escapeHtml(statusText)} | ${escapeHtml(schedule.startDate || '')} - ${escapeHtml(schedule.endDate || 'Ongoing')} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : escapeHtml(schedule.doseQty || '')} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}</small>
+                ${linkedDetailsHtml(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId))}
+            </div>
+            <div class="completed-med-actions">
+                ${modifyAction}
+                ${linkedRemoveAction}
+                <button type="button" onclick="event.stopPropagation(); removeCompletedSchedule('${escapeHtml(schedule.id)}')">Remove</button>
+                ${med ? `<button type="button" onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>` : ''}
+            </div>
         </div>
-        <div class="completed-med-actions">
-            <button type="button" onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify / Extend</button>
-            <button type="button" onclick="event.stopPropagation(); removeCompletedSchedule('${escapeHtml(schedule.id)}')">Remove</button>
-            ${med ? `<button type="button" onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>` : ''}
-        </div>
+        <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
     </div>`;
 }
 
@@ -2120,24 +2472,27 @@ function renderCompletedMedicationOrders(memberId) {
     const completedSingles = db.schedules
         .filter(schedule => schedule.memberId === memberId && !schedule.orderSetId && isScheduleArchived(schedule))
         .sort((a, b) => String(b.completedAt || b.endDate || '').localeCompare(String(a.completedAt || a.endDate || '')));
+    const completedCandidates = db.schedules.filter(schedule => schedule.memberId === memberId);
 
     const setHtml = completedSets.map(set => {
         const setSchedules = db.schedules.filter(schedule => schedule.orderSetId === set.id);
         return `<div class="completed-med-row completed-order-set">
-            <div>
-                <strong>${escapeHtml(set.name)}</strong><br>
-                <small>Completed | ${escapeHtml(set.startDate || '')} - ${escapeHtml(set.endDate || 'Ongoing')}</small>
-                <div style="margin-top:4px;">${setSchedules.map(completedScheduleSummaryHtml).join('')}</div>
+            <div class="completed-med-header">
+                <div class="completed-med-main">
+                    <strong>${escapeHtml(set.name)}</strong><br>
+                    <small class="completed-med-summary">Completed | ${escapeHtml(set.startDate || '')} - ${escapeHtml(set.endDate || 'Ongoing')}</small>
+                </div>
+                <div class="completed-med-actions">
+                    <button type="button" onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit / Extend Regimen</button>
+                    <button type="button" onclick="event.stopPropagation(); removeCompletedOrderSet('${escapeHtml(set.id)}')">Remove</button>
+                    <button type="button" onclick="event.stopPropagation(); printOrderSetLabel('${escapeHtml(set.id)}')">Regimen Label</button>
+                </div>
             </div>
-            <div class="completed-med-actions">
-                <button type="button" onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit / Extend Regimen</button>
-                <button type="button" onclick="event.stopPropagation(); removeCompletedOrderSet('${escapeHtml(set.id)}')">Remove</button>
-                <button type="button" onclick="event.stopPropagation(); printOrderSetLabel('${escapeHtml(set.id)}')">Regimen Label</button>
-            </div>
+            <div class="completed-regimen-items">${setSchedules.map(schedule => completedScheduleSummaryHtml(schedule, setSchedules)).join('')}</div>
         </div>`;
     }).join('');
 
-    const singlesHtml = completedSingles.map(completedScheduleSummaryHtml).join('');
+    const singlesHtml = completedSingles.map(schedule => completedScheduleSummaryHtml(schedule, completedCandidates)).join('');
     container.innerHTML = setHtml || singlesHtml
         ? `${setHtml}${singlesHtml}`
         : '<div class="empty-state">No completed medication orders.</div>';
@@ -2147,7 +2502,22 @@ window.removeCompletedSchedule = async function(scheduleId) {
     const schedule = db.schedules.find(item => item.id === scheduleId);
     if (!schedule || !isScheduleArchived(schedule)) return;
     if (!await appConfirm('Remove this completed medication order from the profile list? Administration history will remain.', 'Remove Completed Order')) return;
+    removeScheduleLinkReferences(scheduleId);
     db.schedules = db.schedules.filter(item => item.id !== scheduleId);
+    await sync();
+    if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
+};
+
+window.removeCompletedLinkedSchedules = async function(scheduleId) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    if (!schedule || !isScheduleArchived(schedule)) return;
+    const candidates = db.schedules.filter(item => item.memberId === schedule.memberId);
+    const linked = linkedSchedulesFor(schedule, candidates).filter(isScheduleArchived);
+    const toRemove = [schedule, ...linked];
+    if (!await appConfirm(`Remove ${toRemove.length} linked completed medication order${toRemove.length === 1 ? '' : 's'} from the profile list? Administration history will remain.`, 'Remove Linked Completed Orders')) return;
+    const removeIds = new Set(toRemove.map(item => item.id));
+    removeScheduleLinkReferences([...removeIds]);
+    db.schedules = db.schedules.filter(item => !removeIds.has(item.id));
     await sync();
     if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
 };
@@ -2157,6 +2527,8 @@ window.removeCompletedOrderSet = async function(orderSetId) {
     if (!set || set.status !== 'completed') return;
     if (!await appConfirm('Remove this completed regimen from the profile list? Administration history will remain.', 'Remove Completed Regimen')) return;
     db.orderSets = db.orderSets.filter(item => item.id !== orderSetId);
+    const removeIds = db.schedules.filter(item => item.orderSetId === orderSetId).map(item => item.id);
+    removeScheduleLinkReferences(removeIds);
     db.schedules = db.schedules.filter(item => item.orderSetId !== orderSetId);
     await sync();
     if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
@@ -2273,14 +2645,14 @@ window.openMemberModal = function(id = null) {
                 printControls.appendChild(printButton);
                 printControls.appendChild(schedulePdfButton);
                 printControls.appendChild(emailSchedulePdfButton);
-                activeMedsContainer.appendChild(printControls);
                 const timelineControls = document.createElement('div');
                 timelineControls.className = 'timeline-controls';
                 timelineControls.innerHTML = `
                     <button type="button" onclick="shiftMemberTimeline(-7)">Previous 7 Days</button>
                     <strong id="member-timeline-range"></strong>
                     <button type="button" onclick="shiftMemberTimeline(7)">Next 7 Days</button>`;
-                activeMedsContainer.appendChild(timelineControls);
+                printControls.appendChild(timelineControls);
+                activeMedsContainer.appendChild(printControls);
             }
             const memberOrderSets = db.orderSets.filter(set =>
                 set.memberId === id && set.status !== 'completed' && db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule))
@@ -2362,7 +2734,7 @@ window.openMemberModal = function(id = null) {
         if (memberCalendar) memberCalendar.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before viewing their calendar.</div>';
         if (prnMedsContainer) prnMedsContainer.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before adding PRN medication orders.</div>';
     }
-    
+
     if (modal) modal.style.display = 'flex';
 };
 
@@ -2371,7 +2743,7 @@ window.openOrderModifier = function(scheduleId) {
     const sched = db.schedules.find(s => s.id === scheduleId);
     if (!sched) return alert("Schedule not found.");
     const med = db.inventory.find(m => m.id === sched.medId);
-    
+
     document.getElementById('mod-sched-id').value = scheduleId;
     document.getElementById('mod-title').innerText = `Modify Order: ${med ? med.name : 'Unknown medication'}`;
     document.getElementById('mod-start').value = sched.startDate;
@@ -2389,11 +2761,16 @@ window.openOrderModifier = function(scheduleId) {
     document.getElementById('mod-prn-window-hours').value = sched.prnWindowHours || 24;
     const modLinkTarget = document.getElementById('mod-link-target');
     if (modLinkTarget) {
-        const choices = scheduleLinkChoices(sched.memberId, sched.id);
+        const choices = scheduleLinkChoicesForModifier(sched);
+        const currentLinkedSchedules = linkedSchedulesFor(
+            sched,
+            db.schedules.filter(candidate => candidate.memberId === sched.memberId && candidate.id !== sched.id)
+        );
         const selectedLinks = new Set(uniqueValues([
             ...(sched.linkTargetIds || []),
             sched.linkTargetId || '',
-            ...scheduleLinkRules(sched).map(rule => rule.targetId)
+            ...scheduleLinkRules(sched).map(rule => rule.targetId),
+            ...currentLinkedSchedules.map(linked => linked.id)
         ]));
         const selected = choices
             .filter(choice => selectedLinks.has(choice.id) || (sched.linkGroup && choice.group === sched.linkGroup && selectedLinks.size === 0))
@@ -2402,11 +2779,17 @@ window.openOrderModifier = function(scheduleId) {
         modLinkTarget.dataset.excludeId = sched.id;
         renderLinkChoicePanel(modLinkTarget, choices, selected, 'openModifierLinkPicker()');
     }
-    document.getElementById('mod-link-mode').value = sched.linkMode || '';
+    const currentLinkedMode = linkedSchedulesFor(
+        sched,
+        db.schedules.filter(candidate => candidate.memberId === sched.memberId && candidate.id !== sched.id)
+    )
+        .map(linked => scheduleLinkModeBetween(sched, linked))
+        .find(Boolean);
+    document.getElementById('mod-link-mode').value = sched.linkMode || currentLinkedMode || '';
     renderFrequencyControls('mod', sched.freq === 'QXH' ? [sched.startTime || getScheduleTimes(sched)[0]] : getScheduleTimes(sched));
     setWeekdaySelections('mod-weekday-container', sched.weekdays || []);
     document.getElementById('mod-instr').value = sched.instructions || "";
-    
+
     document.getElementById('order-modifier-modal').style.display = 'flex';
 };
 
@@ -2414,10 +2797,27 @@ window.saveOrderModification = async function() {
     const id = document.getElementById('mod-sched-id').value;
     const sched = db.schedules.find(s => s.id === id);
     if (sched) {
+        const previousStartDate = sched.startDate;
+        const previousEndDate = sched.endDate;
+        const previousIntervalTiming = JSON.stringify({
+            freq: sched.freq,
+            startDate: sched.startDate,
+            endDate: sched.endDate,
+            times: sched.times || [],
+            intervalHours: sched.intervalHours,
+            startTime: sched.startTime
+        });
         const frequencyDetails = collectFrequencyDetails('mod');
         if (!frequencyDetails) return;
 
-        sched.startDate = document.getElementById('mod-start').value;
+        const requestedStartDate = document.getElementById('mod-start').value;
+        const today = localDateKey();
+        const shouldApplyQxhForward = frequencyDetails.freq === 'QXH' &&
+            previousStartDate &&
+            previousStartDate < today &&
+            (!previousEndDate || previousEndDate === 'Ongoing' || previousEndDate >= today) &&
+            requestedStartDate <= today;
+        sched.startDate = shouldApplyQxhForward ? today : requestedStartDate;
         sched.doseQty = document.getElementById('mod-dose-qty').value;
         sched.prescriberId = document.getElementById('mod-prescriber')?.value || '';
         sched.freq = frequencyDetails.freq;
@@ -2431,10 +2831,23 @@ window.saveOrderModification = async function() {
         sched.prnMaxDoses = frequencyDetails.prnMaxDoses || null;
         sched.prnWindowHours = frequencyDetails.prnWindowHours || 24;
         sched.startTime = frequencyDetails.startTime || frequencyDetails.times[0] || "";
+        const nextIntervalTiming = JSON.stringify({
+            freq: sched.freq,
+            startDate: sched.startDate,
+            endDate: sched.endDate,
+            times: sched.times || [],
+            intervalHours: sched.intervalHours,
+            startTime: sched.startTime
+        });
+        if (sched.freq !== 'QXH' || previousIntervalTiming !== nextIntervalTiming) {
+            sched.rollingAnchorDate = '';
+            sched.rollingAnchorTime = '';
+        }
+        if (sched.freq === 'QXH') recalculateIntervalAnchorFromHistory(sched);
         sched.instructions = document.getElementById('mod-instr').value;
         const linkTargetIds = selectedOptionValues(document.getElementById('mod-link-target'));
         const linkMode = document.getElementById('mod-link-mode')?.value || '';
-        const targetChoice = scheduleLinkChoices(sched.memberId, sched.id).find(choice => choice.id === linkTargetIds[0]);
+        const targetChoice = scheduleLinkChoicesForModifier(sched).find(choice => choice.id === linkTargetIds[0]);
         if (linkTargetIds.length > 0 && !linkMode) {
             await appAlert('Choose what the medication link means: must take together or choose only one.');
             return;
@@ -2452,8 +2865,9 @@ window.saveOrderModification = async function() {
         sched.isOneTime = sched.freq === 'ONCE' || (sched.startDate === sched.endDate && sched.endDate !== "Ongoing");
         sched.status = '';
         sched.completedAt = '';
-        linkedSchedulesFor(sched).forEach(linkedSchedule => {
-            if (linkedSchedule.id !== sched.id && !isScheduleArchived(linkedSchedule)) {
+        const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === sched.memberId);
+        linkedSchedulesFor(sched, linkedModificationCandidates).forEach(linkedSchedule => {
+            if (linkedSchedule.id !== sched.id) {
                 applyLinkedScheduleTiming(sched, linkedSchedule);
             }
         });
@@ -2533,11 +2947,15 @@ window.addInventory = async function() {
     const imageInput = document.getElementById('med-image-input');
     const expiry = document.getElementById('med-expiry').value;
     const barcodeCode = normalizeMedicationCode(document.getElementById('med-barcode-code')?.value) || createMedicationCode();
+    const inventoryAssignedMemberIds = collectMedicationAssignment('med');
     if (!name || isNaN(qty)) return alert("Name and Qty required.");
+    if (document.getElementById('med-assignment-mode')?.value === 'selected' && inventoryAssignedMemberIds.length === 0) {
+        return alert("Select at least one member or change assignment to all members.");
+    }
     if (barcodeCode.length > 100 || !medicationCodeIsAvailable(barcodeCode)) {
         return alert("Enter a unique QR code containing no more than 100 characters.");
     }
-    
+
     // --- NEW COMBINATION LOGIC ---
     const isCombo = document.getElementById('is-combination').checked;
     let components = [];
@@ -2600,9 +3018,9 @@ window.addInventory = async function() {
         } catch (e) { console.error(e); }
     }
 
-    db.inventory.push({ 
-        id: Date.now().toString(), 
-        name, 
+    db.inventory.push({
+        id: Date.now().toString(),
+        name,
         strength: finalStrength,
         units: finalUnits,
         displayStrength,
@@ -2614,18 +3032,19 @@ window.addInventory = async function() {
         inventoryUnit,
         administrationUnit,
         inventoryBehavior,
-        stock: qty, 
+        stock: qty,
         maxCapacity: qty,
         expiry: expiry,
         isLiquid: finalUnits.includes('/') || document.getElementById('med-formulation').value === 'mL',
         isCombination: isCombo,
-        components: components, // Only for combinations    
+        components: components, // Only for combinations
         minThreshold: parseAmount(document.getElementById('med-threshold').value, 5),
         prescriberId,
+        assignedMemberIds: inventoryAssignedMemberIds,
         barcodeCode,
-        imagePath: imagePath 
+        imagePath: imagePath
     });
-    
+
     document.getElementById('med-name').value = '';
     document.getElementById('med-strength').value = '';
     document.getElementById('med-per-amount').value = '1';
@@ -2638,6 +3057,9 @@ window.addInventory = async function() {
     document.getElementById('is-combination').checked = false;
     const medPrescriber = document.getElementById('med-prescriber');
     if (medPrescriber) medPrescriber.value = '';
+    const assignmentMode = document.getElementById('med-assignment-mode');
+    if (assignmentMode) assignmentMode.value = 'all';
+    renderMedicationAssignmentControls('med', []);
     const behaviorInput = document.getElementById('med-inventory-behavior');
     if (behaviorInput) behaviorInput.dataset.formulation = '';
     updateInventoryEntryMode();
@@ -2850,6 +3272,7 @@ window.openMedProfile = function(id) {
     updateMedProfileMode();
     const prescriberSelect = document.getElementById('modal-prescriber');
     if (prescriberSelect) prescriberSelect.innerHTML = prescriberOptionsHtml(med.prescriberId || '', '', true);
+    renderMedicationAssignmentControls('modal', assignedMemberIds(med));
     const imgContainer = document.getElementById('modal-image-container');
     imgContainer.innerHTML = med.imagePath ? `<img src="${imageSrc(med.imagePath)}" style="max-width:100%; max-height:100%;">` : "No Photo";
     document.getElementById('med-modal').style.display = 'flex';
@@ -2867,6 +3290,11 @@ window.saveMedProfile = async function() {
         }
         if (barcodeCode.length > 100 || !medicationCodeIsAvailable(barcodeCode, med.id)) {
             await appAlert('Enter a unique QR code containing no more than 100 characters.');
+            return;
+        }
+        const profileAssignedMemberIds = collectMedicationAssignment('modal');
+        if (document.getElementById('modal-assignment-mode')?.value === 'selected' && profileAssignedMemberIds.length === 0) {
+            await appAlert('Select at least one member or change assignment to all members.');
             return;
         }
         const formulation = document.getElementById('modal-formulation').value;
@@ -2931,6 +3359,7 @@ window.saveMedProfile = async function() {
         med.controlLevel = document.getElementById('modal-control-level').value;
         med.expiry = document.getElementById('modal-expiry').value;
         med.prescriberId = document.getElementById('modal-prescriber')?.value || '';
+        med.assignedMemberIds = profileAssignedMemberIds;
         med.barcodeCode = barcodeCode;
         med.formulation = formulation;
         med.isCombination = isCombination;
@@ -2974,12 +3403,12 @@ window.saveMedProfile = async function() {
 
         // 3. Sync and Close
         await sync();
-        
+
         // Clear the file input for next time
-        if (imageInput) imageInput.value = ''; 
+        if (imageInput) imageInput.value = '';
         pendingModalMedImage = null;
         updateImageDropzone('modal-image-dropzone', null);
-        
+
         closeMedModal();
     }
 };
@@ -3120,7 +3549,9 @@ function orderSetRowLabel(row) {
     const med = getOrderSetRowMed(row);
     const dose = row.querySelector('.os-dose')?.value || '';
     const freq = row.querySelector('.os-freq')?.value || '';
-    return med ? `${med.name} ${formatMedStrength(med)}${dose ? ` - Qty ${dose}` : ''}${freq ? ` (${freq})` : ''}` : 'Select medication first';
+    const intervalHours = parseInt(row.querySelector('.os-interval-hours')?.value, 10);
+    const freqLabel = freq === 'QXH' && Number.isInteger(intervalHours) ? `Q${intervalHours}H` : freq;
+    return med ? `${med.name} ${formatMedStrength(med)}${dose ? ` - Qty ${dose}` : ''}${freqLabel ? ` (${freqLabel})` : ''}` : 'Select medication first';
 }
 
 function renderOrderSetLinkOptions() {
@@ -3187,6 +3618,57 @@ function renderOrderSetRowControls(row, existingTimes = null) {
         timeRow.innerHTML = `<label>${label}</label><input class="os-time-input" type="time" value="${times[i] || defaultTimeForIndex(i, freq)}">`;
         timeContainer.appendChild(timeRow);
     }
+    if (freq === 'QXH') {
+        const preview = document.createElement('div');
+        preview.className = 'interval-preview sunken-panel os-interval-preview';
+        timeContainer.appendChild(preview);
+        const update = () => renderOrderSetIntervalPreview(row);
+        row.querySelector('.os-time-input')?.addEventListener('input', update);
+        row.querySelector('.os-interval-hours')?.addEventListener('input', update);
+        document.getElementById('order-set-start')?.addEventListener('input', update);
+        document.getElementById('order-set-end')?.addEventListener('input', update);
+        renderOrderSetIntervalPreview(row);
+    }
+}
+
+function renderOrderSetIntervalPreview(row) {
+    const preview = row.querySelector('.os-interval-preview');
+    if (!preview) return;
+    const startDate = document.getElementById('order-set-start')?.value || localDateKey();
+    const endValue = document.getElementById('order-set-end')?.value || '';
+    const startTime = row.querySelector('.os-time-input')?.value || '';
+    const intervalHours = parseInt(row.querySelector('.os-interval-hours')?.value, 10);
+    if (!startDate || !startTime || !Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24) {
+        preview.innerHTML = '<div class="interval-preview-empty">Enter regimen start, start time, and interval to preview doses.</div>';
+        return;
+    }
+
+    const previewEnd = parseLocal(startDate);
+    previewEnd.setDate(previewEnd.getDate() + 2);
+    const endDate = endValue ? parseLocal(endValue) : null;
+    const through = endDate && endDate < previewEnd ? endDate : previewEnd;
+    through.setHours(23, 59, 59, 999);
+    const schedule = {
+        id: 'preview',
+        freq: 'QXH',
+        startDate,
+        endDate: endValue || 'Ongoing',
+        startTime,
+        times: [startTime],
+        intervalHours
+    };
+    const from = dateTimeFromParts(startDate, startTime);
+    const grouped = rollingIntervalInstancesBetween(schedule, from, through)
+        .map(dateTimeParts)
+        .filter(item => isScheduleDueOnDate(schedule, item.date))
+        .reduce((map, item) => {
+            if (!map.has(item.date)) map.set(item.date, []);
+            map.get(item.date).push(item.time);
+            return map;
+        }, new Map());
+    preview.innerHTML = grouped.size
+        ? `<table class="interval-preview-table"><thead><tr><th>Date</th><th>Administration times</th></tr></thead><tbody>${Array.from(grouped.entries()).map(([date, times]) => `<tr><td>${escapeHtml(date)}</td><td>${times.map(escapeHtml).join(', ')}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="interval-preview-empty">No doses fall inside the regimen window.</div>';
 }
 
 function collectOrderSetItem(row) {
@@ -3287,12 +3769,12 @@ function collectOrderSetItem(row) {
     };
 }
 
-function orderSetItemToSchedule(orderSet, item, index) {
+function orderSetItemToSchedule(orderSet, item, index, existingSchedule = null) {
     const med = db.inventory.find(inv => inv.id === item.medId);
     const itemStartDate = item.anchorDate || orderSet.startDate;
     const itemEndDate = item.freq === 'ONCE' ? itemStartDate : orderSet.endDate;
     return {
-        id: `${orderSet.id}_${Date.now()}_${index}`,
+        id: existingSchedule?.id || `${orderSet.id}_${Date.now()}_${index}`,
         memberId: orderSet.memberId,
         medId: item.medId,
         doseQty: item.doseQty,
@@ -3318,7 +3800,9 @@ function orderSetItemToSchedule(orderSet, item, index) {
         linkMode: item.linkMode || '',
         linkTargetRowIds: item.linkTargetRowIds || (item.linkTargetRowId ? [item.linkTargetRowId] : []),
         linkTargetRowId: item.linkTargetRowId || '',
-        linkRules: item.linkRules || []
+        linkRules: item.linkRules || [],
+        rollingAnchorDate: existingSchedule?.rollingAnchorDate || '',
+        rollingAnchorTime: existingSchedule?.rollingAnchorTime || ''
     };
 }
 
@@ -3415,9 +3899,27 @@ window.saveOrderSet = async function() {
     if (existingIndex >= 0) db.orderSets[existingIndex] = orderSet;
     else db.orderSets.push(orderSet);
 
+    const existingSchedules = db.schedules.filter(schedule => schedule.orderSetId === orderSet.id);
+    const existingByRowId = new Map(existingSchedules.filter(schedule => schedule.rowId).map(schedule => [schedule.rowId, schedule]));
+    const claimedScheduleIds = new Set();
+    const matchExistingSchedule = item => {
+        const byRow = item.rowId ? existingByRowId.get(item.rowId) : null;
+        if (byRow && !claimedScheduleIds.has(byRow.id)) {
+            claimedScheduleIds.add(byRow.id);
+            return byRow;
+        }
+        const fallback = existingSchedules.find(schedule =>
+            !claimedScheduleIds.has(schedule.id) &&
+            schedule.medId === item.medId &&
+            schedule.freq === item.freq
+        );
+        if (fallback) claimedScheduleIds.add(fallback.id);
+        return fallback || null;
+    };
+
     db.schedules = db.schedules.filter(schedule => schedule.orderSetId !== orderSet.id);
     if (memberId) {
-        db.schedules.push(...items.map((item, index) => orderSetItemToSchedule(orderSet, item, index)));
+        db.schedules.push(...items.map((item, index) => orderSetItemToSchedule(orderSet, item, index, matchExistingSchedule(item))));
     }
 
     await sync();
@@ -3578,7 +4080,7 @@ window.printOrderSetMedicationLabel = async function(id) {
     const options = schedules.map(schedule => {
         const med = db.inventory.find(item => item.id === schedule.medId);
         if (!med) return '';
-        return `<option value="${escapeHtml(schedule.id)}">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} - ${escapeHtml(schedule.freq)}</option>`;
+        return `<option value="${escapeHtml(schedule.id)}">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} - ${escapeHtml(formatFrequency(schedule))}</option>`;
     }).join('');
     const result = await showActionModal(`Individual Labels: ${set.name}`, `
         <div class="field-row-stacked">
@@ -3690,7 +4192,7 @@ function prepackShiftChoiceHtml(current = 'all') {
     const choices = [
         { value: 'all', title: 'All times', detail: 'Keep every scheduled dose together' },
         { value: 'day', title: '☀ Daytime', detail: '12:00 AM through 4:00 PM' },
-        { value: 'evening', title: '☾ Evening', detail: 'After 5:00 PM' }
+        { value: 'evening', title: '☾ Evening', detail: '5:00 PM through 11:59 PM' }
     ];
     return `<div class="prepack-choice-grid">
         ${choices.map(choice => `
@@ -5108,19 +5610,57 @@ function getTimelineRange() {
     return { start: memberTimelineStart, end: localDateKey(end) };
 }
 
+function historyEntryMatchesScheduleInstance(entry, schedule, instance) {
+    if (!entry || !schedule || !instance) return false;
+    if (entry.scheduleInstanceKey === instance.key) return true;
+    if (entry.scheduleId && entry.scheduleId !== schedule.id) return false;
+    return entry.memberId === schedule.memberId &&
+        entry.medId === schedule.medId &&
+        entry.scheduledDate === instance.date &&
+        entry.scheduledTime === instance.time;
+}
+
+function findHistoryForScheduleInstance(schedule, instance) {
+    return db.history.find(item => item.scheduleInstanceKey === instance.key)
+        || db.history.find(item => historyEntryMatchesScheduleInstance(item, schedule, instance));
+}
+
 function timelineDoseState(schedule, instance) {
-    const entry = db.history.find(item => item.scheduleInstanceKey === instance.key);
+    const entry = findHistoryForScheduleInstance(schedule, instance);
     if (entry) {
-        return ['skipped', 'missed'].includes(entry.doseStatus)
-            ? { className: 'timeline-not-given', title: `${doseStatusLabel(entry.doseStatus)}. Click to edit.`, entryId: entry.id }
-            : { className: 'timeline-given', title: `${doseStatusLabel(entry.doseStatus)}. Click to edit.`, entryId: entry.id };
+        const status = entry.doseStatus || 'given';
+        const actual = historyEntryDateTime(entry);
+        const wasOffSchedule = ['late', 'early'].includes(status) ||
+            (isGivenStatus(status) && (actual.date !== instance.date || actual.time !== instance.time));
+        if (['skipped', 'missed'].includes(status)) {
+            return {
+                className: 'timeline-not-given',
+                label: instance.time,
+                title: `${doseStatusLabel(status)}. Click to edit.`,
+                entryId: entry.id
+            };
+        }
+        if (wasOffSchedule) {
+            return {
+                className: 'timeline-offschedule',
+                label: `${instance.time} (${actual.time})`,
+                title: `${doseStatusLabel(status)} at ${actual.date} ${actual.time}. Click to edit.`,
+                entryId: entry.id
+            };
+        }
+        return {
+            className: 'timeline-given',
+            label: instance.time,
+            title: `${doseStatusLabel(status)}. Click to edit.`,
+            entryId: entry.id
+        };
     }
 
     const now = new Date();
     const due = new Date(`${instance.date}T${instance.time === 'PRN' ? '00:00' : instance.time}`);
-    if (due < now) return { className: 'timeline-overdue', title: 'Not documented at scheduled time. Click to document status.' };
-    if (instance.date === localDateKey(now)) return { className: 'timeline-upcoming', title: 'Upcoming dose. Click to document status.' };
-    return { className: 'timeline-future', title: 'Future scheduled dose. Click to document status.' };
+    if (due < now) return { className: 'timeline-overdue', label: instance.time, title: 'Not documented at scheduled time. Click to document status.' };
+    if (instance.date === localDateKey(now)) return { className: 'timeline-upcoming', label: instance.time, title: 'Upcoming dose. Click to document status.' };
+    return { className: 'timeline-future', label: instance.time, title: 'Future scheduled dose. Click to document status.' };
 }
 
 window.documentScheduleInstance = async function(scheduleId, scheduledDate, scheduledTime) {
@@ -5128,7 +5668,7 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
     const med = schedule && db.inventory.find(item => item.id === schedule.medId);
     if (!schedule || !med) return;
     const key = scheduleInstanceKey(schedule.id, scheduledDate, scheduledTime);
-    const existing = db.history.find(item => item.scheduleInstanceKey === key);
+    const existing = findHistoryForScheduleInstance(schedule, { date: scheduledDate, time: scheduledTime, key });
     if (existing) {
         await window.editAdministration(existing.id);
         return;
@@ -5171,6 +5711,7 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
     }
     result.scheduledDate = scheduledDate;
     result.scheduledTime = scheduledTime;
+    normalizeScheduledDoseActualTime(result);
     const documented = await administerScheduleRecord(
         schedule,
         result,
@@ -5217,11 +5758,11 @@ function memberMedicationTimelineHtml(schedule) {
             const instances = getScheduleInstancesForDate(schedule, dateKey);
             doses = instances.length
                 ? instances.map(instance => {
-                const state = timelineDoseState(schedule, instance);
-                const click = state.entryId
-                    ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"`
-                    : ` onclick="event.stopPropagation(); documentScheduleInstance('${schedule.id}','${instance.date}','${instance.time}')"`;
-                return `<button type="button" class="timeline-dose ${state.className}" title="${escapeHtml(state.title)}"${click}>${escapeHtml(instance.time)}</button>`;
+                    const state = timelineDoseState(schedule, instance);
+                    const click = state.entryId
+                        ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"`
+                        : ` onclick="event.stopPropagation(); documentScheduleInstance('${schedule.id}','${instance.date}','${instance.time}')"`;
+                    return `<button type="button" class="timeline-dose ${state.className}" title="${escapeHtml(state.title)}"${click}>${escapeHtml(state.label || instance.time)}</button>`;
                 }).join('')
                 : '<span class="timeline-dose" title="No scheduled dose">-</span>';
         }
@@ -5310,7 +5851,7 @@ function renderInventoryStatus() {
 
     container.innerHTML = `
         <div class="inventory-status-grid">
-            ${section('Low meds', groups.low, 'inventory-status-low', '!')}
+            ${section('Low meds (Refill Needed Soon)', groups.low, 'inventory-status-low', '!')}
             ${section('Expired meds', groups.expired, 'inventory-status-expired', 'X')}
             ${section('Expiring in 15 days', groups.expiringSoon, 'inventory-status-soon', '15')}
         </div>`;
@@ -5686,10 +6227,12 @@ window.emailMemberVitalsPdfReport = async function(memberId = currentEditingMemb
 window.updateSchedStrength = function() {
     const input = document.getElementById('med-search-input');
     const name = input.value;
-    
+    const memberId = document.getElementById('select-member')?.value || '';
+
     // Find all inventory items that have this exact name
-    const matches = db.inventory.filter(m => m.name === name);
-    
+    const matches = db.inventory.filter(m => m.name === name && medicationAssignedToMember(m, memberId));
+    const blockedMatches = db.inventory.filter(m => m.name === name && !medicationAssignedToMember(m, memberId));
+
     const strengthSelect = document.getElementById('sched-strength-display');
     const unitsDisp = document.getElementById('sched-units-display');
 
@@ -5703,16 +6246,16 @@ window.updateSchedStrength = function() {
             opt.innerText = formatMedStrength(med);
             strengthSelect.appendChild(opt);
         });
-        
+
         // Update units display based on the first match
         if (unitsDisp) unitsDisp.innerText = matches[0].units;
         const prescriberSelect = document.getElementById('sched-prescriber');
         if (prescriberSelect && !prescriberSelect.value && matches[0].prescriberId) prescriberSelect.value = matches[0].prescriberId;
-        input.style.backgroundColor = "#e0ffe0"; 
+        input.style.backgroundColor = "#e0ffe0";
         calculateLiveDose();
     } else {
         if (unitsDisp) unitsDisp.innerText = 'units';
-        input.style.backgroundColor = ""; 
+        input.style.backgroundColor = blockedMatches.length ? "#ffe0e0" : "";
     }
     updateScheduleMedicationPreview();
 };
@@ -5813,14 +6356,17 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
     const medId = document.getElementById('sched-strength-display').value;
     const med = db.inventory.find(m => m.id === medId);
     const member = db.family.find(m => m.id === memberId);
-    
+
     const startDate = document.getElementById('sched-start').value;
     const rawEndDate = document.getElementById('sched-end').value || "Ongoing";
-    
+
     const instructions = document.getElementById('sched-instructions').value;
 
     if (!member) return alert("Select a family member first.");
     if (!med || !startDate) return alert("Select medication name, strength, and start date!");
+    if (!medicationAssignedToMember(med, memberId)) {
+        return alert(`${med.name} is not assigned to ${memberDisplayName(member)}. Open the medication profile in Inventory to assign it first.`);
+    }
 
     const frequencyDetails = collectFrequencyDetails('sched');
     if (!frequencyDetails) return;
@@ -5836,7 +6382,7 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
 
     const schedule = {
         id,
-        memberId, 
+        memberId,
         medId: med.id,
         doseQty: document.getElementById('sched-dose-qty').value,
         prescriberId: document.getElementById('sched-prescriber')?.value || med.prescriberId || '',
@@ -6183,7 +6729,48 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
     });
 
     if (sched.isOneTime) markScheduleCompleted(sched);
+    updateIntervalAnchorAfterAdministration(sched, actual);
     return true;
+}
+
+function updateIntervalAnchorAfterAdministration(schedule, actual) {
+    if (!schedule || schedule.freq !== 'QXH' || !['late', 'early'].includes(actual?.doseStatus || 'given')) return;
+    if (!actual.actualDate || !actual.actualTime) return;
+    schedule.rollingAnchorDate = actual.actualDate;
+    schedule.rollingAnchorTime = actual.actualTime;
+}
+
+function recalculateIntervalAnchorFromHistory(schedule) {
+    if (!schedule || schedule.freq !== 'QXH') return;
+    const anchor = latestIntervalAnchorFromHistory(schedule);
+    if (anchor) {
+        schedule.rollingAnchorDate = anchor.date;
+        schedule.rollingAnchorTime = anchor.time;
+    } else {
+        schedule.rollingAnchorDate = '';
+        schedule.rollingAnchorTime = '';
+    }
+}
+
+function actualForLinkedSchedule(linkedSchedule, actual) {
+    const linkedActual = { ...actual };
+    if (!actual?.scheduledDate || !actual?.scheduledTime) return linkedActual;
+
+    const sameTimeInstance = getScheduleInstancesForDate(linkedSchedule, actual.scheduledDate)
+        .find(instance => instance.time === actual.scheduledTime);
+    if (sameTimeInstance) {
+        linkedActual.scheduledDate = sameTimeInstance.date;
+        linkedActual.scheduledTime = sameTimeInstance.time;
+        return linkedActual;
+    }
+
+    const actualTimeInstance = getScheduleInstancesForDate(linkedSchedule, actual.actualDate)
+        .find(instance => instance.time === actual.actualTime);
+    if (actualTimeInstance) {
+        linkedActual.scheduledDate = actualTimeInstance.date;
+        linkedActual.scheduledTime = actualTimeInstance.time;
+    }
+    return linkedActual;
 }
 
 function historyEntryNote(entry) {
@@ -6263,6 +6850,12 @@ window.editAdministration = async function(entryId) {
         return;
     }
 
+    if (schedule?.freq !== 'PRN' && entry.scheduledDate && entry.scheduledTime) {
+        result.scheduledDate = entry.scheduledDate;
+        result.scheduledTime = entry.scheduledTime;
+        normalizeScheduledDoseActualTime(result);
+    }
+
     const adminTimeChanged = current.date !== result.actualDate || current.time !== result.actualTime;
     if (willBeGiven && schedule?.freq === 'PRN' && med && (!wasGiven || adminTimeChanged || !entry.prnLimitOverride)) {
         const allowed = await confirmPrnDoseLimitOverride(schedule, med, result, entry.id);
@@ -6303,6 +6896,7 @@ window.editAdministration = async function(entryId) {
         : 'No dose administered';
     const overrideText = entry.prnLimitOverride ? '; PRN maximum override confirmed' : '';
     entry.details = `${doseStatusLabel(entry.doseStatus)}; ${scheduledText}${stockDetail} via ${administrationSourceLabel(entry)}${overrideText}${noteText}`;
+    if (schedule?.freq === 'QXH') recalculateIntervalAnchorFromHistory(schedule);
     await sync();
 };
 
@@ -6355,7 +6949,7 @@ window.administerDose = async function(medId, scheduleId) {
         const linkedSchedules = requiredTogetherSchedules(sched, [sched, ...activeScheduleCandidates]);
         if (linkedSchedules.length > 0 && await appConfirm(`Also document ${linkedSchedules.length} linked medication${linkedSchedules.length === 1 ? '' : 's'} with the same administration date/time?`, 'Linked Medications')) {
             for (const linkedSchedule of linkedSchedules) {
-                await administerScheduleRecord(linkedSchedule, actual, linkedSchedule.orderSetName ? `Regimen (${linkedSchedule.orderSetName})` : 'Linked Schedule');
+                await administerScheduleRecord(linkedSchedule, actualForLinkedSchedule(linkedSchedule, actual), linkedSchedule.orderSetName ? `Regimen (${linkedSchedule.orderSetName})` : 'Linked Schedule');
             }
         }
     }
@@ -6536,8 +7130,11 @@ window.deleteSchedule = async function(id) {
             <div style="font-size:11px; margin-bottom:8px;">${escapeHtml(medLabel)} is linked to:</div>
             <div class="sunken-panel" style="background:white; padding:5px; max-height:100px; overflow:auto;">${linkedNames}</div>
             <div class="field-row-stacked" style="margin-top:8px;">
-                <label><input type="radio" name="scope" value="single" checked> Discontinue only this medication</label>
-                <label><input type="radio" name="scope" value="linked"> Discontinue this medication and all linked medications</label>
+                <label>Discontinue:</label>
+                <select name="scope" style="width:100%;">
+                    <option value="single">Only this medication</option>
+                    <option value="linked">This medication and all linked medications</option>
+                </select>
             </div>
         `, 'Discontinue');
         if (!result) return;
@@ -6565,7 +7162,7 @@ window.saveRecipe = async function() {
     const drugId = document.getElementById('recipe-drug-select').value;
     const targetConc = parseFloat(document.getElementById('recipe-target-conc').value);
     const totalVol = parseFloat(document.getElementById('recipe-total-vol').value);
-    
+
     const drug = db.inventory.find(m => m.id === drugId);
     const drugVolNeeded = (targetConc * totalVol) / drug.strength;
     const diluentNeeded = totalVol - drugVolNeeded;
@@ -6581,7 +7178,7 @@ window.saveRecipe = async function() {
     };
 
     db.recipes.push(recipe);
-    
+
     // Add to inventory with 0 stock
     db.inventory.push({
         id: 'comp_' + recipe.id,
@@ -6881,6 +7478,7 @@ function renderAll() {
     if (tableBody) tableBody.innerHTML = '';
     if (medDataList) medDataList.innerHTML = '';
     if (medPrescriberSelect) medPrescriberSelect.innerHTML = prescriberOptionsHtml(medPrescriberSelect.value, '', true);
+    renderMedicationAssignmentControls('med');
     renderSchedulePrescriberOptions();
     const inventoryQuery = (document.getElementById('inventory-search')?.value || '').trim().toLowerCase();
     const filteredInventory = inventoryQuery
@@ -6894,13 +7492,13 @@ filteredInventory.forEach(med => {
         // --- EXPIRATION LOGIC ---
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         const fifteenDaysFromNow = new Date();
         fifteenDaysFromNow.setDate(today.getDate() + 15);
-        
+
         // Parse the med's expiry date
         const expiryDate = med.expiry ? parseLocal(med.expiry) : null;
-        
+
         const isLowStock = med.stock <= med.minThreshold;
         const isExpiringSoon = expiryDate && expiryDate <= fifteenDaysFromNow;
         const isExpired = expiryDate && expiryDate < today;
@@ -6910,18 +7508,19 @@ filteredInventory.forEach(med => {
             row.style.color = "red";
             row.style.fontWeight = "bold";
         }
-       
+
 
         row.innerHTML = `
             <td style="display:flex; align-items:center; gap:5px;">
                 ${med.imagePath ? `<img src="${imageSrc(med.imagePath)}" style="width:20px; height:20px; object-fit:cover;">` : '💊'}
                 <span style="cursor:pointer; text-decoration:underline;" onclick="openMedProfile('${med.id}')">${med.name}</span>
             </td>
-            <td>${displayStrength}</td> 
+            <td>${displayStrength}</td>
             <td>${escapeHtml(formatInventoryUnits(med))}</td>
             <td>${formatAmount(parseAmount(med.stock))} ${escapeHtml(inventoryUnitFor(med))}</td>
             <td>${med.minThreshold}</td>
             <td>${med.expiry || 'N/A'}</td> <!-- NEW EXPIRATION COLUMN -->
+            <td>${escapeHtml(medicationAssignmentText(med))}</td>
             <td>
                 <button onclick="takeDose('${med.id}')">Take</button>
                 <button onclick="restockMed('${med.id}')">Restock</button>
@@ -6933,11 +7532,11 @@ filteredInventory.forEach(med => {
 });
 
 if (tableBody && filteredInventory.length === 0) {
-    tableBody.innerHTML = '<tr><td colspan="7" style="padding:8px;">No inventory items match the search.</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="8" style="padding:8px;">No inventory items match the search.</td></tr>';
 }
 
 sortedInventory.forEach(med => {
-    
+
     if (medDataList) {
         const opt = document.createElement('option');
         opt.value = med.name;
@@ -6979,7 +7578,7 @@ window.calculateLiveDose = function() {
     const qty = parseAmount(document.getElementById('sched-dose-qty').value);
     const calcDisplay = document.getElementById('sched-calculated-dose');
     const unitsLabel = document.getElementById('sched-units-display');
-    
+
     const med = db.inventory.find(m => m.id === medId);
     if (!med) {
         calcDisplay.value = '';

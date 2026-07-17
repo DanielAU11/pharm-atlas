@@ -670,8 +670,13 @@ fieldset {
     display: flex;
     align-items: center;
     gap: 5px;
-    margin: 6px 0;
+    margin: 0;
     font-size: 11px;
+}
+
+.member-active-toolbar .timeline-controls {
+    margin-left: auto;
+    padding-left: 8px;
 }
 
 .med-timeline {
@@ -714,6 +719,12 @@ fieldset {
 .timeline-dose.timeline-given {
     background: #75b975;
     border-color: #236323;
+}
+
+.timeline-dose.timeline-offschedule {
+    min-height: 20px;
+    background: #c08adf;
+    border-color: #6e2b8f;
 }
 
 .timeline-dose.timeline-overdue,
@@ -761,6 +772,24 @@ fieldset {
     height: 13px;
     flex: 0 0 auto;
     margin: 0;
+}
+
+.member-assignment-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    max-width: 520px;
+    padding: 3px;
+    border: 1px inset #ffffff;
+    background: #ffffff;
+}
+
+.member-assignment-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+    font-size: 11px;
 }
 
 .order-set-filter-row {
@@ -1096,6 +1125,10 @@ fieldset {
     margin-bottom: 5px;
     border: 2px outset #ffffff;
     background: #c0c0c0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
 }
 
 #member-completed-meds-list {
@@ -1106,29 +1139,107 @@ fieldset {
 }
 
 .completed-med-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px;
-    border-bottom: 1px dotted #808080;
-    background: #ffffff;
+    display: block;
+    padding: 7px;
+    margin: 6px;
+    border: 2px outset #ffffff;
+    background: #f7f7f7;
 }
 
 .completed-med-row:last-child {
-    border-bottom: 0;
+    border-bottom: 2px outset #ffffff;
 }
 
 .completed-order-set {
-    background: #f3f3f3;
+    background: #eeeeee;
+}
+
+.completed-med-main {
+    min-width: 0;
+}
+
+.completed-med-header {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.completed-med-summary {
+    display: block;
+    margin-top: 2px;
+    line-height: 1.25;
+}
+
+.completed-regimen-items {
+    margin-top: 5px;
+    padding: 3px;
+    border: 1px inset #ffffff;
+    background: #ffffff;
+}
+
+.completed-regimen-items .completed-med-row {
+    margin: 3px 0;
+    padding: 5px;
+    border-width: 1px;
+    background: #ffffff;
 }
 
 .completed-med-actions {
     display: flex;
     flex-wrap: wrap;
     align-content: flex-start;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 4px;
-    min-width: 170px;
+    min-width: 0;
+    margin-top: 5px;
+}
+
+#member-completed-meds-list .med-timeline {
+    grid-template-columns: repeat(7, minmax(84px, 1fr));
+    margin-top: 5px;
+    width: 100%;
+    overflow-x: auto;
+}
+
+#member-completed-meds-list .timeline-day {
+    min-width: 84px;
+}
+
+#member-completed-meds-list .timeline-dose {
+    min-height: 18px;
+    font-size: 10px;
+    line-height: 14px;
+}
+
+.interval-preview {
+    margin-top: 6px;
+    padding: 4px;
+    background: #ffffff;
+    font-size: 11px;
+}
+
+.interval-preview-empty {
+    color: #555555;
+}
+
+.interval-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.interval-preview-table th,
+.interval-preview-table td {
+    border: 1px solid #808080;
+    padding: 3px 4px;
+    text-align: left;
+}
+
+.interval-preview-table th {
+    background: #dcdcdc;
+}
+
+.interval-preview-administered {
+    color: #008000;
+    font-weight: bold;
 }
 
 #member-prn-meds-list {
