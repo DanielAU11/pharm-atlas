@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld('api', {
     notify: (title, body) => ipcRenderer.invoke('notify', title, body),
     sendEmail: (details) => ipcRenderer.invoke('send-email', details),
     savePdfReport: (details) => ipcRenderer.invoke('save-pdf-report', details),
-    emailPdfReport: (details) => ipcRenderer.invoke('email-pdf-report', details)
+    emailPdfReport: (details) => ipcRenderer.invoke('email-pdf-report', details),
+    backupData: (data) => ipcRenderer.invoke('backup-data', data),
+    restoreData: () => ipcRenderer.invoke('restore-data')
 });

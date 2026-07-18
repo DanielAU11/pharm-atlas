@@ -53,6 +53,11 @@
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
+                        <legend>Missed Dose Dashboard</legend>
+                        <div id="missed-dose-dashboard"></div>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
                         <legend>Monitoring Trends</legend>
                         <div id="vitals-dashboard"></div>
                     </fieldset>
@@ -66,6 +71,8 @@
                         <legend>PDF Reports</legend>
                         <div class="field-row">
                             <button onclick="generateInventoryPdfReport()">Current Inventory PDF</button>
+                            <button type="button" onclick="backupAppData()">Backup Data</button>
+                            <button type="button" onclick="restoreAppData()">Restore Data</button>
                         </div>
                     </fieldset>
 
@@ -749,6 +756,7 @@
                 </fieldset>
                 <input id="m-prescriber-ids-data" type="hidden">
                 <input id="m-diagnoses-data" type="hidden">
+                <input id="m-allergies-data" type="hidden">
                 <div class="field-row" style="align-items:flex-start; margin-top:8px;">
                     <div style="flex:1;">
                         <strong>Provider Profiles</strong>
@@ -760,6 +768,11 @@
                         <div id="m-diagnosis-list" class="sunken-panel" style="height:72px; overflow-y:auto; background:white; margin-top:3px;"></div>
                         <button type="button" onclick="addMemberDiagnosis()">Add Diagnosis</button>
                     </div>
+                </div>
+                <div style="margin-top:8px;">
+                    <strong>Allergies &amp; Intolerances</strong>
+                    <div id="m-allergy-list" class="sunken-panel" style="min-height:72px; max-height:150px; overflow-y:auto; background:white; margin-top:3px;"></div>
+                    <button type="button" onclick="addMemberAllergy()">Add Allergy / Intolerance</button>
                 </div>
             </fieldset>
 

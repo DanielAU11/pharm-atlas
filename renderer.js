@@ -1045,6 +1045,12 @@ function formatQtyForSchedule(schedule, med) {
     return `${qty} ${unit}`;
 }
 
+function formatMultiMedLabelName(schedule, med) {
+    if (!med || !schedule) return 'Unknown medication';
+    const actualDose = formatPrescribedDose(med, schedule.doseQty);
+    return `${med.name}${actualDose ? ` ${actualDose}` : ''}`;
+}
+
 function prnLimitText(schedule) {
     const maxDoses = parseInt(schedule?.prnMaxDoses, 10);
     if (schedule?.freq !== 'PRN' || !Number.isInteger(maxDoses) || maxDoses < 1) return '';
@@ -1323,7 +1329,7 @@ window.printPreviewedLabel = async function() {
     printArea.innerHTML = pendingLabelHtml;
     const prepackDefinition = pendingPrepackDefinition;
     window.closeLabelPreview();
-    if (prepackDefinition) await commitPrepackPrint(prepackDefinition);
+    if (prepackDefinition?.existingQueueId) await commitPrepackPrint(prepackDefinition);
     printPreparedArea();
 };
 
@@ -1630,6 +1636,50 @@ function memberMonitoringProfiles(member) {
     return Array.isArray(member?.monitoringProfiles) ? member.monitoringProfiles.filter(Boolean) : [];
 }
 
+function normalizeMemberAllergies(member) {
+    return Array.isArray(member?.allergies)
+        ? member.allergies
+            .map(item => ({
+                id: item.id || `allergy_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+                type: item.type === 'intolerance' ? 'intolerance' : 'allergy',
+                medId: item.medId || '',
+                name: String(item.name || '').trim(),
+                reaction: String(item.reaction || '').trim()
+            }))
+            .filter(item => item.medId || item.name)
+        : [];
+}
+
+function allergyTypeLabel(type) {
+    return type === 'intolerance' ? 'Intolerance' : 'Allergy';
+}
+
+function allergyDisplayName(record) {
+    const med = record?.medId ? db.inventory.find(item => item.id === record.medId) : null;
+    return med ? `${med.name} ${formatMedStrength(med)}` : (record?.name || 'Unnamed');
+}
+
+function medicationAllergySearchText(med) {
+    return [
+        med?.name,
+        formatMedStrength(med || {}),
+        ...(med?.components || []).flatMap(component => [component.name, component.unit])
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function allergyMatchesMedication(record, med) {
+    if (!record || !med) return false;
+    if (record.medId && record.medId === med.id) return true;
+    const allergyName = String(record.name || '').trim().toLowerCase();
+    if (!allergyName) return false;
+    return medicationAllergySearchText(med).includes(allergyName) ||
+        allergyName.includes(String(med.name || '').trim().toLowerCase());
+}
+
+function medicationAllergyMatches(member, med) {
+    return normalizeMemberAllergies(member).filter(record => allergyMatchesMedication(record, med));
+}
+
 function prescriberOptionsHtml(selected = '', memberId = '', includeAll = true) {
     const member = db.family.find(item => item.id === memberId);
     const allowedIds = member ? new Set(memberPrescriberIds(member)) : null;
@@ -1673,8 +1723,12 @@ function setHiddenJson(id, value) {
 function renderMemberCareLists() {
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
     const diagnoses = getHiddenJson('m-diagnoses-data');
+    const allergies = document.getElementById('m-allergies-data')
+        ? getHiddenJson('m-allergies-data')
+        : [];
     const prescriberList = document.getElementById('m-prescriber-list');
     const diagnosisList = document.getElementById('m-diagnosis-list');
+    const allergyList = document.getElementById('m-allergy-list');
 
     if (prescriberList) {
         prescriberList.innerHTML = prescriberIds.length
@@ -1696,6 +1750,18 @@ function renderMemberCareLists() {
                 <button type="button" onclick="removeMemberDiagnosis(${index})">Remove</button>
             </div>`).join('')
             : '<div style="font-size:11px; padding:4px;">No diagnoses added.</div>';
+    }
+
+    if (allergyList) {
+        allergyList.innerHTML = allergies.length
+            ? allergies.map((record, index) => `<div class="med-item-row allergy-list-row" style="font-size:11px;">
+                <span>
+                    <strong>${escapeHtml(allergyTypeLabel(record.type))}:</strong> ${escapeHtml(allergyDisplayName(record))}
+                    ${record.reaction ? `<br><small>Reaction: ${escapeHtml(record.reaction)}</small>` : ''}
+                </span>
+                <button type="button" onclick="removeMemberAllergy(${index})">Remove</button>
+            </div>`).join('')
+            : '<div style="font-size:11px; padding:4px;">No allergies or intolerances added.</div>';
     }
 }
 
@@ -1940,6 +2006,70 @@ window.removeMemberDiagnosis = function(index) {
     const diagnoses = getHiddenJson('m-diagnoses-data');
     diagnoses.splice(index, 1);
     setHiddenJson('m-diagnoses-data', diagnoses);
+    renderMemberCareLists();
+};
+
+window.updateAllergyInventorySelection = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const select = body.querySelector('[name="medId"]');
+    const nameInput = body.querySelector('[name="name"]');
+    if (!select || !nameInput) return;
+    const med = db.inventory.find(item => item.id === select.value);
+    if (med) nameInput.value = med.name;
+};
+
+window.addMemberAllergy = async function() {
+    const inventoryOptions = db.inventory
+        .slice()
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+        .map(med => `<option value="${escapeHtml(med.id)}">${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</option>`)
+        .join('');
+    const result = await showActionModal('Add Allergy / Intolerance', `
+        <div class="field-row">
+            <label>Type:</label>
+            <select name="type">
+                <option value="allergy">Allergy</option>
+                <option value="intolerance">Intolerance</option>
+            </select>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Inventory product, if listed:</label>
+            <select name="medId" onchange="updateAllergyInventorySelection()" style="width:100%;">
+                <option value="">Not in inventory / free text</option>
+                ${inventoryOptions}
+            </select>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Medication, ingredient, or product name:</label>
+            <input name="name" type="text" style="width:100%;" placeholder="e.g. Penicillin, lactose, acetaminophen">
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Reaction / notes:</label>
+            <textarea name="reaction" rows="2" style="width:100%; resize:none;"></textarea>
+        </div>
+    `, 'Add');
+    if (!result) return;
+    const med = db.inventory.find(item => item.id === result.medId);
+    const record = {
+        id: `allergy_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        type: result.type === 'intolerance' ? 'intolerance' : 'allergy',
+        medId: result.medId || '',
+        name: String(result.name || med?.name || '').trim(),
+        reaction: String(result.reaction || '').trim()
+    };
+    if (!record.medId && !record.name) {
+        await appAlert('Select an inventory product or enter an allergy/intolerance name.');
+        return;
+    }
+    setHiddenJson('m-allergies-data', [...getHiddenJson('m-allergies-data'), record]);
+    renderMemberCareLists();
+};
+
+window.removeMemberAllergy = function(index) {
+    const allergies = getHiddenJson('m-allergies-data');
+    allergies.splice(index, 1);
+    setHiddenJson('m-allergies-data', allergies);
     renderMemberCareLists();
 };
 
@@ -2555,6 +2685,7 @@ window.openMemberModal = function(id = null) {
     fields.forEach(f => safeSet(f, ''));
     setHiddenJson('m-prescriber-ids-data', []);
     setHiddenJson('m-diagnoses-data', []);
+    setHiddenJson('m-allergies-data', []);
     const notifyEnabled = document.getElementById('m-notify-enabled');
     const emailReminders = document.getElementById('m-email-reminders');
     if (notifyEnabled) notifyEnabled.checked = true;
@@ -2596,6 +2727,7 @@ window.openMemberModal = function(id = null) {
             if (emailReminders) emailReminders.checked = notifications.emailReminders === true;
             setHiddenJson('m-prescriber-ids-data', memberPrescriberIds(m));
             setHiddenJson('m-diagnoses-data', normalizeMemberDiagnoses(m));
+            setHiddenJson('m-allergies-data', normalizeMemberAllergies(m));
             renderMemberCareLists();
             renderMemberMonitoringProfiles(m.id);
             setMemberGoalFields(m);
@@ -2658,9 +2790,9 @@ window.openMemberModal = function(id = null) {
                 set.memberId === id && set.status !== 'completed' && db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule))
             );
             memberOrderSets.forEach(set => {
-                const div = document.createElement('div');
-                div.className = 'sunken-panel';
-                div.style.cssText = "padding:5px; margin-bottom:5px; background:white; border:1px inset gray;";
+                const div = document.createElement('details');
+                div.className = 'sunken-panel member-regimen-card';
+                div.open = true;
                 const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id && !isScheduleArchived(candidate));
                 const itemRows = setSchedules.map(schedule => {
                     if (schedule.freq === 'PRN') return '';
@@ -2675,10 +2807,12 @@ window.openMemberModal = function(id = null) {
                     </div>`;
                 }).join('');
                 div.innerHTML = `
-                    <strong>${set.name}</strong><br>
-                    <small>${set.startDate} - ${set.endDate}</small>
-                    <div style="margin-top:4px;">${itemRows}</div>
-                    <div style="text-align:right; margin-top:5px;">
+                    <summary class="member-regimen-summary">
+                        <span><strong>${escapeHtml(set.name)}</strong><br><small>${escapeHtml(set.startDate)} - ${escapeHtml(set.endDate)}</small></span>
+                        <span class="form-help">${setSchedules.length} medication${setSchedules.length === 1 ? '' : 's'}</span>
+                    </summary>
+                    <div class="member-regimen-items">${itemRows}</div>
+                    <div class="member-regimen-actions">
                         <button onclick="event.stopPropagation(); printOrderSetLabel('${set.id}')">Regimen Label</button>
                         <button onclick="event.stopPropagation(); printOrderSetMedicationLabel('${set.id}')">Individual Labels</button>
                         <button onclick="event.stopPropagation(); administerOrderSet('${set.id}')">Administer</button>
@@ -2886,6 +3020,7 @@ window.saveMember = async function() {
         .filter(Boolean);
     const diagnosesList = Array.from(new Set([...getHiddenJson('m-diagnoses-data'), ...typedDiagnoses]));
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
+    const allergies = normalizeMemberAllergies({ allergies: getHiddenJson('m-allergies-data') });
 
     const data = {
         firstName: document.getElementById('m-first').value,
@@ -2897,6 +3032,7 @@ window.saveMember = async function() {
         providers: document.getElementById('m-providers').value,
         diagnoses: diagnosesList.join(', '),
         diagnosesList,
+        allergies,
         address: document.getElementById('m-addr').value,
         phone: document.getElementById('m-phone').value,
         email: document.getElementById('m-email').value,
@@ -4018,12 +4154,14 @@ window.printOrderSetLabel = function(id) {
             ? 'As needed'
             : `${formatFrequency(schedule)} at ${getScheduleTimes(schedule).join(', ')}`;
         const detail = `Qty ${formatQtyForSchedule(schedule, med)} | Dose ${formatPrescribedDose(med, schedule.doseQty)} | ${timing}`;
+        const displayName = formatMultiMedLabelName(schedule, med);
         return {
             med,
             schedule,
+            displayName,
             detail,
             instructions: schedule.instructions || '',
-            size: med.name.length + formatLabelMedStrength(med).length + detail.length + String(schedule.instructions || '').length
+            size: displayName.length + detail.length + String(schedule.instructions || '').length
         };
     }).filter(Boolean);
     if (entries.length === 0) {
@@ -4050,7 +4188,7 @@ window.printOrderSetLabel = function(id) {
     const labels = pages.map((pageEntries, pageIndex) => {
         const rows = pageEntries.map(entry => `
             <div class="label-med-row order-set-label-row">
-                <span class="order-set-label-med">${escapeHtml(entry.med.name)} ${escapeHtml(formatLabelMedStrength(entry.med))}</span><br>
+                <span class="order-set-label-med">${escapeHtml(entry.displayName)}</span><br>
                 ${escapeHtml(entry.detail)}
                 ${entry.instructions ? `<br>Note: ${escapeHtml(entry.instructions)}` : ''}
             </div>`).join('');
@@ -4961,11 +5099,11 @@ window.addLastMinutePrepackItem = async function(queueId) {
 
 function prepackDayLabelHtml(queue, day) {
     const labelClass = getLabelClass(
-        day.items.map(item => `${item.time} ${item.medName} ${item.strength} ${item.quantity}`),
+        day.items.map(item => `${item.time} ${item.medName} ${item.dose || item.strength} ${item.quantity}`),
         day.items.length + 1
     );
     const rows = day.items.length
-        ? day.items.map(item => `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')} (${escapeHtml(item.quantity)})</div>`).join('')
+        ? day.items.map(item => `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(item.medName)} ${escapeHtml(item.dose || item.strength || '')} (${escapeHtml(item.quantity)})</div>`).join('')
         : '<div class="label-med-row">No medications in this prepack</div>';
     return `<div class="${labelClass}">
         <div class="label-date label-date-with-icon">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}${labelShiftIconHtml(queue.selection?.prepackShift)}</div>
@@ -5001,7 +5139,8 @@ window.printUpdatedPrepackLabels = async function(queueId) {
                 member,
                 queue.selection.startDate,
                 queue.selection.endDate,
-                instances
+                instances,
+                queue.selection.prepackShift || 'all'
             );
         } else if (schedule && med && member && instances.length > 0) {
             const byDate = instances.reduce((acc, instance) => {
@@ -5010,7 +5149,7 @@ window.printUpdatedPrepackLabels = async function(queueId) {
                 return acc;
             }, {});
             labelHtml = Object.entries(byDate).map(([date, times]) =>
-                medicationLabelHtml(schedule, med, member, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)))
+                medicationLabelHtml(schedule, med, member, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), queue.selection.prepackShift || 'all')
             ).join('');
         }
     }
@@ -5812,6 +5951,62 @@ function renderVitalDashboard() {
     });
 }
 
+function missedDoseRows(daysBack = 7) {
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - Math.max(0, daysBack - 1));
+    const rows = [];
+    db.schedules
+        .filter(schedule => !isScheduleArchived(schedule) && schedule.freq !== 'PRN')
+        .forEach(schedule => {
+            const member = db.family.find(item => item.id === schedule.memberId);
+            const med = db.inventory.find(item => item.id === schedule.medId);
+            if (!member || !med) return;
+            const cursor = new Date(start);
+            while (cursor <= now) {
+                const dateKey = localDateKey(cursor);
+                getScheduleInstancesForDate(schedule, dateKey).forEach(instance => {
+                    if (instance.time === 'PRN') return;
+                    const due = dateTimeFromParts(instance.date, instance.time);
+                    if (!due || due >= now) return;
+                    if (findHistoryForScheduleInstance(schedule, instance)) return;
+                    rows.push({ schedule, member, med, instance, due });
+                });
+                cursor.setDate(cursor.getDate() + 1);
+            }
+        });
+    return rows.sort((a, b) => a.due - b.due);
+}
+
+function renderMissedDoseDashboard() {
+    const container = document.getElementById('missed-dose-dashboard');
+    if (!container) return;
+    const rows = missedDoseRows(7);
+    if (rows.length === 0) {
+        container.innerHTML = '<div class="status-ok">No undocumented overdue doses in the last 7 days.</div>';
+        return;
+    }
+    container.innerHTML = `
+        <div class="missed-dose-summary"><strong>${rows.length}</strong> undocumented overdue dose${rows.length === 1 ? '' : 's'} in the last 7 days</div>
+        <div class="missed-dose-list">
+            ${rows.slice(0, 30).map(row => `
+                <div class="missed-dose-row">
+                    <span>
+                        <strong>${escapeHtml(row.member.firstName)} ${escapeHtml(row.member.lastName)}</strong> -
+                        ${escapeHtml(row.med.name)} ${escapeHtml(formatMedStrength(row.med))}
+                        <br><small>${escapeHtml(row.instance.date)} ${escapeHtml(row.instance.time)} | Qty ${escapeHtml(formatQtyForSchedule(row.schedule, row.med))}</small>
+                    </span>
+                    <span>
+                        <button type="button" onclick="documentScheduleInstance('${escapeHtml(row.schedule.id)}','${escapeHtml(row.instance.date)}','${escapeHtml(row.instance.time)}')">Document</button>
+                        <button type="button" onclick="openMemberModal('${escapeHtml(row.member.id)}')">Profile</button>
+                    </span>
+                </div>
+            `).join('')}
+            ${rows.length > 30 ? `<div class="form-help">Showing 30 of ${rows.length}. Open member profiles for older items.</div>` : ''}
+        </div>`;
+}
+
 function getInventoryStatusGroups() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -5856,6 +6051,35 @@ function renderInventoryStatus() {
             ${section('Expiring in 15 days', groups.expiringSoon, 'inventory-status-soon', '15')}
         </div>`;
 }
+
+window.backupAppData = async function() {
+    if (!window.api?.backupData) {
+        await appAlert('Backup support is not available in this build. Restart the desktop app and try again.');
+        return;
+    }
+    const path = await window.api.backupData(db);
+    if (path) await appAlert(`Backup saved:\n${path}`, 'Backup Complete');
+};
+
+window.restoreAppData = async function() {
+    if (!window.api?.restoreData) {
+        await appAlert('Restore support is not available in this build. Restart the desktop app and try again.');
+        return;
+    }
+    if (!await appConfirm('Restore will replace the current PharmAtlas data with the selected backup file. Continue?', 'Restore Backup')) return;
+    try {
+        const restored = await window.api.restoreData();
+        if (!restored) return;
+        db = { ...emptyDb, ...restored };
+        pendingScheduleOrders = [];
+        activePrepackQueueId = null;
+        renderAll();
+        await appAlert('Backup restored successfully.', 'Restore Complete');
+    } catch (error) {
+        console.error(error);
+        await appAlert('Unable to restore that backup file. Make sure it is a valid PharmAtlas JSON backup.', 'Restore Failed');
+    }
+};
 
 function reportStyles() {
     return `
@@ -6482,11 +6706,47 @@ function scheduleSummaryLine(schedule) {
                 <span>${escapeHtml(formatFrequency(schedule))}</span>
                 <span>${escapeHtml(times)}</span>
                 ${linkText ? `<span class="pending-link-chip">${linkText}</span>` : ''}
+                ${schedule.allergyOverride ? '<span class="pending-allergy-chip">Allergy override</span>' : ''}
             </span>
             <span class="pending-order-meta">${escapeHtml(member ? memberDisplayName(member) : 'No member')} | ${escapeHtml(dates)}</span>
             ${linkedDetailsHtml(schedule, [...db.schedules, ...pendingScheduleOrders])}
             ${schedule.instructions ? `<span class="pending-order-note">${escapeHtml(schedule.instructions)}</span>` : ''}`
     };
+}
+
+async function confirmAllergyOverrideForSchedule(schedule) {
+    const member = db.family.find(item => item.id === schedule?.memberId);
+    const med = db.inventory.find(item => item.id === schedule?.medId);
+    if (!member || !med) return true;
+    const matches = medicationAllergyMatches(member, med);
+    if (matches.length === 0) return true;
+    if (schedule.allergyOverride?.comment) return true;
+    const matchRows = matches.map(record => `<li><strong>${escapeHtml(allergyTypeLabel(record.type))}:</strong> ${escapeHtml(allergyDisplayName(record))}${record.reaction ? ` - ${escapeHtml(record.reaction)}` : ''}</li>`).join('');
+    const result = await showActionModal('ALLERGY / INTOLERANCE WARNING', `
+        <div class="allergy-warning-modal">
+            <strong>${escapeHtml(memberDisplayName(member))}</strong> has the following allergy/intolerance record(s) that match <strong>${escapeHtml(med.name)}</strong>:
+            <ul>${matchRows}</ul>
+            <label>Override reason / comment required:</label>
+            <textarea name="overrideComment" rows="3" style="width:100%; resize:none;" placeholder="Explain why this medication is still being scheduled."></textarea>
+        </div>
+    `, 'Accept Override');
+    if (!result) return false;
+    const comment = String(result.overrideComment || '').trim();
+    if (!comment) {
+        await appAlert('An override comment is required before this medication can be scheduled.', 'Override Required');
+        return false;
+    }
+    schedule.allergyOverride = {
+        comment,
+        date: new Date().toISOString(),
+        matches: matches.map(record => ({
+            type: record.type,
+            medId: record.medId || '',
+            name: allergyDisplayName(record),
+            reaction: record.reaction || ''
+        }))
+    };
+    return true;
 }
 
 window.renderPendingScheduleOrders = function() {
@@ -6567,6 +6827,10 @@ window.finalizePendingScheduleOrders = async function() {
         return;
     }
     const selected = pendingScheduleOrders.filter(order => selectedIds.includes(order.id));
+    for (const order of selected) {
+        const allowed = await confirmAllergyOverrideForSchedule(order);
+        if (!allowed) return;
+    }
     const idMap = new Map(selected.map(order => [order.id, Date.now().toString() + Math.random().toString(16).slice(2)]));
     selected.forEach(order => {
         const mappedTargets = uniqueValues(order.linkTargetIds?.length ? order.linkTargetIds : (order.linkTargetId ? [order.linkTargetId] : []))
@@ -6589,6 +6853,7 @@ window.finalizePendingScheduleOrders = async function() {
 window.addSchedule = async function() {
     const schedule = buildScheduleFromEntry();
     if (!schedule) return;
+    if (!await confirmAllergyOverrideForSchedule(schedule)) return;
     pendingScheduleOrders.push(schedule);
     clearScheduleEntryFields();
     renderPendingScheduleOrders();
@@ -7570,6 +7835,7 @@ sortedInventory.forEach(med => {
     renderPendingScheduleOrders();
     renderScheduleLinkOptions();
     renderVitals();
+    renderMissedDoseDashboard();
     renderInventoryStatus();
     renderVitalDashboard();
 }
@@ -7662,7 +7928,7 @@ window.updateIndividualLabelOptions = function() {
     if (timeRow) timeRow.style.display = doseMode === 'specific' ? 'flex' : 'none';
 };
 
-function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
+function medicationLabelHtml(schedule, med, member, doseDate, doseTimes, prepackShift = 'all') {
     const times = doseTimes.length > 0 ? doseTimes.join(', ') : 'As Needed';
     const header = schedule.freq === 'PRN' ? 'As Needed' : `${doseDate} | ${times}`;
     const instructionLine = schedule.instructions
@@ -7679,7 +7945,7 @@ function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
 
     return `
         <div class="${labelClass}">
-            <div class="label-date">${escapeHtml(header)}</div>
+            <div class="label-date label-date-with-icon">${escapeHtml(header)}${labelShiftIconHtml(prepackShift)}</div>
             <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
             <div class="label-small">Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
             <div class="label-small"><b>Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}</b></div>
@@ -7688,7 +7954,7 @@ function medicationLabelHtml(schedule, med, member, doseDate, doseTimes) {
         </div>`;
 }
 
-function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances) {
+function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances, prepackShift = 'all') {
     const totalQuantity = instances.reduce((sum) => sum + parseAmount(schedule.doseQty, 0), 0);
     const scheduledTimes = Array.from(new Set(instances.map(instance => instance.time)))
         .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
@@ -7709,7 +7975,7 @@ function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, ins
         schedule.instructions
     ], schedule.instructions ? 7 : 6);
     return `<div class="${labelClass}">
-        <div class="label-date">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}</div>
+        <div class="label-date label-date-with-icon">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}${labelShiftIconHtml(prepackShift)}</div>
         <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
         <div class="label-small">Dose each time: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
         <div class="label-small"><b>Total Qty: ${escapeHtml(totalQtyText)}</b></div>
@@ -7789,6 +8055,10 @@ window.printSingleLabel = async function(scheduleId) {
             <label>Scheduled time:</label>
             <select name="labelSpecificTime">${timeOptions}</select>
         </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Prepack icon/group:</label>
+            ${prepackShiftChoiceHtml(prepackShiftForTime(scheduledTimes[0]) || 'all')}
+        </div>
         ${!orderHasEndDate ? '<div class="form-help" style="margin-top:8px;">This order is ongoing, so use a specific date or custom date range.</div>' : ''}
     `, 'Preview Labels');
     if (!result) return;
@@ -7814,6 +8084,8 @@ window.printSingleLabel = async function(scheduleId) {
     if (result.labelDoseMode === 'specific') {
         instances = instances.filter(instance => instance.time === result.labelSpecificTime);
     }
+    const prepackShift = result.prepackShift || 'all';
+    instances = filterRowsByPrepackShift(instances.map(instance => ({ instance })), prepackShift).map(row => row.instance);
     if (instances.length === 0) {
         await appAlert('This medication has no scheduled doses in the selected date range.');
         return;
@@ -7821,7 +8093,7 @@ window.printSingleLabel = async function(scheduleId) {
 
     let labels = [];
     if (result.labelLayout === 'range') {
-        labels = [medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances)];
+        labels = [medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, prepackShift)];
     } else if (result.labelDoseMode === 'all') {
         const byDate = instances.reduce((acc, instance) => {
             if (!acc[instance.date]) acc[instance.date] = [];
@@ -7829,10 +8101,10 @@ window.printSingleLabel = async function(scheduleId) {
             return acc;
         }, {});
         labels = Object.entries(byDate).map(([date, times]) =>
-            medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)))
+            medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), prepackShift)
         );
     } else {
-        labels = instances.map(instance => medicationLabelHtml(s, med, mem, instance.date, [instance.time]));
+        labels = instances.map(instance => medicationLabelHtml(s, med, mem, instance.date, [instance.time], prepackShift));
     }
 
     if (labels.length > 100 && !await appConfirm(`This will create ${labels.length} labels. Continue?`, 'Large Label Print Job')) {
@@ -7852,7 +8124,8 @@ window.printSingleLabel = async function(scheduleId) {
                 endDate,
                 specificTime: result.labelDoseMode === 'specific' ? result.labelSpecificTime : '',
                 labelLayout: result.labelLayout || 'daily',
-                singleMedication: true
+                singleMedication: true,
+                prepackShift
             }
         )
     );
@@ -8080,13 +8353,13 @@ window.printDateRangeLabels = async function(memberId, startDate, endDate) {
 
         labelCount++;
         const labelClass = getLabelClass(
-            doseRows.map(row => `${row.instance.time} ${row.med.name} ${formatLabelMedStrength(row.med)} ${formatQtyForSchedule(row.schedule, row.med)}`),
+            doseRows.map(row => `${row.instance.time} ${formatMultiMedLabelName(row.schedule, row.med)} ${formatQtyForSchedule(row.schedule, row.med)}`),
             doseRows.length + 1
         );
         const medRowsHtml = doseRows.length > 0
             ? doseRows.map(row => {
                 return `<div class="label-med-row">
-                <b>${escapeHtml(row.instance.time)}</b>: ${escapeHtml(row.med.name)} ${escapeHtml(formatLabelMedStrength(row.med))} (${escapeHtml(formatQtyForSchedule(row.schedule, row.med))})</div>`;
+                <b>${escapeHtml(row.instance.time)}</b>: ${escapeHtml(formatMultiMedLabelName(row.schedule, row.med))} (${escapeHtml(formatQtyForSchedule(row.schedule, row.med))})</div>`;
             }).join('')
             : '<div class="label-med-row">No included medications scheduled</div>';
 

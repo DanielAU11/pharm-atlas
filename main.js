@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, nativeImage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
@@ -126,6 +126,17 @@ function safePdfFileName(fileName) {
     return safeName.toLowerCase().endsWith('.pdf') ? safeName : `${safeName}.pdf`;
 }
 
+function safeJsonFileName(fileName) {
+    const safeName = String(fileName || `PharmAtlas_Backup_${Date.now()}.json`)
+        .replace(/[<>:"/\\|?*]+/g, '_');
+    return safeName.toLowerCase().endsWith('.json') ? safeName : `${safeName}.json`;
+}
+
+function safeAssetFileName(fileName) {
+    return String(fileName || `asset_${Date.now()}`)
+        .replace(/[<>:"/\\|?*]+/g, '_');
+}
+
 async function renderPdfBuffer(html) {
     const reportWindow = new BrowserWindow({
         show: false,
@@ -162,6 +173,70 @@ ipcMain.handle('load-db', () => {
     if (!fs.existsSync(dbPath)) return { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [] };
     const data = fs.readFileSync(dbPath, 'utf8');
     return JSON.parse(data);
+});
+
+ipcMain.handle('backup-data', async (event, data) => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const result = await dialog.showSaveDialog(win, {
+        title: 'Save PharmAtlas Backup',
+        defaultPath: path.join(dataDir, safeJsonFileName(`PharmAtlas_Backup_${stamp}.json`)),
+        filters: [{ name: 'PharmAtlas Backup', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    const images = [];
+    (data?.inventory || []).forEach(med => {
+        const imagePath = med?.imagePath;
+        if (!imagePath || !fs.existsSync(imagePath)) return;
+        try {
+            images.push({
+                originalPath: imagePath,
+                fileName: safeAssetFileName(path.basename(imagePath)),
+                base64: fs.readFileSync(imagePath).toString('base64')
+            });
+        } catch (error) {
+            console.error('Unable to add image to backup:', error.message);
+        }
+    });
+    const payload = {
+        app: 'PharmAtlas',
+        backupVersion: 1,
+        createdAt: new Date().toISOString(),
+        images,
+        data
+    };
+    fs.writeFileSync(result.filePath, JSON.stringify(payload, null, 2));
+    return result.filePath;
+});
+
+ipcMain.handle('restore-data', async () => {
+    const result = await dialog.showOpenDialog(win, {
+        title: 'Restore PharmAtlas Backup',
+        properties: ['openFile'],
+        filters: [{ name: 'PharmAtlas Backup', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePaths?.[0]) return null;
+    const raw = fs.readFileSync(result.filePaths[0], 'utf8').replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(raw);
+    const restored = parsed && parsed.app === 'PharmAtlas' && parsed.data ? parsed.data : parsed;
+    if (parsed?.images?.length && Array.isArray(restored?.inventory)) {
+        const pathMap = new Map();
+        parsed.images.forEach((image, index) => {
+            if (!image?.base64 || !image.originalPath) return;
+            const fileName = safeAssetFileName(image.fileName || `restored_image_${index}.png`);
+            const targetPath = path.join(dataDir, fileName);
+            try {
+                fs.writeFileSync(targetPath, image.base64, 'base64');
+                pathMap.set(image.originalPath, targetPath);
+            } catch (error) {
+                console.error('Unable to restore image from backup:', error.message);
+            }
+        });
+        restored.inventory.forEach(med => {
+            if (pathMap.has(med.imagePath)) med.imagePath = pathMap.get(med.imagePath);
+        });
+    }
+    fs.writeFileSync(dbPath, JSON.stringify(restored, null, 2));
+    return restored;
 });
 
 ipcMain.handle('save-image', (event, fileName, base64Data) => {
