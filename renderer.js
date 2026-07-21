@@ -1101,6 +1101,8 @@ function scheduleInstanceKey(scheduleId, date, time) {
 
 function isScheduleInstanceDocumented(scheduleId, date, time) {
     const key = scheduleInstanceKey(scheduleId, date, time);
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    if (schedule && findHistoryForScheduleInstance(schedule, { date, time, key })) return true;
     return db.history.some(entry => entry.scheduleInstanceKey === key);
 }
 
@@ -4554,7 +4556,7 @@ async function commitPrepackPrint(definition) {
 
 function updatePrepackQueueStatus(queue) {
     queue.days.forEach(day => {
-        day.status = !day.needsReprint && day.items.every(item => item.status === 'correct')
+        day.status = isPrepackDayComplete(day)
             ? 'completed'
             : 'pending';
     });
@@ -4562,6 +4564,10 @@ function updatePrepackQueueStatus(queue) {
     queue.status = complete ? 'completed' : 'pending';
     if (complete && !queue.completedAt) queue.completedAt = new Date().toISOString();
     if (!complete) queue.completedAt = '';
+}
+
+function isPrepackDayComplete(day) {
+    return !!day && day.items.length > 0 && day.items.every(item => item.status === 'correct');
 }
 
 function prepackStatusMark(item) {
@@ -4612,14 +4618,15 @@ function prepackWorkspaceHtml(queue) {
         </div>`;
     }).join('');
     const dayButtons = queue.days.map((entry, index) => {
+        const completed = entry.status === 'completed' || isPrepackDayComplete(entry);
         const classes = [
             'prepack-day-button',
             index === dayIndex ? 'active' : '',
-            entry.status === 'completed' ? 'completed' : '',
-            entry.needsReprint ? 'needs-reprint' : ''
+            completed ? 'completed' : '',
+            entry.needsReprint && !completed ? 'needs-reprint' : ''
         ].filter(Boolean).join(' ');
         const dayLabel = entry.date.includes(' - ') ? entry.date : entry.date.slice(5);
-        return `<button type="button" class="${classes}" onclick="selectPrepackDay('${escapeHtml(queue.id)}',${index})">${escapeHtml(dayLabel)}${entry.status === 'completed' ? ' &#10003;' : ''}</button>`;
+        return `<button type="button" class="${classes}" onclick="selectPrepackDay('${escapeHtml(queue.id)}',${index})">${escapeHtml(dayLabel)}${completed ? ' &#10003;' : ''}</button>`;
     }).join('');
     const scanner = queue.status === 'completed'
         ? '<div class="prepack-complete-banner">&#10003; Prepackage complete</div>'
@@ -4649,7 +4656,7 @@ function prepackWorkspaceHtml(queue) {
             </div>
         </div>
         <div class="prepack-day-strip">${dayButtons}</div>
-        ${day.needsReprint ? '<div class="prepack-reprint-warning">Labels for this day need to be reprinted.</div>' : ''}
+        ${day.needsReprint && !isPrepackDayComplete(day) ? '<div class="prepack-reprint-warning">Labels for this day need to be reprinted.</div>' : ''}
         ${scanner}
         <div class="prepack-items">${itemRows || '<div class="empty-state">No medications queued for this day.</div>'}</div>`;
 }
@@ -4693,7 +4700,7 @@ window.renderPrepackageQueues = function() {
     const queueRow = (queue, complete = false) => `
         <button type="button" class="prepack-queue-row ${complete ? 'completed' : ''} ${queue.id === activePrepackQueueId ? 'selected' : ''}" onclick="selectPrepackQueue('${escapeHtml(queue.id)}')">
             <strong>${complete ? '&#10003; ' : ''}${escapeHtml(queue.title)}</strong><br>
-            <small>${escapeHtml(queue.sourceLabel || '')}${queue.scheduledFor ? ` | ${escapeHtml(queue.scheduledFor.replace('T', ' '))}` : ''}${!queue.labelsPrinted ? ' | LABELS NOT PRINTED' : ''}${queue.days.some(day => day.needsReprint) ? ' | LABELS NEED REPRINT' : ''}</small>
+            <small>${escapeHtml(queue.sourceLabel || '')}${queue.scheduledFor ? ` | ${escapeHtml(queue.scheduledFor.replace('T', ' '))}` : ''}${!queue.labelsPrinted ? ' | LABELS NOT PRINTED' : ''}${queue.days.some(day => day.needsReprint && !isPrepackDayComplete(day)) ? ' | LABELS NEED REPRINT' : ''}</small>
         </button>`;
     activeList.innerHTML = active.length
         ? active.map(queue => queueRow(queue)).join('')
@@ -5759,9 +5766,44 @@ function historyEntryMatchesScheduleInstance(entry, schedule, instance) {
         entry.scheduledTime === instance.time;
 }
 
+function historyTimeForSort(entry) {
+    return entry.scheduledTime || historyEntryDateTime(entry).time || '99:99';
+}
+
+function scheduleDateHistoryEntries(schedule, date) {
+    return db.history
+        .filter(entry => historyEntryMatchesScheduleDate(entry, schedule, date))
+        .sort((a, b) => timeToMinutes(historyTimeForSort(a)) - timeToMinutes(historyTimeForSort(b)));
+}
+
+function historyEntryMatchesScheduleDate(entry, schedule, date) {
+    if (!entry || !schedule || !date) return false;
+    if (entry.scheduleId && entry.scheduleId !== schedule.id) return false;
+    return entry.memberId === schedule.memberId &&
+        entry.medId === schedule.medId &&
+        entry.scheduledDate === date;
+}
+
+function findHistoryForModifiedScheduleInstance(schedule, instance) {
+    const historyEntries = scheduleDateHistoryEntries(schedule, instance.date);
+    if (historyEntries.length === 0) return null;
+
+    const instances = getScheduleInstancesForDate(schedule, instance.date)
+        .slice()
+        .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+    if (instances.length === 1 && historyEntries.length === 1) return historyEntries[0];
+
+    const instanceIndex = instances.findIndex(candidate => candidate.time === instance.time);
+    if (instanceIndex < 0) return null;
+    if (instances.length === historyEntries.length) return historyEntries[instanceIndex] || null;
+
+    return null;
+}
+
 function findHistoryForScheduleInstance(schedule, instance) {
     return db.history.find(item => item.scheduleInstanceKey === instance.key)
-        || db.history.find(item => historyEntryMatchesScheduleInstance(item, schedule, instance));
+        || db.history.find(item => historyEntryMatchesScheduleInstance(item, schedule, instance))
+        || findHistoryForModifiedScheduleInstance(schedule, instance);
 }
 
 function timelineDoseState(schedule, instance) {
