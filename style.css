@@ -1158,9 +1158,9 @@ fieldset {
 }
 
 #member-active-meds-list {
-    height: min(460px, 48vh);
+    height: auto;
     min-height: 320px;
-    overflow-y: auto;
+    overflow-y: visible;
     padding-right: 4px;
 }
 
