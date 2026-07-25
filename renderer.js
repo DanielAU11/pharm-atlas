@@ -1,4 +1,4 @@
-const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [] };
+const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [], formularyItems: [], inventoryOrders: [] };
 let db = { ...emptyDb };
 let currentEditingMedId = null;
 let currentEditingMemberId = null;
@@ -158,11 +158,35 @@ function normalizeMedicationCode(value) {
     return String(value || '').trim().toUpperCase();
 }
 
+function medicationCodes(med) {
+    const codes = [
+        med?.barcodeCode,
+        ...(Array.isArray(med?.barcodeCodes) ? med.barcodeCodes : [])
+    ].map(normalizeMedicationCode).filter(Boolean);
+    return Array.from(new Set(codes));
+}
+
+function addMedicationBarcode(med, code) {
+    const normalized = normalizeMedicationCode(code);
+    if (!med || !normalized) return false;
+    const codes = medicationCodes(med);
+    if (codes.includes(normalized)) return false;
+    med.barcodeCodes = [...codes, normalized];
+    if (!med.barcodeCode) med.barcodeCode = normalized;
+    return true;
+}
+
+function findInventoryByBarcode(code) {
+    const normalized = normalizeMedicationCode(code);
+    if (!normalized) return null;
+    return db.inventory.find(med => medicationCodes(med).includes(normalized)) || null;
+}
+
 function createMedicationCode() {
     let code = '';
     do {
         code = `PA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    } while (db.inventory.some(med => normalizeMedicationCode(med.barcodeCode) === code));
+    } while (db.inventory.some(med => medicationCodes(med).includes(code)));
     return code;
 }
 
@@ -179,7 +203,12 @@ function ensureMedicationCodes() {
             med.barcodeCode = code;
             changed = true;
         }
-        used.add(code);
+        const codes = medicationCodes(med);
+        if (!Array.isArray(med.barcodeCodes) || med.barcodeCodes.join('|') !== codes.join('|')) {
+            med.barcodeCodes = codes;
+            changed = true;
+        }
+        codes.forEach(item => used.add(item));
     });
     return changed;
 }
@@ -192,7 +221,7 @@ window.generateMedicationCode = function(inputId) {
 function medicationCodeIsAvailable(code, excludedMedId = '') {
     const normalized = normalizeMedicationCode(code);
     return normalized && !db.inventory.some(med =>
-        med.id !== excludedMedId && normalizeMedicationCode(med.barcodeCode) === normalized
+        med.id !== excludedMedId && medicationCodes(med).includes(normalized)
     );
 }
 
@@ -3180,6 +3209,7 @@ window.addInventory = async function() {
         prescriberId,
         assignedMemberIds: inventoryAssignedMemberIds,
         barcodeCode,
+        barcodeCodes: [barcodeCode],
         imagePath: imagePath
     });
 
@@ -3499,6 +3529,7 @@ window.saveMedProfile = async function() {
         med.prescriberId = document.getElementById('modal-prescriber')?.value || '';
         med.assignedMemberIds = profileAssignedMemberIds;
         med.barcodeCode = barcodeCode;
+        med.barcodeCodes = Array.from(new Set([barcodeCode, ...medicationCodes(med)].filter(Boolean)));
         med.formulation = formulation;
         med.isCombination = isCombination;
         med.components = components;
@@ -4473,6 +4504,7 @@ function prepackItemFingerprint(item) {
 
 function reconcilePrepackQueue(queue) {
     if (!queue?.selection) return false;
+    if (queue.status === 'completed') return false;
     const rows = prepackRowsForSelection(queue.selection);
     const fresh = buildPrepackDefinition(queue.memberId, queue.sourceLabel, rows, queue.selection);
     const previousItems = new Map();
@@ -4513,8 +4545,49 @@ function reconcilePrepackQueue(queue) {
     return changed;
 }
 
+function prepackSelectionFingerprint(selection) {
+    if (!selection) return '';
+    return JSON.stringify({
+        kind: selection.kind || '',
+        memberId: selection.memberId || '',
+        scheduleIds: (selection.scheduleIds || []).slice().sort(),
+        excludedScheduleIds: (selection.excludedScheduleIds || []).slice().sort(),
+        excludedInstanceKeys: (selection.excludedInstanceKeys || []).slice().sort(),
+        startDate: selection.startDate || '',
+        endDate: selection.endDate || '',
+        specificTime: selection.specificTime || '',
+        labelLayout: selection.labelLayout || '',
+        singleMedication: selection.singleMedication === true,
+        prepackShift: selection.prepackShift || 'all'
+    });
+}
+
+function nextActivePrepackQueueId(excludedQueueId = '') {
+    const next = (db.prepackQueues || []).find(queue => queue.id !== excludedQueueId && queue.status !== 'completed');
+    return next?.id || null;
+}
+
 async function createPrepackQueue(definition, options = {}) {
     if (!definition.days?.some(day => day.items.length > 0)) return null;
+    const fingerprint = prepackSelectionFingerprint(definition.selection);
+    const existing = (db.prepackQueues || []).find(queue =>
+        queue.status !== 'completed' &&
+        prepackSelectionFingerprint(queue.selection) === fingerprint
+    );
+    if (existing) {
+        existing.memberName = definition.memberName;
+        existing.sourceLabel = definition.sourceLabel;
+        existing.title = definition.title;
+        existing.selection = definition.selection;
+        existing.scheduledFor = options.scheduledFor || existing.scheduledFor || '';
+        existing.labelsPrinted = existing.labelsPrinted || options.labelsPrinted === true;
+        existing.days = definition.days;
+        existing.currentDayIndex = 0;
+        updatePrepackQueueStatus(existing);
+        activePrepackQueueId = existing.id;
+        await sync();
+        return existing;
+    }
     const queue = {
         id: `queue_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         memberId: definition.memberId,
@@ -4667,7 +4740,9 @@ window.renderPrepackageQueues = function() {
     const workspace = document.getElementById('prepack-workspace');
     if (!activeList || !completedList || !workspace) return;
     if (!Array.isArray(db.prepackQueues)) db.prepackQueues = [];
-    db.prepackQueues.forEach(queue => reconcilePrepackQueue(queue));
+    db.prepackQueues
+        .filter(queue => queue.status !== 'completed')
+        .forEach(queue => reconcilePrepackQueue(queue));
 
     const filter = document.getElementById('prepack-member-filter');
     const selectedFilter = filter?.value || '';
@@ -4760,7 +4835,9 @@ window.scanPrepackCode = async function(queueId) {
     if (item.status === 'correct') item.verificationMethod = 'scan';
     input.value = '';
     updatePrepackQueueStatus(queue);
-    if (day.status === 'completed' && queue.status !== 'completed') {
+    if (queue.status === 'completed') {
+        activePrepackQueueId = nextActivePrepackQueueId(queue.id);
+    } else if (day.status === 'completed') {
         const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
         if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
     }
@@ -4839,7 +4916,9 @@ window.markPrepackDayManual = async function(queueId) {
     });
     day.needsReprint = false;
     updatePrepackQueueStatus(queue);
-    if (queue.status !== 'completed') {
+    if (queue.status === 'completed') {
+        activePrepackQueueId = nextActivePrepackQueueId(queue.id);
+    } else {
         const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
         if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
     }
@@ -7747,6 +7826,514 @@ function inventorySearchText(med) {
     ].filter(Boolean).join(' ').toLowerCase();
 }
 
+function asArray(value) {
+    if (Array.isArray(value)) return value;
+    return value ? [value] : [];
+}
+
+function inventoryDisplayName(med) {
+    return med ? `${med.name} ${formatMedStrength(med)}`.trim() : 'Unknown item';
+}
+
+function formularyItemName(item) {
+    const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+    return med ? inventoryDisplayName(med) : `${item.name || 'Unnamed item'} ${item.strength || ''}`.trim();
+}
+
+function formularyBarcodeCodes(item) {
+    const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+    return med ? medicationCodes(med) : asArray(item.barcodeCodes).map(normalizeMedicationCode).filter(Boolean);
+}
+
+function sortByName(list, getName = item => item.name || '') {
+    return list.slice().sort((a, b) => getName(a).localeCompare(getName(b), undefined, { sensitivity: 'base' }));
+}
+
+function formularyPdfBody() {
+    const rows = sortByName(db.formularyItems || [], formularyItemName).map(item => {
+        const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+        return `<tr>
+            <td>${escapeHtml(formularyItemName(item))}</td>
+            <td>${escapeHtml(med ? formatMedStrength(med) : (item.strength || ''))}</td>
+            <td>${escapeHtml(med ? formatInventoryUnits(med) : (item.units || ''))}</td>
+            <td>${escapeHtml(item.targetQty || '')}</td>
+            <td>${escapeHtml(med ? `${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}` : 'Not in inventory')}</td>
+            <td>${escapeHtml(item.notes || '')}</td>
+        </tr>`;
+    }).join('');
+    return `<h2>Reorder Formulary</h2>
+        <table>
+            <thead><tr><th>Item</th><th>Strength</th><th>Units</th><th>Target Qty</th><th>Current Stock</th><th>Notes</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6">No formulary items saved.</td></tr>'}</tbody>
+        </table>`;
+}
+
+function renderInventoryWorkflowSummary() {
+    const container = document.getElementById('inventory-workflow-summary');
+    if (!container) return;
+    const formularyCount = (db.formularyItems || []).length;
+    const openOrders = (db.inventoryOrders || []).filter(order => order.status !== 'received');
+    const latestOrder = sortByName(db.inventoryOrders || [], order => order.createdAt || '').reverse()[0];
+    container.innerHTML = `
+        <div class="inventory-workflow-card"><strong>Formulary</strong>${formularyCount} reorder item${formularyCount === 1 ? '' : 's'} saved.</div>
+        <div class="inventory-workflow-card"><strong>Open Orders</strong>${openOrders.length} order${openOrders.length === 1 ? '' : 's'} waiting to be received.</div>
+        <div class="inventory-workflow-card"><strong>Latest Order</strong>${latestOrder ? `${escapeHtml(new Date(latestOrder.createdAt).toLocaleString())} - ${escapeHtml(latestOrder.status || 'open')}` : 'No orders created yet.'}</div>`;
+}
+
+window.addFormularyCustomRow = function(values = {}) {
+    const container = document.getElementById('formulary-custom-list');
+    if (!container) return;
+    const rowId = `formulary-custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const div = document.createElement('div');
+    div.className = 'formulary-custom-row';
+    div.innerHTML = `
+        <input name="customName" type="text" placeholder="Medication or supplement" value="${escapeHtml(values.name || '')}">
+        <input name="customStrength" type="text" placeholder="Strength" value="${escapeHtml(values.strength || '')}">
+        <input name="customUnits" type="text" placeholder="Units" value="${escapeHtml(values.units || '')}">
+        <input name="customTargetQty" type="text" placeholder="Target qty" value="${escapeHtml(values.targetQty || '')}">
+        <input name="customNotes" type="text" placeholder="Notes" value="${escapeHtml(values.notes || '')}">
+        <button type="button" onclick="document.getElementById('${rowId}').remove()">Remove</button>`;
+    div.id = rowId;
+    container.appendChild(div);
+};
+
+window.toggleAllFormularyChoices = function(checked) {
+    document.querySelectorAll('#action-modal-body input[name="formularyInventoryIds"]').forEach(input => { input.checked = checked; });
+};
+
+window.createEditFormulary = async function() {
+    db.formularyItems = db.formularyItems || [];
+    const byMedId = new Map(db.formularyItems.filter(item => item.medId).map(item => [item.medId, item]));
+    const customItems = db.formularyItems.filter(item => !item.medId);
+    const inventoryChoices = sortByName(db.inventory, inventoryDisplayName).map((med, index) => {
+        const existing = byMedId.get(med.id);
+        const inputId = `formulary-med-${index}`;
+        return `<div class="formulary-item">
+            <input id="${inputId}" name="formularyInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''}>
+            <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
+            <input name="targetQty-${escapeHtml(med.id)}" type="text" placeholder="Target qty" value="${escapeHtml(existing?.targetQty || '')}" style="width:80px;">
+            <input name="notes-${escapeHtml(med.id)}" type="text" placeholder="Notes" value="${escapeHtml(existing?.notes || '')}" style="width:150px;">
+        </div>`;
+    }).join('');
+
+    const formularyPromise = showActionModal('Create/edit Formulary', `
+        <div style="font-size:11px; margin-bottom:6px;">Select inventory items to keep on your reorder formulary. Add free-text items for products not currently in inventory.</div>
+        <div class="field-row" style="margin-bottom:6px;">
+            <button type="button" onclick="toggleAllFormularyChoices(true)">Select All Inventory</button>
+            <button type="button" onclick="toggleAllFormularyChoices(false)">Deselect All Inventory</button>
+            <button type="button" onclick="addFormularyCustomRow()">Add Non-inventory Item</button>
+        </div>
+        <div class="formulary-grid">${inventoryChoices || '<div class="empty-state">No inventory items yet.</div>'}</div>
+        <div style="font-size:11px; margin:8px 0 4px;"><strong>Non-inventory formulary items</strong></div>
+        <div id="formulary-custom-list"></div>
+    `, 'Save Formulary', body => {
+        const base = collectNamedInputs(body);
+        base.customRows = Array.from(body.querySelectorAll('.formulary-custom-row')).map(row => ({
+            name: row.querySelector('[name="customName"]')?.value.trim() || '',
+            strength: row.querySelector('[name="customStrength"]')?.value.trim() || '',
+            units: row.querySelector('[name="customUnits"]')?.value.trim() || '',
+            targetQty: row.querySelector('[name="customTargetQty"]')?.value.trim() || '',
+            notes: row.querySelector('[name="customNotes"]')?.value.trim() || ''
+        })).filter(item => item.name);
+        return base;
+    });
+    customItems.forEach(item => window.addFormularyCustomRow(item));
+    const result = await formularyPromise;
+    if (!result) return;
+
+    const selectedIds = new Set(asArray(result.formularyInventoryIds));
+    const nextItems = [];
+    db.inventory.forEach(med => {
+        if (!selectedIds.has(med.id)) return;
+        const existing = byMedId.get(med.id);
+        nextItems.push({
+            id: existing?.id || `formulary_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            medId: med.id,
+            name: med.name,
+            strength: formatMedStrength(med),
+            units: formatInventoryUnits(med),
+            targetQty: result[`targetQty-${med.id}`] || existing?.targetQty || '',
+            notes: result[`notes-${med.id}`] || ''
+        });
+    });
+    result.customRows.forEach(item => {
+        const existing = customItems.find(candidate =>
+            candidate.name.toLowerCase() === item.name.toLowerCase() &&
+            String(candidate.strength || '').toLowerCase() === String(item.strength || '').toLowerCase()
+        );
+        nextItems.push({
+            id: existing?.id || `formulary_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            ...item,
+            barcodeCodes: existing?.barcodeCodes || []
+        });
+    });
+    db.formularyItems = sortByName(nextItems, formularyItemName);
+    await sync();
+};
+
+window.viewFormulary = async function() {
+    const items = sortByName(db.formularyItems || [], formularyItemName);
+    const rows = items.map(item => {
+        const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+        return `<tr>
+            <td>${escapeHtml(formularyItemName(item))}</td>
+            <td>${escapeHtml(med ? `${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}` : 'Not in inventory')}</td>
+            <td>${escapeHtml(item.targetQty || '')}</td>
+            <td>${escapeHtml(item.notes || '')}</td>
+        </tr>`;
+    }).join('');
+    const result = await showActionModal('View Formulary', `
+        <div class="sunken-panel" style="background:white; max-height:420px; overflow:auto;">
+            <table class="interactive" style="width:100%;">
+                <thead><tr><th>Item</th><th>Current Stock</th><th>Target Qty</th><th>Notes</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="4">No formulary items saved.</td></tr>'}</tbody>
+            </table>
+        </div>
+    `, 'Generate PDF');
+    if (result) await saveReportPdf('Formulary Reorder List', formularyPdfBody(), 'Formulary');
+};
+
+function orderLineFromInventory(med, reason = '') {
+    return {
+        id: `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        sourceType: 'inventory',
+        medId: med.id,
+        name: med.name,
+        strength: formatMedStrength(med),
+        units: formatInventoryUnits(med),
+        inventoryUnit: inventoryUnitFor(med),
+        requestedQty: '',
+        receivedQty: 0,
+        barcodeCodes: medicationCodes(med),
+        notes: reason,
+        status: 'open'
+    };
+}
+
+function orderLineFromFormulary(item) {
+    const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+    return {
+        id: `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        sourceType: med ? 'inventory' : 'formulary',
+        medId: med?.id || '',
+        formularyId: item.id,
+        name: med?.name || item.name,
+        strength: med ? formatMedStrength(med) : (item.strength || ''),
+        units: med ? formatInventoryUnits(med) : (item.units || ''),
+        inventoryUnit: med ? inventoryUnitFor(med) : (item.units || 'unit'),
+        requestedQty: item.targetQty || '',
+        receivedQty: 0,
+        barcodeCodes: formularyBarcodeCodes(item),
+        notes: item.notes || '',
+        status: 'open'
+    };
+}
+
+window.addOrderCustomRow = function() {
+    const container = document.getElementById('order-custom-list');
+    if (!container) return;
+    const rowId = `order-custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const div = document.createElement('div');
+    div.id = rowId;
+    div.className = 'formulary-custom-row';
+    div.innerHTML = `
+        <input name="orderCustomName" type="text" placeholder="Medication or supplement">
+        <input name="orderCustomStrength" type="text" placeholder="Strength">
+        <input name="orderCustomUnits" type="text" placeholder="Units">
+        <input name="orderCustomQty" type="text" placeholder="Order qty">
+        <input name="orderCustomNotes" type="text" placeholder="Notes">
+        <button type="button" onclick="document.getElementById('${rowId}').remove()">Remove</button>`;
+    container.appendChild(div);
+};
+
+function inventoryReorderCandidates() {
+    const groups = getInventoryStatusGroups();
+    const ids = new Set([...groups.low, ...groups.expired].map(med => med.id));
+    return db.inventory.filter(med => ids.has(med.id));
+}
+
+window.createInventoryOrder = async function() {
+    const candidates = inventoryReorderCandidates();
+    const candidateIds = new Set(candidates.map(med => med.id));
+    const candidateChoices = sortByName(candidates, inventoryDisplayName).map((med, index) => {
+        const inputId = `order-candidate-${index}`;
+        const expired = getInventoryStatusGroups().expired.some(item => item.id === med.id);
+        const reason = expired ? 'Expired' : 'Low stock';
+        return `<div class="formulary-item">
+            <input id="${inputId}" name="candidateMedIds" type="checkbox" value="${escapeHtml(med.id)}" checked>
+            <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(reason)} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
+            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || med.minThreshold || '')}" style="width:90px;">
+            <span></span>
+        </div>`;
+    }).join('');
+    const otherInventoryChoices = sortByName(db.inventory.filter(med => !candidateIds.has(med.id)), inventoryDisplayName).map((med, index) => {
+        const inputId = `order-other-inventory-${index}`;
+        return `<div class="formulary-item">
+            <input id="${inputId}" name="otherInventoryIds" type="checkbox" value="${escapeHtml(med.id)}">
+            <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
+            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || '')}" style="width:90px;">
+            <span></span>
+        </div>`;
+    }).join('');
+    const formularyChoices = sortByName(db.formularyItems || [], formularyItemName).map((item, index) => {
+        const inputId = `order-formulary-${index}`;
+        return `<div class="formulary-item">
+            <input id="${inputId}" name="formularyOrderIds" type="checkbox" value="${escapeHtml(item.id)}">
+            <label for="${inputId}"><strong>${escapeHtml(formularyItemName(item))}</strong><br><span class="form-help">${escapeHtml(item.notes || 'Formulary item')}</span></label>
+            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(item.targetQty || '')}" style="width:90px;">
+            <span></span>
+        </div>`;
+    }).join('');
+    const result = await showActionModal('Create Inventory Order', `
+        <div style="font-size:11px; margin-bottom:6px;">Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary or new items as needed.</div>
+        <div style="font-size:11px; margin:4px 0;"><strong>Low or expired inventory</strong></div>
+        <div class="formulary-grid">${candidateChoices || '<div class="empty-state">No low-stock or expired inventory items.</div>'}</div>
+        <div style="font-size:11px; margin:8px 0 4px;"><strong>Add other current inventory</strong></div>
+        <div class="formulary-grid">${otherInventoryChoices || '<div class="empty-state">No other inventory items available.</div>'}</div>
+        <div style="font-size:11px; margin:8px 0 4px;"><strong>Add from formulary</strong></div>
+        <div class="formulary-grid">${formularyChoices || '<div class="empty-state">No formulary items saved.</div>'}</div>
+        <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-formulary Item</button></div>
+        <div id="order-custom-list"></div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;"></textarea>
+        </div>
+    `, 'Create Order', body => {
+        const base = collectNamedInputs(body);
+        base.customRows = Array.from(body.querySelectorAll('.formulary-custom-row')).map(row => ({
+            name: row.querySelector('[name="orderCustomName"]')?.value.trim() || '',
+            strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
+            units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+            requestedQty: row.querySelector('[name="orderCustomQty"]')?.value.trim() || '',
+            notes: row.querySelector('[name="orderCustomNotes"]')?.value.trim() || ''
+        })).filter(item => item.name);
+        return base;
+    });
+    if (!result) return;
+
+    const lines = [];
+    asArray(result.candidateMedIds).forEach(id => {
+        const med = db.inventory.find(item => item.id === id);
+        if (!med) return;
+        const line = orderLineFromInventory(med, 'Auto-added from low/expired stock');
+        line.requestedQty = result[`candidateQty-${id}`] || '';
+        lines.push(line);
+    });
+    asArray(result.otherInventoryIds).forEach(id => {
+        const med = db.inventory.find(item => item.id === id);
+        if (!med) return;
+        const line = orderLineFromInventory(med, 'Added from current inventory');
+        line.requestedQty = result[`otherInventoryQty-${id}`] || '';
+        if (!lines.some(existing => existing.medId && existing.medId === line.medId)) lines.push(line);
+    });
+    asArray(result.formularyOrderIds).forEach(id => {
+        const item = db.formularyItems.find(candidate => candidate.id === id);
+        if (!item) return;
+        const line = orderLineFromFormulary(item);
+        line.requestedQty = result[`formularyQty-${id}`] || line.requestedQty || '';
+        if (!lines.some(existing => existing.medId && existing.medId === line.medId)) lines.push(line);
+    });
+    result.customRows.forEach(item => lines.push({
+        id: `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        sourceType: 'new',
+        medId: '',
+        formularyId: '',
+        name: item.name,
+        strength: item.strength,
+        units: item.units,
+        inventoryUnit: item.units || 'unit',
+        requestedQty: item.requestedQty,
+        receivedQty: 0,
+        barcodeCodes: [],
+        notes: item.notes,
+        status: 'open'
+    }));
+    if (lines.length === 0) {
+        await appAlert('Add at least one item to create an order.');
+        return;
+    }
+    db.inventoryOrders = db.inventoryOrders || [];
+    db.inventoryOrders.unshift({
+        id: `order_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        createdAt: new Date().toISOString(),
+        status: 'open',
+        note: result.orderNote || '',
+        lines
+    });
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: 'Inventory Order',
+        details: `Created reorder with ${lines.length} item${lines.length === 1 ? '' : 's'}.`
+    });
+    await sync();
+};
+
+window.markReceiveLineScanned = function() {
+    const body = document.getElementById('action-modal-body');
+    const codeInput = body?.querySelector('#receive-scan-code');
+    const lineSelect = body?.querySelector('#receive-scan-line');
+    const code = normalizeMedicationCode(codeInput?.value);
+    if (!body || !code) return;
+    let lineId = lineSelect?.value || '';
+    if (!lineId) {
+        const matchedMed = findInventoryByBarcode(code);
+        const matchedRow = matchedMed && body.querySelector(`.order-line-item[data-med-id="${CSS.escape(matchedMed.id)}"]`);
+        lineId = matchedRow?.dataset.lineId || '';
+    }
+    if (!lineId) {
+        void appAlert('Select the order line this new barcode belongs to.');
+        return;
+    }
+    const row = body.querySelector(`.order-line-item[data-line-id="${CSS.escape(lineId)}"]`);
+    if (!row) return;
+    row.querySelector('[name="receiveLine"]').checked = true;
+    row.querySelector('[name="receiveBarcode"]').value = code;
+    row.classList.add('receive-line-received');
+    if (codeInput) codeInput.value = '';
+};
+
+async function promptNewInventoryFromOrderLine(line, barcode, qty) {
+    const result = await showActionModal(`New Inventory Item: ${line.name}`, `
+        <div style="font-size:11px; margin-bottom:6px;">This received item is not in inventory yet. Enter the inventory details to add it.</div>
+        <div class="field-row"><label>Name:</label><input name="name" type="text" value="${escapeHtml(line.name || '')}" style="width:260px;"></div>
+        <div class="field-row" style="margin-top:8px;"><label>Strength:</label><input name="strength" type="text" value="${escapeHtml(line.strength || '')}" style="width:120px;"><label>Units:</label><input name="units" type="text" value="${escapeHtml(line.units || '')}" style="width:90px;"></div>
+        <div class="field-row" style="margin-top:8px;"><label>Stock unit:</label><input name="inventoryUnit" type="text" value="${escapeHtml(line.inventoryUnit || line.units || 'unit')}" style="width:90px;"><span class="form-help">Qty received comes from the order line.</span></div>
+        <div class="field-row" style="margin-top:8px;"><label>Formulation:</label><input name="formulation" type="text" value="${escapeHtml(line.formulation || 'Other')}" style="width:120px;"><label>Alert at:</label><input name="minThreshold" type="number" step="any" value="5" style="width:60px;"><label>Expiry:</label><input name="expiry" type="date"></div>
+        <div class="field-row-stacked" style="margin-top:8px;"><label>Notes:</label><textarea name="notes" rows="2" style="width:100%; resize:none;">${escapeHtml(line.notes || '')}</textarea></div>
+    `, 'Add to Inventory');
+    if (!result) return null;
+    const parsedStrength = parseAmount(result.strength, NaN);
+    const med = {
+        id: Date.now().toString(),
+        name: result.name || line.name,
+        strength: Number.isFinite(parsedStrength) ? parsedStrength : (result.strength || line.strength || ''),
+        units: result.units || line.units || '',
+        displayStrength: result.strength || line.strength || '',
+        formulation: result.formulation || 'Other',
+        inventoryUnit: result.inventoryUnit || 'unit',
+        administrationUnit: result.inventoryUnit || result.units || 'unit',
+        inventoryBehavior: 'per-dose',
+        stock: 0,
+        maxCapacity: 0,
+        expiry: result.expiry || '',
+        isLiquid: String(result.units || '').includes('/'),
+        isCombination: false,
+        components: [],
+        minThreshold: parseAmount(result.minThreshold, 5),
+        prescriberId: '',
+        assignedMemberIds: [],
+        barcodeCode: normalizeMedicationCode(barcode) || createMedicationCode(),
+        barcodeCodes: [],
+        notes: result.notes || ''
+    };
+    med.barcodeCodes = medicationCodes(med);
+    db.inventory.push(med);
+    return med;
+}
+
+async function receiveOrderLine(line, receivedQty, barcode) {
+    const normalizedBarcode = normalizeMedicationCode(barcode);
+    let med = line.medId ? db.inventory.find(item => item.id === line.medId) : null;
+    const barcodeMatch = normalizedBarcode ? findInventoryByBarcode(normalizedBarcode) : null;
+    if (!med && barcodeMatch) med = barcodeMatch;
+    if (!med) {
+        const lineName = String(line.name || '').trim().toLowerCase();
+        const lineStrength = String(line.strength || '').trim().toLowerCase();
+        med = db.inventory.find(item =>
+            String(item.name || '').trim().toLowerCase() === lineName &&
+            (!lineStrength || String(formatMedStrength(item) || '').trim().toLowerCase() === lineStrength)
+        ) || null;
+    }
+    if (!med) med = await promptNewInventoryFromOrderLine(line, normalizedBarcode, receivedQty);
+    if (!med) return false;
+    if (normalizedBarcode) addMedicationBarcode(med, normalizedBarcode);
+    med.stock = parseAmount(med.stock, 0) + parseAmount(receivedQty, 0);
+    if (parseAmount(med.maxCapacity, 0) < parseAmount(med.stock, 0)) med.maxCapacity = med.stock;
+    line.medId = med.id;
+    line.receivedQty = parseAmount(line.receivedQty, 0) + parseAmount(receivedQty, 0);
+    line.status = 'received';
+    if (normalizedBarcode) {
+        line.barcodeCodes = Array.from(new Set([...asArray(line.barcodeCodes), normalizedBarcode]));
+        const formulary = line.formularyId ? db.formularyItems.find(item => item.id === line.formularyId) : null;
+        if (formulary) {
+            formulary.medId = formulary.medId || med.id;
+            formulary.barcodeCodes = Array.from(new Set([...asArray(formulary.barcodeCodes), normalizedBarcode]));
+        }
+    }
+    return true;
+}
+
+window.receiveInventoryOrder = async function() {
+    const orders = (db.inventoryOrders || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    if (orders.length === 0) {
+        await appAlert('No inventory orders have been created yet.');
+        return;
+    }
+    const orderOptions = orders.map(order => `<option value="${escapeHtml(order.id)}">${escapeHtml(new Date(order.createdAt).toLocaleString())} - ${escapeHtml(order.status || 'open')} - ${order.lines?.length || 0} item(s)</option>`).join('');
+    const selectResult = await showActionModal('Receive Order', `
+        <div class="field-row"><label>Order:</label><select name="orderId" style="width:360px;">${orderOptions}</select></div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Mode:</label>
+            <select name="receiveMode">
+                <option value="manual">Receive all/manual entry</option>
+                <option value="scan">Scan products by line</option>
+            </select>
+        </div>
+    `, 'Continue');
+    if (!selectResult) return;
+    const order = db.inventoryOrders.find(item => item.id === selectResult.orderId);
+    if (!order) return;
+    const lineOptions = order.lines.map(line => `<option value="${escapeHtml(line.id)}">${escapeHtml(`${line.name} ${line.strength || ''}`)}</option>`).join('');
+    const lineRows = order.lines.map(line => `
+        <div class="order-line-item ${line.status === 'received' ? 'receive-line-received' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}">
+            <input name="receiveLine" type="checkbox" value="${escapeHtml(line.id)}" ${selectResult.receiveMode === 'manual' && line.status !== 'received' ? 'checked' : ''}>
+            <div><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${line.status === 'received' ? ' - received' : ''}</span></div>
+            <input name="receiveQty" data-line-id="${escapeHtml(line.id)}" type="number" step="any" value="${escapeHtml(line.requestedQty || '1')}" style="width:80px;">
+            <input name="receiveBarcode" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Barcode / QR code" value="" style="width:170px;">
+        </div>`).join('');
+    const scanPanel = selectResult.receiveMode === 'scan'
+        ? `<div class="receive-scan-panel">
+            <div class="field-row">
+                <label>Scan code:</label><input id="receive-scan-code" type="text" style="width:220px;">
+                <label>Apply to:</label><select id="receive-scan-line" style="width:240px;"><option value="">Auto match known barcode</option>${lineOptions}</select>
+                <button type="button" onclick="markReceiveLineScanned()">Mark scanned</button>
+            </div>
+        </div>`
+        : '';
+    const result = await showActionModal(`Receive Order: ${new Date(order.createdAt).toLocaleDateString()}`, `
+        ${scanPanel}
+        <div class="order-line-list">${lineRows}</div>
+    `, 'Receive Selected', body => ({
+        lines: Array.from(body.querySelectorAll('.order-line-item')).map(row => ({
+            lineId: row.dataset.lineId,
+            selected: row.querySelector('[name="receiveLine"]')?.checked === true,
+            qty: row.querySelector('[name="receiveQty"]')?.value || '',
+            barcode: row.querySelector('[name="receiveBarcode"]')?.value || ''
+        }))
+    }));
+    if (!result) return;
+    let receivedCount = 0;
+    for (const received of result.lines.filter(item => item.selected)) {
+        const line = order.lines.find(item => item.id === received.lineId);
+        const qty = parseAmount(received.qty, NaN);
+        if (!line || !Number.isFinite(qty) || qty <= 0) continue;
+        if (await receiveOrderLine(line, qty, received.barcode)) receivedCount++;
+    }
+    if (receivedCount === 0) {
+        await appAlert('No order lines were received.');
+        return;
+    }
+    order.status = order.lines.every(line => line.status === 'received') ? 'received' : 'partial';
+    order.receivedAt = order.status === 'received' ? new Date().toISOString() : '';
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: 'Inventory Order',
+        details: `Received ${receivedCount} item${receivedCount === 1 ? '' : 's'} from order created ${new Date(order.createdAt).toLocaleString()}.`
+    });
+    await sync();
+};
+
 window.clearInventorySearch = function() {
     const search = document.getElementById('inventory-search');
     if (search) search.value = '';
@@ -7879,6 +8466,7 @@ sortedInventory.forEach(med => {
     renderVitals();
     renderMissedDoseDashboard();
     renderInventoryStatus();
+    renderInventoryWorkflowSummary();
     renderVitalDashboard();
 }
 window.calculateLiveDose = function() {

@@ -23,14 +23,14 @@
         <div class="window-body">
             <div class="tabs">
             <menu role="tablist">
-                <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')">Dashboard</a></li>
-                <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')">Schedule Medications</a></li>
-                <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')">Prepackage Meds</a></li>
-                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Regimens</a></li>
-                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Monitoring</a></li>
-                <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')">Inventory</a></li>
-                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')">Drug/Vaccine Information</a></li>
-                <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')">Members</a></li>
+                <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')"><span class="win98-icon icon-dashboard"></span>Dashboard</a></li>
+                <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')"><span class="win98-icon icon-calendar"></span>Schedule Medications</a></li>
+                <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')"><span class="win98-icon icon-box"></span>Prepackage Meds</a></li>
+                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')"><span class="win98-icon icon-regimen"></span>Regimens</a></li>
+                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')"><span class="win98-icon icon-monitor"></span>Monitoring</a></li>
+                <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')"><span class="win98-icon icon-inventory"></span>Inventory</a></li>
+                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug/Vaccine Information</a></li>
+                <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')"><span class="win98-icon icon-family"></span>Members</a></li>
             </menu>
 
         <!-- Tab Content Container -->
@@ -464,9 +464,14 @@
                         <div class="field-row" style="margin-bottom:6px;">
                             <label for="inventory-search">Search:</label>
                             <input id="inventory-search" type="search" placeholder="Find medication..." style="width:220px;" oninput="renderAll()">
-                            <button type="button" onclick="clearInventorySearch()">Clear</button>
-                            <button type="button" onclick="printAllInventoryLabels()">Print Inventory Labels</button>
+                            <button type="button" onclick="clearInventorySearch()"><span class="win98-icon icon-clear"></span>Clear</button>
+                            <button type="button" onclick="printAllInventoryLabels()"><span class="win98-icon icon-label"></span>Print Inventory Labels</button>
+                            <button type="button" onclick="createEditFormulary()"><span class="win98-icon icon-formulary"></span>Create/edit formulary</button>
+                            <button type="button" onclick="viewFormulary()"><span class="win98-icon icon-view"></span>View Formulary</button>
+                            <button type="button" onclick="createInventoryOrder()"><span class="win98-icon icon-order"></span>Create Order</button>
+                            <button type="button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive Order</button>
                         </div>
+                        <div id="inventory-workflow-summary" class="inventory-workflow-summary"></div>
                         <div class="sunken-panel" style="height: 800px; width: 100%; overflow-y: scroll;">
                             <table class="interactive" style="width: 100%;">
                                 <thead>

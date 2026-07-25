@@ -207,6 +207,103 @@ fieldset {
     padding: 0;
 }
 
+.win98-icon {
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+    vertical-align: -2px;
+    margin-right: 4px;
+    border: 1px solid #000;
+    background: #c0c0c0;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #808080;
+    position: relative;
+}
+
+.win98-icon::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    background: #000080;
+}
+
+.icon-dashboard::after { background: linear-gradient(90deg, #008080 0 45%, #ffffff 45% 55%, #008000 55%); }
+.icon-calendar::after { background: repeating-linear-gradient(0deg, #ffffff 0 3px, #000080 3px 4px); }
+.icon-box::after { background: linear-gradient(135deg, #c08000 0 50%, #ffff80 50%); }
+.icon-regimen::after { background: repeating-linear-gradient(90deg, #008000 0 3px, #ffffff 3px 4px); }
+.icon-monitor::after { background: linear-gradient(180deg, #00a000 0 35%, #000 35% 45%, #ff0000 45%); }
+.icon-inventory::after { background: linear-gradient(90deg, #ff8080 0 35%, #ffffff 35% 65%, #0080ff 65%); }
+.icon-info::after { background: #0000a0; border-radius: 50%; }
+.icon-family::after { background: radial-gradient(circle at 35% 35%, #000080 0 3px, transparent 4px), radial-gradient(circle at 70% 60%, #008080 0 3px, transparent 4px); }
+.icon-clear::after { background: #ff0000; }
+.icon-label::after { background: linear-gradient(180deg, #ffffff 0 60%, #000 60% 70%, #ffffff 70%); }
+.icon-formulary::after { background: repeating-linear-gradient(0deg, #ffffff 0 2px, #008000 2px 4px); }
+.icon-view::after { background: radial-gradient(circle, #ffffff 0 35%, #000080 36% 70%, transparent 71%); }
+.icon-order::after { background: linear-gradient(180deg, #ffff80 0 45%, #c08000 45%); }
+.icon-receive::after { background: linear-gradient(135deg, #00a000 0 50%, #ffffff 50%); }
+
+.inventory-workflow-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+    gap: 6px;
+    margin: 6px 0;
+    font-size: 11px;
+}
+
+.inventory-workflow-card {
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 6px;
+    min-height: 44px;
+}
+
+.inventory-workflow-card strong {
+    display: block;
+    color: #000080;
+    margin-bottom: 3px;
+}
+
+.formulary-grid,
+.order-line-list {
+    display: grid;
+    gap: 5px;
+    max-height: 330px;
+    overflow-y: auto;
+    background: #ffffff;
+    padding: 6px;
+    border: 2px inset #ffffff;
+}
+
+.formulary-item,
+.order-line-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 6px;
+    align-items: center;
+    border-bottom: 1px dotted #c0c0c0;
+    padding-bottom: 4px;
+    font-size: 11px;
+}
+
+.formulary-custom-row {
+    display: grid;
+    grid-template-columns: 1.4fr 100px 80px 80px 1fr auto;
+    gap: 5px;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.receive-scan-panel {
+    background: #fffde0;
+    border: 2px inset #ffffff;
+    padding: 6px;
+    margin-bottom: 6px;
+    font-size: 11px;
+}
+
+.receive-line-received {
+    background: #d6ffd6;
+}
+
 .missed-dose-summary {
     padding: 6px;
     margin-bottom: 6px;
