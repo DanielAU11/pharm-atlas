@@ -29,8 +29,9 @@
                 <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')"><span class="win98-icon icon-regimen"></span>Regimens</a></li>
                 <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')"><span class="win98-icon icon-monitor"></span>Monitoring</a></li>
                 <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')"><span class="win98-icon icon-inventory"></span>Inventory</a></li>
-                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug/Vaccine Information</a></li>
                 <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')"><span class="win98-icon icon-family"></span>Members</a></li>
+                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug/Vaccine Information</a></li>
+                <li role="tab" id="tab-help"><a href="#" onclick="switchTab('help')"><span class="win98-icon icon-info"></span>Help</a></li>
             </menu>
             <div id="workspace-taskbar" class="workspace-taskbar"></div>
 
@@ -473,6 +474,7 @@
                             <button type="button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive Order</button>
                             <button type="button" onclick="viewInventoryOrderLog()"><span class="win98-icon icon-view"></span>Order Log</button>
                             <button type="button" onclick="printInventoryOrderPdf()"><span class="win98-icon icon-order"></span>Order PDF</button>
+                            <button type="button" onclick="openMedKits()"><span class="win98-icon icon-box"></span>Med Kits</button>
                         </div>
                         <div id="inventory-workflow-summary" class="inventory-workflow-summary"></div>
                         <div class="sunken-panel" style="height: 800px; width: 100%; overflow-y: scroll;">
@@ -561,6 +563,134 @@
                             </details></li>
                         </ul>
                     </fieldset>
+                </div>
+
+                <!-- HELP -->
+                <div id="panel-help" style="display: none;">
+                    <section class="help-hero">
+                        <div>
+                            <h2>PharmAtlas Help Center</h2>
+                            <p>A practical guide for setting up members, scheduling medications, documenting administrations, managing inventory, preparing labels, tracking monitoring values, and keeping backup records.</p>
+                        </div>
+                    </section>
+
+                    <div class="help-grid">
+                        <fieldset class="help-card">
+                            <legend>1. Recommended Setup</legend>
+                            <ol>
+                                <li>Add each person in the <strong>Members</strong> tab.</li>
+                                <li>Add providers, diagnoses, allergies, intolerance notes, monitoring goals, and contact information in each member profile.</li>
+                                <li>Add inventory items before scheduling them. Use formulation, stock unit, give/apply unit, expiration date, storage, barcode, and assignment fields.</li>
+                                <li>Create regimens for grouped routines such as supplements, rescue plans, or condition-specific medication groups.</li>
+                                <li>Make a backup before heavy editing or before testing a major workflow.</li>
+                            </ol>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>2. Scheduling Medications</legend>
+                            <ul>
+                                <li>Use <strong>Schedule Medications</strong> to stage medication orders before adding them to a profile.</li>
+                                <li>Pending scheduled medications can be reviewed, modified, removed, and then finalized.</li>
+                                <li>Supported frequencies include one-time, daily, BID, TID, QID, nightly, PRN, every other day, weekly, every X weeks, X times per week, monthly, and every X hours.</li>
+                                <li>Every X hours schedules preview upcoming times and can adjust future times after late/early documentation.</li>
+                                <li>Use linked medications when items must be taken together or when only one formulation should be selected.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>3. Documenting Doses</legend>
+                            <ul>
+                                <li>Use <strong>Administer</strong> from a member profile, regimen, calendar, active order, PRN order, or inventory Take button.</li>
+                                <li>Document the actual date/time, and mark doses as given, late, early, skipped, or missed.</li>
+                                <li>Purple timeline blocks mean a dose was given at a different time than originally scheduled.</li>
+                                <li>Skipped and missed doses remain in the administration record and affect adherence.</li>
+                                <li>If a medication exists in a Med Kit, the administration dialog lets you choose whether stock came from main inventory or from that kit.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>4. Inventory Basics</legend>
+                            <ul>
+                                <li>Inventory tracks name, strength, formulation, quantity, expiration, storage, control level, notes, photos, barcode aliases, prescriber, and member assignment.</li>
+                                <li>For tablets, capsules, mL, sprays, drops, and similar items, administered doses reduce stock.</li>
+                                <li>For container-based products such as many topicals, stock can stay unchanged until the container is marked finished.</li>
+                                <li>Use <strong>Restock</strong> to add received quantities directly to inventory.</li>
+                                <li>Use <strong>Print Inventory Labels</strong> or individual Label buttons to generate inventory labels.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>5. Med Kits</legend>
+                            <ul>
+                                <li>Use <strong>Inventory &gt; Med Kits</strong> to create named kits such as Travel Kit, Emergency Kit, School Kit, Work Kit, or First Aid Kit.</li>
+                                <li>Search inventory items, enter a quantity, and add them into the selected kit.</li>
+                                <li>Adding an item to a kit subtracts that quantity from main inventory.</li>
+                                <li>Returning an item or deleting a kit sends kit quantities back to main inventory.</li>
+                                <li>Kits and kit items turn red when any item is expired or expiring within 10 days.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>6. Formulary & Orders</legend>
+                            <ul>
+                                <li>The formulary is a master reorder list. It can include inventory items and non-inventory items.</li>
+                                <li>Create Orders can add low/expired items, formulary items, current inventory, or new non-inventory items.</li>
+                                <li>New non-inventory order items are highlighted yellow until received and entered into inventory.</li>
+                                <li>The Order Log lets you edit active orders, delete order records, generate PDFs, and modify received order records.</li>
+                                <li>Prices are line prices for the ordered item, not price multiplied by tablets, mL, capsules, or units.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>7. Prepackaging & Labels</legend>
+                            <ul>
+                                <li>Prepack queues can be created for date ranges and later printed when it is time to prepare doses.</li>
+                                <li>Use scanning when available, or use manual completion when a scanner is not available.</li>
+                                <li>Prepack labels can be grouped by all times, daytime, or evening.</li>
+                                <li>If medications change after labels are generated, affected prepacks are marked for reprint.</li>
+                                <li>Inventory labels can include QR/barcode codes for verification workflows.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>8. Monitoring & Reports</legend>
+                            <ul>
+                                <li>Monitoring supports BP/HR, blood glucose, weight, temperature, INR, drug levels, and custom lab goals.</li>
+                                <li>Member profiles display monitoring graphs, adherence, calendars, active orders, PRN orders, completed schedules, and administration logs.</li>
+                                <li>PDFs are available for inventory, schedules, monitoring, formulary, and inventory orders.</li>
+                                <li>Schedule PDFs can be used as paper check-off sheets for trips, caregivers, or periods away from the app.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card help-wide">
+                            <legend>Safety Checklist Before Real Use</legend>
+                            <div class="help-checklist">
+                                <label><input type="checkbox"> Verify medication names, strengths, formulations, and doses.</label>
+                                <label><input type="checkbox"> Confirm start dates, end dates, frequencies, and administration times.</label>
+                                <label><input type="checkbox"> Review allergies, intolerances, linked medications, and PRN maximum dose settings.</label>
+                                <label><input type="checkbox"> Test labels with your printer before relying on a large print job.</label>
+                                <label><input type="checkbox"> Test inventory subtraction for each formulation type you use.</label>
+                                <label><input type="checkbox"> Confirm Med Kit stock movements match your real-world kit counts.</label>
+                                <label><input type="checkbox"> Create a backup after important updates.</label>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="help-card help-wide">
+                            <legend>Troubleshooting</legend>
+                            <div class="help-troubleshooting">
+                                <div><strong>Text or windows look cramped:</strong><span>Use the app at normal desktop scaling when possible. Wide windows and taskbar-minimized workspaces are designed for desktop use.</span></div>
+                                <div><strong>Printer preview is unavailable:</strong><span>Use PharmAtlas label preview first, then print. Some embedded print engines do not expose a native preview screen.</span></div>
+                                <div><strong>Inventory stock looks wrong:</strong><span>Check whether the dose was documented from main inventory, a Med Kit, or a container-finish workflow.</span></div>
+                                <div><strong>Order item is yellow:</strong><span>It is a new non-inventory item and needs full product details during receiving.</span></div>
+                                <div><strong>Administration history changed after editing:</strong><span>Use the timeline and administration log to edit documentation rather than recreating schedules whenever possible.</span></div>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="help-card help-wide">
+                            <legend>Important Note</legend>
+                            <p>PharmAtlas is an organization and documentation tool. It does not replace a licensed prescriber, pharmacist, clinical medication review, or emergency care. Always verify medication instructions, vaccine decisions, and monitoring goals with qualified healthcare professionals.</p>
+                        </fieldset>
+                    </div>
                 </div>
 
                 <!-- 4. FAMILY -->

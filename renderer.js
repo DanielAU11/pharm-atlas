@@ -10,7 +10,8 @@ const emptyDb = {
     reminderLog: [],
     prepackQueues: [],
     formularyItems: [],
-    inventoryOrders: []
+    inventoryOrders: [],
+    medKits: []
 };
 let db = { ...emptyDb };
 let currentEditingMedId = null;
@@ -48,6 +49,7 @@ let memberTimelineStart = null;
 let dashboardCalendarStart = localDateKey();
 let memberCalendarStart = localDateKey();
 let activePrepackQueueId = null;
+let activeMedKitId = null;
 let prepackScanTimer = null;
 let pendingScheduleOrders = [];
 let pendingNewMedImage = null;
@@ -1728,6 +1730,91 @@ function inventoryUnitFor(med) {
     return med?.inventoryUnit || (usesContainerTracking(med) ? 'container' : (med?.administrationUnit || med?.formulation || 'unit(s)'));
 }
 
+function ensureMedKits() {
+    db.medKits = Array.isArray(db.medKits) ? db.medKits : [];
+}
+
+function medKitName(kit) {
+    return String(kit?.name || '').trim() || 'Unnamed Kit';
+}
+
+function medKitItemId() {
+    return `kit_item_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function kitItemMed(item) {
+    return db.inventory.find(med => med.id === item.medId) || null;
+}
+
+function isExpiringWithinDays(dateValue, days = 10) {
+    const date = parseLocal(dateValue);
+    if (!date) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() + days);
+    return date <= cutoff;
+}
+
+function medKitHasExpiringSoon(kit) {
+    return (kit?.items || []).some(item => isExpiringWithinDays(item.expiry, 10));
+}
+
+function kitSourceOptionsForMed(medId) {
+    ensureMedKits();
+    const sources = [];
+    db.medKits.forEach(kit => {
+        (kit.items || []).forEach(item => {
+            if (item.medId === medId && parseAmount(item.qty, 0) > 0) {
+                sources.push({ kit, item });
+            }
+        });
+    });
+    return sources;
+}
+
+function kitSourceSelectHtml(medId) {
+    const sources = kitSourceOptionsForMed(medId);
+    if (sources.length === 0) return '';
+    const options = sources.map(({ kit, item }) => {
+        const med = kitItemMed(item);
+        const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
+        return `<option value="${escapeHtml(`${kit.id}|${item.id}`)}">${escapeHtml(`${medKitName(kit)} - ${formatAmount(parseAmount(item.qty))} ${unit} available`)}</option>`;
+    }).join('');
+    return `<div class="field-row" style="margin-top:8px;">
+        <label>Inventory source:</label>
+        <select name="inventorySource" style="width:260px;">
+            <option value="main">Main inventory</option>
+            ${options}
+        </select>
+    </div>`;
+}
+
+function consumeFromKitSource(sourceValue, med, qty) {
+    if (!sourceValue || sourceValue === 'main') return { sourceLabel: 'Main inventory', kitItem: null };
+    const [kitId, itemId] = String(sourceValue).split('|');
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const item = kit?.items?.find(candidate => candidate.id === itemId && candidate.medId === med.id);
+    if (!kit || !item) return { error: 'The selected med kit item could not be found.' };
+    if (parseAmount(item.qty, 0) < qty) {
+        return { error: `Insufficient kit quantity. ${medKitName(kit)} has ${formatAmount(parseAmount(item.qty))} ${inventoryUnitFor(med)}.` };
+    }
+    item.qty = parseAmount(item.qty, 0) - qty;
+    if (item.qty <= 0) kit.items = kit.items.filter(candidate => candidate.id !== item.id);
+    kit.updatedAt = new Date().toISOString();
+    return { sourceLabel: `Med Kit (${medKitName(kit)})`, kitItem: item };
+}
+
+function returnKitItemToInventory(kit, item) {
+    const med = kitItemMed(item);
+    if (!med) return false;
+    med.stock = parseAmount(med.stock, 0) + parseAmount(item.qty, 0);
+    if (parseAmount(med.maxCapacity, 0) < parseAmount(med.stock, 0)) med.maxCapacity = med.stock;
+    kit.items = (kit.items || []).filter(candidate => candidate.id !== item.id);
+    kit.updatedAt = new Date().toISOString();
+    return true;
+}
+
 function defaultActualDateTime() {
     const now = new Date();
     return {
@@ -1754,6 +1841,7 @@ async function requestActualAdministration(title, extraHtml = '', confirmText = 
 }
 
 async function requestScheduledDoseDocumentation(schedule, title) {
+    const med = db.inventory.find(item => item.id === schedule.medId);
     const defaults = defaultActualDateTime();
     const range = getInstanceSelectionRange(schedule);
     const instances = getScheduleInstancesInRange(schedule, range.start, range.end);
@@ -1792,6 +1880,7 @@ async function requestScheduledDoseDocumentation(schedule, title) {
             <label>Date documented/taken:</label><input name="actualDate" type="date" value="${defaults.date}">
             <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
         </div>
+        ${med ? kitSourceSelectHtml(med.id) : ''}
         <div class="field-row-stacked" style="margin-top:8px;">
             <label>Note:</label>
             <textarea name="doseNote" rows="2" style="width:100%; resize:none;" placeholder="Optional note"></textarea>
@@ -2784,7 +2873,7 @@ window.adminOrderSetToggleLinked = function(input) {
 };
 
 window.switchTab = function(tabName) {
-    const tabs = ['dashboard', 'schedules', 'prepackage', 'order-sets', 'vitals', 'inventory', 'drug-info', 'family'];
+    const tabs = ['dashboard', 'schedules', 'prepackage', 'order-sets', 'vitals', 'inventory', 'family', 'drug-info', 'help'];
     tabs.forEach(t => {
         const tabElement = document.getElementById(`tab-${t}`);
         const panelElement = document.getElementById(`panel-${t}`);
@@ -3625,6 +3714,7 @@ window.takeDose = async function(medId) {
             <label>Amount taken (${escapeHtml(administrationUnit)}):</label>
             <input name="amountTaken" type="number" min="0" step="any" value="1">
         </div>
+        ${kitSourceSelectHtml(med.id)}
         <div class="field-row-stacked" style="margin-top:8px;">
             <label>Note / reason given:</label>
             <textarea name="adminNote" rows="2" style="width:100%; resize:none;"></textarea>
@@ -3641,12 +3731,23 @@ window.takeDose = async function(medId) {
         await appAlert("Enter an amount taken greater than 0.");
         return;
     }
-    if (!usesContainerTracking(med) && parseAmount(med.stock) < amountTaken) {
-        await appAlert("Insufficient stock.");
-        return;
+    let stockSourceLabel = 'Main inventory';
+    if (!usesContainerTracking(med)) {
+        if (result.inventorySource && result.inventorySource !== 'main') {
+            const kitResult = consumeFromKitSource(result.inventorySource, med, amountTaken);
+            if (kitResult.error) {
+                await appAlert(kitResult.error);
+                return;
+            }
+            stockSourceLabel = kitResult.sourceLabel;
+        } else {
+            if (parseAmount(med.stock) < amountTaken) {
+                await appAlert("Insufficient stock.");
+                return;
+            }
+            med.stock = parseAmount(med.stock) - amountTaken;
+        }
     }
-
-    if (!usesContainerTracking(med)) med.stock = parseAmount(med.stock) - amountTaken;
     db.history.unshift({
         id: Date.now().toString(),
         timestamp: formatActualTimestamp(result),
@@ -3654,7 +3755,7 @@ window.takeDose = async function(medId) {
         memberName: memberDisplayName(member),
         medId: med.id,
         medName: med.name,
-        details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}${usesContainerTracking(med) ? `; ${inventoryUnitFor(med)} inventory unchanged until a container is marked finished` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
+        details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}; Source: ${stockSourceLabel}${usesContainerTracking(med) ? `; ${inventoryUnitFor(med)} inventory unchanged until a container is marked finished` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
     });
     await sync();
 };
@@ -3683,6 +3784,244 @@ window.restockMed = async function(medId) {
     }
 };
 window.refillMed = window.restockMed;
+
+function medKitInventoryOptionsHtml() {
+    return sortByName(db.inventory, inventoryDisplayName).map(med =>
+        `<option value="${escapeHtml(med.id)}">${escapeHtml(inventoryDisplayName(med))} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</option>`
+    ).join('');
+}
+
+function medKitInventoryDatalistHtml() {
+    return sortByName(db.inventory, inventoryDisplayName).map(med =>
+        `<option value="${escapeHtml(inventoryDisplayName(med))}" data-id="${escapeHtml(med.id)}">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</option>`
+    ).join('');
+}
+
+function selectedMedKitInventoryMedication() {
+    const search = document.getElementById('med-kit-add-med-search');
+    const hidden = document.getElementById('med-kit-add-med-id');
+    const medId = hidden?.value || '';
+    const byId = medId ? db.inventory.find(med => med.id === medId) : null;
+    if (byId) return byId;
+    const query = String(search?.value || '').trim().toLowerCase();
+    return db.inventory.find(med => inventoryDisplayName(med).toLowerCase() === query)
+        || db.inventory.find(med => inventorySearchText(med).includes(query))
+        || null;
+}
+
+function setMedKitMessage(message, tone = '') {
+    const target = document.getElementById('med-kit-message');
+    if (!target) return;
+    target.className = `med-kit-message ${tone}`;
+    target.textContent = message || '';
+}
+
+function renderMedKitsWorkspace() {
+    ensureMedKits();
+    const target = document.getElementById('med-kit-workspace');
+    if (!target) return;
+    if (!activeMedKitId && db.medKits.length) activeMedKitId = db.medKits[0].id;
+    const activeKit = db.medKits.find(kit => kit.id === activeMedKitId) || null;
+    const kitButtons = db.medKits.map(kit => {
+        const expiring = medKitHasExpiringSoon(kit);
+        return `<button type="button" class="med-kit-tab ${kit.id === activeMedKitId ? 'active' : ''} ${expiring ? 'expiring' : ''}" onclick="selectMedKit('${escapeHtml(kit.id)}')">
+            <span class="win98-icon icon-box"></span>${escapeHtml(medKitName(kit))}
+        </button>`;
+    }).join('');
+    const itemRows = activeKit
+        ? (activeKit.items || []).map(item => {
+            const med = kitItemMed(item);
+            const expiring = isExpiringWithinDays(item.expiry, 10);
+            return `<tr class="${expiring ? 'kit-expiring-row' : ''}">
+                <td class="${expiring ? 'kit-expiring-text' : ''}">${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'Unknown item')}</td>
+                <td>${escapeHtml(formatAmount(parseAmount(item.qty)))} ${escapeHtml(med ? inventoryUnitFor(med) : item.unit || 'unit')}</td>
+                <td class="${expiring ? 'kit-expiring-text' : ''}">${escapeHtml(item.expiry || med?.expiry || 'N/A')}</td>
+                <td><button type="button" onclick="returnMedKitItem('${escapeHtml(activeKit.id)}','${escapeHtml(item.id)}')">Return</button></td>
+            </tr>`;
+        }).join('')
+        : '';
+    target.innerHTML = `
+        <div class="med-kit-shell">
+            <aside class="med-kit-left">
+                <div class="med-kit-toolbar"><button type="button" onclick="createMedKit()">+ New Kit</button></div>
+                <div class="med-kit-tabs">${kitButtons || '<div class="empty-state">No kits yet.</div>'}</div>
+            </aside>
+            <section class="med-kit-right">
+                ${activeKit ? `
+                    <div class="med-kit-header">
+                        <div class="field-row">
+                            <label>Kit name:</label>
+                            <input id="med-kit-name-input" type="text" value="${escapeHtml(medKitName(activeKit))}" style="width:260px;">
+                            <button type="button" onclick="saveMedKitName('${escapeHtml(activeKit.id)}')">Save Name</button>
+                            <button type="button" onclick="deleteMedKit('${escapeHtml(activeKit.id)}')">Delete Kit</button>
+                        </div>
+                    </div>
+                    <fieldset>
+                        <legend>Add From Inventory</legend>
+                        <div class="med-kit-add-row">
+                            <input id="med-kit-add-med-search" type="search" list="med-kit-inventory-options" placeholder="Search inventory medication..." oninput="updateMedKitSelectedMed()" onchange="updateMedKitSelectedMed()">
+                            <input id="med-kit-add-med-id" type="hidden">
+                            <datalist id="med-kit-inventory-options">${medKitInventoryDatalistHtml()}</datalist>
+                            <input id="med-kit-add-qty" type="number" min="0" step="any" placeholder="Quantity" title="Quantity to move into this kit">
+                            <input id="med-kit-add-expiry" type="date" title="Kit item expiration date">
+                            <button type="button" onclick="addMedKitItem('${escapeHtml(activeKit.id)}')">Add to Kit</button>
+                        </div>
+                    </fieldset>
+                    <div id="med-kit-message" class="med-kit-message"></div>
+                    <div class="sunken-panel med-kit-table-wrap">
+                        <table class="interactive med-kit-table">
+                            <thead><tr><th>Medication</th><th>Kit Qty</th><th>Expiry</th><th>Action</th></tr></thead>
+                            <tbody>${itemRows || '<tr><td colspan="4">No medications in this kit.</td></tr>'}</tbody>
+                        </table>
+                    </div>
+                    <div class="form-help">Adding to a kit subtracts that quantity from main inventory. Returning an item adds it back.</div>
+                ` : '<div class="empty-state">Create a med kit to begin.</div>'}
+            </section>
+        </div>`;
+    enhanceButtonIcons(target);
+}
+
+window.openMedKits = async function() {
+    ensureMedKits();
+    if (!activeMedKitId && db.medKits.length) activeMedKitId = db.medKits[0].id;
+    const promise = showActionModal('Med Kits', `
+        <div data-action-modal-size="wide" id="med-kit-workspace"></div>
+    `, 'Close');
+    renderMedKitsWorkspace();
+    await promise;
+};
+
+window.selectMedKit = function(kitId) {
+    activeMedKitId = kitId;
+    renderMedKitsWorkspace();
+};
+
+window.updateMedKitSelectedMed = function() {
+    const search = document.getElementById('med-kit-add-med-search');
+    const hidden = document.getElementById('med-kit-add-med-id');
+    const expiry = document.getElementById('med-kit-add-expiry');
+    if (!search || !hidden) return;
+    const value = search.value.trim().toLowerCase();
+    const med = db.inventory.find(item => inventoryDisplayName(item).toLowerCase() === value)
+        || db.inventory.find(item => inventorySearchText(item).includes(value));
+    hidden.value = med?.id || '';
+    if (expiry && med?.expiry) expiry.value = med.expiry;
+};
+
+window.createMedKit = async function() {
+    ensureMedKits();
+    const kit = {
+        id: `kit_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: `Med Kit ${db.medKits.length + 1}`,
+        items: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+    db.medKits.push(kit);
+    activeMedKitId = kit.id;
+    await sync();
+    renderMedKitsWorkspace();
+};
+
+window.saveMedKitName = async function(kitId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const input = document.getElementById('med-kit-name-input');
+    if (!kit || !input) return;
+    const name = input.value.trim();
+    if (!name) {
+        setMedKitMessage('Enter a kit name before saving.', 'error');
+        return;
+    }
+    kit.name = name;
+    kit.updatedAt = new Date().toISOString();
+    await sync();
+    renderMedKitsWorkspace();
+    setMedKitMessage('Kit name saved.', 'ok');
+};
+
+window.addMedKitItem = async function(kitId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const med = selectedMedKitInventoryMedication();
+    const qty = parseAmount(document.getElementById('med-kit-add-qty')?.value, NaN);
+    const expiryInput = document.getElementById('med-kit-add-expiry')?.value || '';
+    if (!kit) return;
+    if (!med) {
+        setMedKitMessage('Search for and select an inventory medication before adding it to the kit.', 'error');
+        return;
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+        setMedKitMessage('Enter a quantity greater than 0.', 'error');
+        return;
+    }
+    if (parseAmount(med.stock, 0) < qty) {
+        setMedKitMessage(`Insufficient main inventory. ${med.name} has ${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}.`, 'error');
+        return;
+    }
+    const expiry = expiryInput || med.expiry || '';
+    med.stock = parseAmount(med.stock, 0) - qty;
+    kit.items = kit.items || [];
+    const existing = kit.items.find(item => item.medId === med.id && (item.expiry || '') === expiry);
+    if (existing) {
+        existing.qty = parseAmount(existing.qty, 0) + qty;
+    } else {
+        kit.items.push({
+            id: medKitItemId(),
+            medId: med.id,
+            name: inventoryDisplayName(med),
+            qty,
+            unit: inventoryUnitFor(med),
+            expiry,
+            addedAt: new Date().toISOString()
+        });
+    }
+    kit.updatedAt = new Date().toISOString();
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: med.name,
+        details: `Moved ${formatAmount(qty)} ${inventoryUnitFor(med)} from main inventory to ${medKitName(kit)}.`
+    });
+    await sync();
+    renderMedKitsWorkspace();
+    setMedKitMessage(`${med.name} added to ${medKitName(kit)}.`, 'ok');
+};
+
+window.returnMedKitItem = async function(kitId, itemId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const item = kit?.items?.find(candidate => candidate.id === itemId);
+    if (!kit || !item) return;
+    const med = kitItemMed(item);
+    const qty = parseAmount(item.qty, 0);
+    if (!returnKitItemToInventory(kit, item)) {
+        setMedKitMessage('This kit item is not linked to an inventory medication anymore.', 'error');
+        return;
+    }
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: med?.name || item.name || 'Medication',
+        details: `Returned ${formatAmount(qty)} ${med ? inventoryUnitFor(med) : item.unit || 'unit'} from ${medKitName(kit)} to main inventory.`
+    });
+    await sync();
+    renderMedKitsWorkspace();
+    setMedKitMessage('Item returned to main inventory.', 'ok');
+};
+
+window.deleteMedKit = async function(kitId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    if (!kit) return;
+    (kit.items || []).slice().forEach(item => returnKitItemToInventory(kit, item));
+    db.medKits = db.medKits.filter(candidate => candidate.id !== kitId);
+    activeMedKitId = db.medKits[0]?.id || null;
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: medKitName(kit),
+        details: 'Deleted med kit and returned contents to main inventory.'
+    });
+    await sync();
+    renderMedKitsWorkspace();
+};
 
 window.deleteMed = async function(id) {
     const scheduleCount = db.schedules.filter(s => s.medId === id).length;
@@ -6433,6 +6772,7 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
             <label>Date documented/taken:</label><input name="actualDate" type="date" value="${defaults.date}">
             <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
         </div>
+        ${kitSourceSelectHtml(med.id)}
         <div class="field-row-stacked" style="margin-top:8px;">
             <label>Note:</label>
             <textarea name="doseNote" rows="3" style="width:100%; resize:none;" placeholder="Optional note"></textarea>
@@ -7455,7 +7795,7 @@ window.addSchedule = async function() {
 };
 
 
-async function getAdministrationStockPlan(med, sched) {
+async function getAdministrationStockPlan(med, sched, actual = {}) {
     const doseUnit = med.administrationUnit || med.formulation || 'unit(s)';
     if (usesContainerTracking(med)) {
         return {
@@ -7465,13 +7805,24 @@ async function getAdministrationStockPlan(med, sched) {
     }
 
     const qtyToSubtract = parseAmount(sched.doseQty, 0);
+    if (actual.inventorySource && actual.inventorySource !== 'main') {
+        const kitResult = consumeFromKitSource(actual.inventorySource, med, qtyToSubtract);
+        if (kitResult.error) {
+            await appAlert(kitResult.error);
+            return null;
+        }
+        return {
+            qtyToSubtract: 0,
+            logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from ${kitResult.sourceLabel}`
+        };
+    }
     if (parseAmount(med.stock) < qtyToSubtract) {
         await appAlert(`Insufficient stock. You need ${formatAmount(qtyToSubtract)}, but only have ${formatAmount(parseAmount(med.stock))} left.`);
         return null;
     }
     return {
         qtyToSubtract,
-        logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit}`
+        logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from Main inventory`
     };
 }
 
@@ -7557,7 +7908,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
     }
 
     const stockPlan = isGivenDose
-        ? await getAdministrationStockPlan(med, sched)
+        ? await getAdministrationStockPlan(med, sched, actual)
         : { qtyToSubtract: 0, logDetail: 'No dose administered' };
     if (!stockPlan) return false;
 
@@ -7781,6 +8132,7 @@ window.administerDose = async function(medId, scheduleId) {
                     <option value="missed">Missed / forgotten</option>
                 </select>
             </div>
+            ${kitSourceSelectHtml(med.id)}
             <div class="field-row-stacked" style="margin-top:8px;">
                 <label>Note:</label><textarea name="doseNote" rows="2" style="width:100%; resize:none;"></textarea>
             </div>

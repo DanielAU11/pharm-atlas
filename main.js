@@ -182,7 +182,8 @@ ipcMain.handle('load-db', () => {
         reminderLog: [],
         prepackQueues: [],
         formularyItems: [],
-        inventoryOrders: []
+        inventoryOrders: [],
+        medKits: []
     };
     const data = fs.readFileSync(dbPath, 'utf8');
     return JSON.parse(data);
