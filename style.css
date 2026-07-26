@@ -791,6 +791,44 @@ button {
 
 .med-kit-table {
     width: 100%;
+    table-layout: fixed;
+}
+
+.med-kit-table th,
+.med-kit-table td {
+    padding: 4px 6px;
+    vertical-align: middle;
+    line-height: 1.35;
+}
+
+.med-kit-table th:first-child,
+.med-kit-table td:first-child {
+    width: 42%;
+    white-space: normal;
+    word-break: normal;
+}
+
+.med-kit-table th:last-child,
+.med-kit-table td:last-child {
+    width: 360px;
+}
+
+.med-kit-action-cell {
+    min-width: 360px;
+}
+
+.med-kit-row-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(104px, 1fr));
+    gap: 4px;
+    align-items: center;
+}
+
+.med-kit-row-actions button {
+    width: 100%;
+    min-height: 24px;
+    justify-content: center;
+    white-space: nowrap;
 }
 
 .kit-expiring-text {
@@ -800,6 +838,19 @@ button {
 
 .kit-expiring-row {
     background: #fff0f0;
+}
+
+.choice-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 5px 0;
+    font-size: 11px;
+}
+
+.error-text {
+    color: #b00000;
+    font-weight: bold;
 }
 
 #panel-help {

@@ -1815,6 +1815,12 @@ function returnKitItemToInventory(kit, item) {
     return true;
 }
 
+function removeKitItemFromKit(kit, item) {
+    if (!kit || !item) return;
+    kit.items = (kit.items || []).filter(candidate => candidate.id !== item.id);
+    kit.updatedAt = new Date().toISOString();
+}
+
 function defaultActualDateTime() {
     const now = new Date();
     return {
@@ -3832,11 +3838,18 @@ function renderMedKitsWorkspace() {
         ? (activeKit.items || []).map(item => {
             const med = kitItemMed(item);
             const expiring = isExpiringWithinDays(item.expiry, 10);
+            const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
             return `<tr class="${expiring ? 'kit-expiring-row' : ''}">
                 <td class="${expiring ? 'kit-expiring-text' : ''}">${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'Unknown item')}</td>
-                <td>${escapeHtml(formatAmount(parseAmount(item.qty)))} ${escapeHtml(med ? inventoryUnitFor(med) : item.unit || 'unit')}</td>
+                <td>${escapeHtml(formatAmount(parseAmount(item.qty)))} ${escapeHtml(unit)}</td>
                 <td class="${expiring ? 'kit-expiring-text' : ''}">${escapeHtml(item.expiry || med?.expiry || 'N/A')}</td>
-                <td><button type="button" onclick="returnMedKitItem('${escapeHtml(activeKit.id)}','${escapeHtml(item.id)}')">Return</button></td>
+                <td class="med-kit-action-cell">
+                    <div class="med-kit-row-actions">
+                        <button type="button" onclick="restockMedKitItem('${escapeHtml(activeKit.id)}','${escapeHtml(item.id)}')">Restock</button>
+                        <button type="button" onclick="adjustMedKitItemQuantity('${escapeHtml(activeKit.id)}','${escapeHtml(item.id)}')">Adjust Quantity</button>
+                        <button type="button" onclick="returnOrDiscardMedKitItem('${escapeHtml(activeKit.id)}','${escapeHtml(item.id)}')">Return/Discard</button>
+                    </div>
+                </td>
             </tr>`;
         }).join('')
         : '';
@@ -3870,11 +3883,11 @@ function renderMedKitsWorkspace() {
                     <div id="med-kit-message" class="med-kit-message"></div>
                     <div class="sunken-panel med-kit-table-wrap">
                         <table class="interactive med-kit-table">
-                            <thead><tr><th>Medication</th><th>Kit Qty</th><th>Expiry</th><th>Action</th></tr></thead>
+                            <thead><tr><th>Medication</th><th>Kit Qty</th><th>Expiry</th><th>Actions</th></tr></thead>
                             <tbody>${itemRows || '<tr><td colspan="4">No medications in this kit.</td></tr>'}</tbody>
                         </table>
                     </div>
-                    <div class="form-help">Adding to a kit subtracts that quantity from main inventory. Returning an item adds it back.</div>
+                    <div class="form-help">Adding or restocking into a kit subtracts that quantity from main inventory. Adjust Quantity corrects the kit count only. Return/Discard removes the item from the kit and lets you choose whether it goes back to main inventory.</div>
                 ` : '<div class="empty-state">Create a med kit to begin.</div>'}
             </section>
         </div>`;
@@ -3984,6 +3997,137 @@ window.addMedKitItem = async function(kitId) {
     await sync();
     renderMedKitsWorkspace();
     setMedKitMessage(`${med.name} added to ${medKitName(kit)}.`, 'ok');
+};
+
+window.restockMedKitItem = async function(kitId, itemId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const item = kit?.items?.find(candidate => candidate.id === itemId);
+    if (!kit || !item) return;
+    const med = kitItemMed(item);
+    const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
+    if (!med) {
+        setMedKitMessage('This kit item is not linked to an inventory medication anymore.', 'error');
+        return;
+    }
+    const result = await showActionModal('Restock Med Kit Item', `
+        <div style="font-size:11px; margin-bottom:8px;">
+            Add more <strong>${escapeHtml(inventoryDisplayName(med))}</strong> to <strong>${escapeHtml(medKitName(kit))}</strong>.
+        </div>
+        <div class="field-row">
+            <label>Amount to add:</label>
+            <input name="qty" type="number" min="0" step="any" placeholder="Quantity" style="width:120px;">
+            <span>${escapeHtml(unit)}</span>
+        </div>
+        <div class="form-help">This subtracts the amount from main inventory.</div>
+    `, 'Restock');
+    if (!result) return;
+    const qty = parseAmount(result.qty, NaN);
+    if (!Number.isFinite(qty) || qty <= 0) {
+        setMedKitMessage('Enter a quantity greater than 0.', 'error');
+        return;
+    }
+    if (parseAmount(med.stock, 0) < qty) {
+        setMedKitMessage(`Insufficient main inventory. ${med.name} has ${formatAmount(parseAmount(med.stock))} ${unit}.`, 'error');
+        return;
+    }
+    med.stock = parseAmount(med.stock, 0) - qty;
+    item.qty = parseAmount(item.qty, 0) + qty;
+    item.unit = unit;
+    kit.updatedAt = new Date().toISOString();
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: med.name,
+        details: `Restocked ${formatAmount(qty)} ${unit} into ${medKitName(kit)} from main inventory.`
+    });
+    await sync();
+    renderMedKitsWorkspace();
+    setMedKitMessage(`${med.name} kit quantity increased by ${formatAmount(qty)} ${unit}.`, 'ok');
+};
+
+window.adjustMedKitItemQuantity = async function(kitId, itemId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const item = kit?.items?.find(candidate => candidate.id === itemId);
+    if (!kit || !item) return;
+    const med = kitItemMed(item);
+    const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
+    const currentQty = parseAmount(item.qty, 0);
+    const result = await showActionModal('Adjust Med Kit Quantity', `
+        <div style="font-size:11px; margin-bottom:8px;">
+            Correct the kit count for <strong>${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'this item')}</strong>.
+        </div>
+        <div class="field-row">
+            <label>Exact kit quantity:</label>
+            <input name="qty" type="number" min="0" step="any" value="${escapeHtml(String(currentQty))}" style="width:120px;">
+            <span>${escapeHtml(unit)}</span>
+        </div>
+        <div class="form-help">This fixes the kit count only and does not move anything in or out of main inventory.</div>
+    `, 'Adjust Quantity');
+    if (!result) return;
+    const qty = parseAmount(result.qty, NaN);
+    if (!Number.isFinite(qty) || qty < 0) {
+        setMedKitMessage('Enter a valid quantity of 0 or greater.', 'error');
+        return;
+    }
+    if (qty === 0) {
+        removeKitItemFromKit(kit, item);
+    } else {
+        item.qty = qty;
+        item.unit = unit;
+        kit.updatedAt = new Date().toISOString();
+    }
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: med?.name || item.name || 'Medication',
+        details: `Adjusted ${medKitName(kit)} kit count from ${formatAmount(currentQty)} ${unit} to ${formatAmount(qty)} ${unit}. Main inventory unchanged.`
+    });
+    await sync();
+    renderMedKitsWorkspace();
+    setMedKitMessage('Kit quantity adjusted.', 'ok');
+};
+
+window.returnOrDiscardMedKitItem = async function(kitId, itemId) {
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    const item = kit?.items?.find(candidate => candidate.id === itemId);
+    if (!kit || !item) return;
+    const med = kitItemMed(item);
+    const qty = parseAmount(item.qty, 0);
+    const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
+    const result = await showActionModal('Return/Discard Kit Item', `
+        <div style="font-size:11px; margin-bottom:8px;">
+            Remove <strong>${escapeHtml(formatAmount(qty))} ${escapeHtml(unit)}</strong> of
+            <strong>${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'this item')}</strong>
+            from <strong>${escapeHtml(medKitName(kit))}</strong>.
+        </div>
+        <label class="choice-row">
+            <input type="radio" name="handling" value="return" ${med ? 'checked' : 'disabled'}>
+            Return to main inventory
+        </label>
+        <label class="choice-row">
+            <input type="radio" name="handling" value="discard" ${med ? '' : 'checked'}>
+            Discard / remove without returning to inventory
+        </label>
+        ${med ? '' : '<div class="form-help error-text">This kit item is no longer linked to inventory, so it can only be discarded from the kit.</div>'}
+    `, 'Continue');
+    if (!result) return;
+    if (result.handling === 'return') {
+        if (!returnKitItemToInventory(kit, item)) {
+            setMedKitMessage('This kit item is not linked to an inventory medication anymore.', 'error');
+            return;
+        }
+    } else {
+        removeKitItemFromKit(kit, item);
+    }
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: med?.name || item.name || 'Medication',
+        details: `${result.handling === 'return' ? 'Returned' : 'Discarded'} ${formatAmount(qty)} ${unit} from ${medKitName(kit)}${result.handling === 'return' ? ' to main inventory' : ''}.`
+    });
+    await sync();
+    renderMedKitsWorkspace();
+    setMedKitMessage(result.handling === 'return' ? 'Item returned to main inventory.' : 'Item discarded from med kit.', 'ok');
 };
 
 window.returnMedKitItem = async function(kitId, itemId) {
