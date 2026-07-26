@@ -464,6 +464,11 @@ button {
     margin-bottom: 3px;
 }
 
+.order-total-line {
+    color: #008000;
+    font-weight: bold;
+}
+
 .formulary-grid,
 .order-line-list {
     display: grid;
@@ -478,7 +483,7 @@ button {
 .formulary-item,
 .order-line-item {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     gap: 6px;
     align-items: center;
     border-bottom: 1px dotted #c0c0c0;
@@ -494,12 +499,26 @@ button {
 }
 
 .inventory-builder-source .formulary-item {
-    grid-template-columns: auto minmax(240px, 1fr) 88px minmax(110px, 165px);
-    align-items: center;
+    grid-template-columns: auto minmax(0, 1fr) 88px 88px minmax(150px, 220px);
+    grid-template-areas:
+        "check label label label label"
+        ". qty price link link";
+    align-items: start;
+    background: #ffffff;
+    padding: 5px;
 }
 
-.inventory-builder-source .formulary-item > input[type="text"] {
-    grid-column: auto;
+.inventory-builder-source .formulary-item > input[type="checkbox"] {
+    grid-area: check;
+    margin-top: 2px;
+}
+
+.inventory-builder-source .formulary-item > label {
+    grid-area: label;
+}
+
+.inventory-builder-source .formulary-item > input[type="text"],
+.inventory-builder-source .formulary-item > input[type="url"] {
     width: 100%;
     box-sizing: border-box;
 }
@@ -511,17 +530,36 @@ button {
 .inventory-builder-source .formulary-item input[name^="candidateQty-"],
 .inventory-builder-source .formulary-item input[name^="otherInventoryQty-"],
 .inventory-builder-source .formulary-item input[name^="formularyQty-"],
+.inventory-builder-source .formulary-item input[name^="candidatePrice-"],
+.inventory-builder-source .formulary-item input[name^="otherInventoryPrice-"],
+.inventory-builder-source .formulary-item input[name^="formularyPrice-"],
 .inventory-builder-source .formulary-item input[name^="targetQty-"] {
+    grid-area: qty;
     width: 78px !important;
 }
 
+.inventory-builder-source .formulary-item input[name^="candidatePrice-"],
+.inventory-builder-source .formulary-item input[name^="otherInventoryPrice-"],
+.inventory-builder-source .formulary-item input[name^="formularyPrice-"] {
+    grid-area: price;
+    width: 88px !important;
+}
+
+.inventory-builder-source .formulary-item input[name^="candidateLink-"],
+.inventory-builder-source .formulary-item input[name^="otherInventoryLink-"],
+.inventory-builder-source .formulary-item input[name^="formularyLink-"] {
+    grid-area: link;
+    width: 100% !important;
+}
+
 .inventory-builder-source .formulary-item input[name^="notes-"] {
-    width: 150px !important;
+    grid-area: link;
+    width: 100% !important;
 }
 
 .formulary-custom-row {
     display: grid;
-    grid-template-columns: minmax(180px, 1.2fr) minmax(110px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(180px, 1fr) auto;
+    grid-template-columns: minmax(170px, 1.2fr) minmax(100px, 0.75fr) minmax(80px, 0.6fr) minmax(80px, 0.6fr) minmax(78px, 0.5fr) minmax(130px, 0.9fr) minmax(150px, 1fr) auto;
     gap: 5px;
     align-items: center;
     margin-bottom: 4px;
@@ -586,6 +624,120 @@ button {
 .inventory-builder-preview-text {
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.order-line-estimate,
+.order-estimated-total {
+    color: #008000;
+    font-weight: bold;
+}
+
+.order-estimated-total {
+    margin-top: 6px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #e8ffe8;
+    text-align: right;
+}
+
+.order-new-noninventory {
+    background: #fff4a8 !important;
+}
+
+.receive-line-received.order-new-noninventory {
+    background: #c8f0c8 !important;
+}
+
+.order-new-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 4px;
+    border: 1px solid #806000;
+    background: #ffffcc;
+    color: #6a4400;
+    font-size: 10px;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.inventory-order-log fieldset {
+    background: #c0c0c0;
+}
+
+.inventory-order-card {
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    margin: 6px 0;
+    padding: 6px;
+    font-size: 11px;
+}
+
+.inventory-order-card-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    border-bottom: 1px dotted #808080;
+    padding-bottom: 5px;
+    margin-bottom: 5px;
+}
+
+.inventory-order-card-head strong {
+    color: #000080;
+}
+
+.inventory-order-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.inventory-order-lines {
+    display: grid;
+    gap: 4px;
+}
+
+.order-log-line {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) repeat(5, minmax(88px, 0.8fr));
+    gap: 5px;
+    align-items: start;
+    padding: 4px;
+    border-bottom: 1px dotted #c0c0c0;
+}
+
+.order-log-line strong,
+.order-log-line .form-help {
+    overflow-wrap: anywhere;
+}
+
+.order-edit-list {
+    display: grid;
+    gap: 6px;
+    max-height: 520px;
+    overflow-y: auto;
+}
+
+.order-edit-line {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 110px 110px 150px minmax(180px, 1fr) minmax(150px, 1fr);
+    gap: 6px;
+    align-items: end;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 6px;
+    font-size: 11px;
+}
+
+.order-edit-line label {
+    display: grid;
+    gap: 2px;
+}
+
+.order-edit-line input {
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .inventory-builder-remove {
@@ -1909,6 +2061,99 @@ button {
 #member-vitals-trends {
     max-height: 260px;
     overflow-y: auto;
+}
+
+#member-adherence-chart {
+    background: #ffffff;
+    border: 2px inset #ffffff;
+    padding: 8px;
+    font-size: 11px;
+}
+
+.adherence-summary {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+    padding: 6px;
+    border: 1px solid #808080;
+    background: #f0f0f0;
+}
+
+.adherence-summary strong {
+    display: block;
+    font-size: 22px;
+    line-height: 24px;
+}
+
+.adherence-summary span {
+    font-size: 10px;
+}
+
+.adherence-summary.good strong { color: #008000; }
+.adherence-summary.watch strong { color: #a06000; }
+.adherence-summary.risk strong { color: #b00000; }
+
+.adherence-chart {
+    display: grid;
+    grid-template-columns: repeat(14, minmax(28px, 1fr));
+    gap: 4px;
+    align-items: end;
+    min-height: 128px;
+    padding: 6px;
+    border: 1px solid #808080;
+    background: linear-gradient(#ffffff, #f7f7f7);
+}
+
+.adherence-day {
+    display: grid;
+    grid-template-rows: 96px 16px;
+    gap: 3px;
+    min-width: 0;
+}
+
+.adherence-bar-frame {
+    display: flex;
+    align-items: end;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.adherence-bar {
+    width: 100%;
+    min-height: 2px;
+    border-top: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.adherence-bar.good,
+.adherence-legend i.good { background: #38a850; }
+.adherence-bar.watch,
+.adherence-legend i.watch { background: #ffd45a; }
+.adherence-bar.risk,
+.adherence-legend i.risk { background: #ff7070; }
+.adherence-bar.empty { background: #d0d0d0; }
+
+.adherence-day-label {
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+}
+
+.adherence-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
+}
+
+.adherence-legend i {
+    display: inline-block;
+    width: 12px;
+    height: 8px;
+    margin-right: 4px;
+    border: 1px solid #404040;
 }
 
 .modal-overlay {

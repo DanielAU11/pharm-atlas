@@ -1,4 +1,17 @@
-const emptyDb = { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [], formularyItems: [], inventoryOrders: [] };
+const emptyDb = {
+    family: [],
+    inventory: [],
+    schedules: [],
+    history: [],
+    recipes: [],
+    vitals: [],
+    orderSets: [],
+    prescribers: [],
+    reminderLog: [],
+    prepackQueues: [],
+    formularyItems: [],
+    inventoryOrders: []
+};
 let db = { ...emptyDb };
 let currentEditingMedId = null;
 let currentEditingMemberId = null;
@@ -938,6 +951,11 @@ function parseAmount(value, fallback = 0) {
     return Number.isFinite(amount) ? amount : fallback;
 }
 
+function parseMoney(value, fallback = 0) {
+    const amount = parseFloat(String(value || '').replace(/[$,\s]/g, ''));
+    return Number.isFinite(amount) ? amount : fallback;
+}
+
 function formatAmount(value) {
     const amount = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(amount)) return '0';
@@ -1161,6 +1179,12 @@ function formatQtyForSchedule(schedule, med) {
     const unitKey = String(rawUnit).toLowerCase();
     const unit = numericQty === 1 ? rawUnit : (pluralUnits[unitKey] || rawUnit);
     return `${qty} ${unit}`;
+}
+
+function formatCurrency(value) {
+    const amount = typeof value === 'number' ? value : parseMoney(value, NaN);
+    if (!Number.isFinite(amount)) return '$0.00';
+    return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
 function formatMultiMedLabelName(schedule, med) {
@@ -2782,6 +2806,7 @@ async function sync() {
     if (currentEditingMemberId && memberModal?.style.display === 'flex') {
         renderMemberAdministrationLog(currentEditingMemberId);
         renderMemberVitalProfile(currentEditingMemberId);
+        renderMemberAdherenceProfile(currentEditingMemberId);
         renderMemberMonitoringProfiles(currentEditingMemberId);
         renderMemberPrnMedicationOrders(currentEditingMemberId);
         renderMemberMedicationTimelines();
@@ -3235,6 +3260,7 @@ window.openMemberModal = async function(id = null) {
             renderCompletedMedicationOrders(m.id);
             renderMemberPrnMedicationOrders(m.id);
             renderMemberVitalProfile(m.id);
+            renderMemberAdherenceProfile(m.id);
             renderMemberAdministrationLog(m.id);
             renderMemberMedicationTimelines();
             renderMemberCalendar(m.id);
@@ -3243,6 +3269,8 @@ window.openMemberModal = async function(id = null) {
         if (title) title.innerHTML = `${memberTaskIconHtml(null)} <span>Add New Member</span>`;
         const profileVitals = document.getElementById('member-vitals-trends');
         if (profileVitals) profileVitals.innerHTML = '<div style="font-size:11px;">Save member before logging vitals.</div>';
+        const adherence = document.getElementById('member-adherence-chart');
+        if (adherence) adherence.innerHTML = '<div style="font-size:11px;">Save member before tracking adherence.</div>';
         const adminLog = document.getElementById('member-admin-log');
         if (adminLog) adminLog.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before recording administrations.</div>';
         const memberCalendar = document.getElementById('member-calendar-grid');
@@ -3554,7 +3582,6 @@ window.addInventory = async function() {
         barcodeCodes: [barcodeCode],
         imagePath: imagePath
     });
-
     document.getElementById('med-name').value = '';
     document.getElementById('med-strength').value = '';
     document.getElementById('med-per-amount').value = '1';
@@ -6160,6 +6187,90 @@ function renderMemberVitalProfile(memberId) {
     renderMemberVitalCharts(memberId, document.getElementById('member-vitals-trends'));
 }
 
+function memberAdherenceRows(memberId, days = 14) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(start.getDate() - (days - 1));
+    const now = new Date();
+    const rows = [];
+    const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq !== 'PRN');
+
+    for (let i = 0; i < days; i++) {
+        const cursor = new Date(start);
+        cursor.setDate(start.getDate() + i);
+        const date = localDateKey(cursor);
+        let due = 0;
+        let given = 0;
+        let exceptions = 0;
+
+        schedules.forEach(schedule => {
+            getScheduleInstancesForDate(schedule, date).forEach(instance => {
+                const instanceDateTime = new Date(`${instance.date}T${instance.time === 'PRN' ? '23:59' : instance.time}`);
+                if (instanceDateTime > now) return;
+                due++;
+                const entry = findHistoryForScheduleInstance(schedule, instance);
+                if (entry && isGivenStatus(entry.doseStatus || 'given')) given++;
+                else if (entry && ['skipped', 'missed'].includes(entry.doseStatus)) exceptions++;
+            });
+        });
+
+        rows.push({
+            date,
+            due,
+            given,
+            exceptions,
+            missed: Math.max(0, due - given - exceptions),
+            percent: due > 0 ? Math.round((given / due) * 100) : null
+        });
+    }
+    return rows;
+}
+
+function renderMemberAdherenceProfile(memberId) {
+    const container = document.getElementById('member-adherence-chart');
+    if (!container) return;
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) {
+        container.innerHTML = '<div class="empty-state">Save member before tracking adherence.</div>';
+        return;
+    }
+    const rows = memberAdherenceRows(memberId, 14);
+    const totalDue = rows.reduce((sum, row) => sum + row.due, 0);
+    const totalGiven = rows.reduce((sum, row) => sum + row.given, 0);
+    const totalExceptions = rows.reduce((sum, row) => sum + row.exceptions, 0);
+    const overall = totalDue > 0 ? Math.round((totalGiven / totalDue) * 100) : null;
+    if (totalDue === 0) {
+        container.innerHTML = '<div class="empty-state">No scheduled non-PRN doses were due in the last 14 days.</div>';
+        return;
+    }
+    const statusClass = overall >= 90 ? 'good' : overall >= 75 ? 'watch' : 'risk';
+    const bars = rows.map(row => {
+        const labelDate = parseLocal(row.date);
+        const label = labelDate ? `${labelDate.getMonth() + 1}/${labelDate.getDate()}` : row.date;
+        const width = row.percent === null ? 0 : Math.max(2, row.percent);
+        const barClass = row.percent === null ? 'empty' : row.percent >= 90 ? 'good' : row.percent >= 75 ? 'watch' : 'risk';
+        const title = row.due
+            ? `${row.date}: ${row.given}/${row.due} documented, ${row.exceptions} skipped/missed`
+            : `${row.date}: no doses due`;
+        return `<div class="adherence-day" title="${escapeHtml(title)}">
+            <div class="adherence-bar-frame"><div class="adherence-bar ${barClass}" style="height:${width}%;"></div></div>
+            <div class="adherence-day-label">${escapeHtml(label)}</div>
+        </div>`;
+    }).join('');
+    container.innerHTML = `
+        <div class="adherence-summary ${statusClass}">
+            <div><strong>${overall}%</strong><span>Last 14 days</span></div>
+            <div>${totalGiven}/${totalDue} scheduled doses documented as given${totalExceptions ? `; ${totalExceptions} skipped/missed documented` : ''}.</div>
+        </div>
+        <div class="adherence-chart">${bars}</div>
+        <div class="adherence-legend">
+            <span><i class="good"></i>90%+</span>
+            <span><i class="watch"></i>75-89%</span>
+            <span><i class="risk"></i>Below 75%</span>
+        </div>`;
+}
+
 function renderMemberAdministrationLog(memberId) {
     const container = document.getElementById('member-admin-log');
     if (!container) return;
@@ -8218,7 +8329,31 @@ function inventoryOrderName(order) {
 
 function inventoryOrderLabel(order) {
     const created = order?.createdAt ? new Date(order.createdAt).toLocaleString() : 'No date';
-    return `${inventoryOrderName(order)} - ${created} - ${order?.status || 'open'} - ${order?.lines?.length || 0} item(s)`;
+    const actual = orderActualTotal(order);
+    const totalText = actual > 0 ? ` - Actual ${formatCurrency(actual)}` : '';
+    return `${inventoryOrderName(order)} - ${created} - ${order?.status || 'open'} - ${order?.lines?.length || 0} item(s)${totalText}`;
+}
+
+function orderLineEstimatedTotal(line) {
+    return parseMoney(line?.estimatedUnitPrice || line?.estimatedPrice, 0);
+}
+
+function orderLineActualTotal(line) {
+    const enteredTotal = parseMoney(line?.actualTotal, 0);
+    if (enteredTotal > 0) return enteredTotal;
+    return parseMoney(line?.actualUnitPrice || line?.actualPrice, 0);
+}
+
+function isOrderLineNewNonInventory(line) {
+    return line?.sourceType === 'new' || line?.sourceType === 'formulary' || !line?.medId;
+}
+
+function orderEstimatedTotal(order) {
+    return (order?.lines || []).reduce((sum, line) => sum + orderLineEstimatedTotal(line), 0);
+}
+
+function orderActualTotal(order) {
+    return (order?.lines || []).reduce((sum, line) => sum + orderLineActualTotal(line), 0);
 }
 
 function modalNamedValue(body, name) {
@@ -8243,13 +8378,18 @@ function filterInventoryBuilder(inputId, itemSelector) {
 function renderBuilderPreview(targetId, items, emptyText = 'Nothing selected yet.') {
     const target = document.getElementById(targetId);
     if (!target) return;
+    const hasCostData = items.some(item => String(item.unitPrice || '').trim() || (Number.isFinite(item.lineTotal) && item.lineTotal > 0));
+    const estimatedTotal = items.reduce((sum, item) => sum + (Number.isFinite(item.lineTotal) ? item.lineTotal : 0), 0);
     target.innerHTML = items.length
         ? items.map(item => `
-            <div class="inventory-builder-preview-item">
+            <div class="inventory-builder-preview-item ${item.isNewNonInventory ? 'order-new-noninventory' : ''}">
                 <div class="inventory-builder-preview-text">
-                    <strong>${escapeHtml(item.name)}</strong>
+                    <strong>${escapeHtml(item.name)}</strong>${item.isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}
                     <div>${escapeHtml([item.strength, item.units].filter(Boolean).join(' | ') || 'No strength/units entered')}</div>
                     ${item.qty ? `<div>Qty: ${escapeHtml(item.qty)}</div>` : ''}
+                    ${item.unitPrice ? `<div>Estimated price: ${escapeHtml(formatCurrency(item.unitPrice))}</div>` : ''}
+                    ${Number.isFinite(item.lineTotal) && item.lineTotal > 0 ? `<div class="order-line-estimate">Line estimate: ${escapeHtml(formatCurrency(item.lineTotal))}</div>` : ''}
+                    ${item.purchaseLink ? `<div class="form-help">Purchase link: ${escapeHtml(item.purchaseLink)}</div>` : ''}
                     ${item.notes ? `<div class="form-help">${escapeHtml(item.notes)}</div>` : ''}
                 </div>
                 <button type="button" class="inventory-builder-remove"
@@ -8258,7 +8398,7 @@ function renderBuilderPreview(targetId, items, emptyText = 'Nothing selected yet
                     data-builder-row="${escapeHtml(item.removeRow || '')}"
                     data-builder-render="${escapeHtml(item.removeRender || '')}"
                     onclick="removePendingBuilderSelection(this)">X</button>
-            </div>`).join('')
+            </div>`).join('') + (hasCostData ? `<div class="order-estimated-total">Estimated total: ${escapeHtml(formatCurrency(estimatedTotal))}</div>` : '')
         : `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
 }
 
@@ -8328,11 +8468,18 @@ window.renderOrderBuilderPreview = function() {
         const med = db.inventory.find(item => item.id === input.value);
         if (!med) return;
         const qtyName = input.name === 'candidateMedIds' ? `candidateQty-${med.id}` : `otherInventoryQty-${med.id}`;
+        const priceName = input.name === 'candidateMedIds' ? `candidatePrice-${med.id}` : `otherInventoryPrice-${med.id}`;
+        const linkName = input.name === 'candidateMedIds' ? `candidateLink-${med.id}` : `otherInventoryLink-${med.id}`;
+        const qty = modalNamedValue(body, qtyName);
+        const unitPrice = modalNamedValue(body, priceName);
         items.push({
             name: inventoryDisplayName(med),
             strength: formatMedStrength(med),
             units: formatInventoryUnits(med),
-            qty: modalNamedValue(body, qtyName),
+            qty,
+            unitPrice,
+            purchaseLink: modalNamedValue(body, linkName),
+            lineTotal: parseMoney(unitPrice, 0),
             notes: input.name === 'candidateMedIds' ? 'Low/expired stock' : 'Current inventory',
             removeName: input.name,
             removeValue: med.id,
@@ -8342,12 +8489,19 @@ window.renderOrderBuilderPreview = function() {
     body.querySelectorAll('input[name="formularyOrderIds"]:checked').forEach(input => {
         const item = db.formularyItems.find(candidate => candidate.id === input.value);
         if (!item) return;
+        const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+        const qty = modalNamedValue(body, `formularyQty-${item.id}`);
+        const unitPrice = modalNamedValue(body, `formularyPrice-${item.id}`);
         items.push({
             name: formularyItemName(item),
             strength: item.strength || '',
             units: item.units || '',
-            qty: modalNamedValue(body, `formularyQty-${item.id}`),
+            qty,
+            unitPrice,
+            purchaseLink: modalNamedValue(body, `formularyLink-${item.id}`),
+            lineTotal: parseMoney(unitPrice, 0),
             notes: item.notes || 'Formulary item',
+            isNewNonInventory: !med,
             removeName: 'formularyOrderIds',
             removeValue: item.id,
             removeRender: 'renderOrderBuilderPreview'
@@ -8361,7 +8515,11 @@ window.renderOrderBuilderPreview = function() {
             strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
             units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
             qty: row.querySelector('[name="orderCustomQty"]')?.value.trim() || '',
+            unitPrice: row.querySelector('[name="orderCustomPrice"]')?.value.trim() || '',
+            purchaseLink: row.querySelector('[name="orderCustomLink"]')?.value.trim() || '',
+            lineTotal: parseMoney(row.querySelector('[name="orderCustomPrice"]')?.value, 0),
             notes: row.querySelector('[name="orderCustomNotes"]')?.value.trim() || '',
+            isNewNonInventory: true,
             removeRow: row.id,
             removeRender: 'renderOrderBuilderPreview'
         });
@@ -8397,7 +8555,7 @@ function renderInventoryWorkflowSummary() {
     container.innerHTML = `
         <div class="inventory-workflow-card"><strong>Formulary</strong>${formularyCount} reorder item${formularyCount === 1 ? '' : 's'} saved.</div>
         <div class="inventory-workflow-card"><strong>Open Orders</strong>${openOrders.length} order${openOrders.length === 1 ? '' : 's'} waiting to be received.</div>
-        <div class="inventory-workflow-card"><strong>Latest Order</strong>${latestOrder ? `${escapeHtml(inventoryOrderName(latestOrder))}<br>${escapeHtml(new Date(latestOrder.createdAt).toLocaleString())} - ${escapeHtml(latestOrder.status || 'open')}` : 'No orders created yet.'}</div>`;
+        <div class="inventory-workflow-card"><strong>Latest Order</strong>${latestOrder ? `${escapeHtml(inventoryOrderName(latestOrder))}<br>${escapeHtml(new Date(latestOrder.createdAt).toLocaleString())} - ${escapeHtml(latestOrder.status || 'open')}<br><span class="order-total-line">Est: ${escapeHtml(formatCurrency(orderEstimatedTotal(latestOrder)))}${orderActualTotal(latestOrder) > 0 ? ` | Actual: ${escapeHtml(formatCurrency(orderActualTotal(latestOrder)))}` : ''}</span>` : 'No orders created yet.'}</div>`;
 }
 
 window.addFormularyCustomRow = function(values = {}) {
@@ -8574,6 +8732,10 @@ function orderLineFromInventory(med, reason = '') {
         inventoryUnit: inventoryUnitFor(med),
         requestedQty: '',
         receivedQty: 0,
+        estimatedUnitPrice: med.lastUnitPrice || '',
+        actualUnitPrice: '',
+        actualTotal: '',
+        purchaseLink: med.purchaseLink || '',
         barcodeCodes: medicationCodes(med),
         notes: reason,
         status: 'open'
@@ -8593,13 +8755,17 @@ function orderLineFromFormulary(item) {
         inventoryUnit: med ? inventoryUnitFor(med) : (item.units || 'unit'),
         requestedQty: item.targetQty || '',
         receivedQty: 0,
+        estimatedUnitPrice: item.lastUnitPrice || med?.lastUnitPrice || '',
+        actualUnitPrice: '',
+        actualTotal: '',
+        purchaseLink: item.purchaseLink || med?.purchaseLink || '',
         barcodeCodes: formularyBarcodeCodes(item),
         notes: item.notes || '',
         status: 'open'
     };
 }
 
-window.addOrderCustomRow = function() {
+window.addOrderCustomRow = function(values = {}) {
     const container = document.getElementById('order-custom-list');
     if (!container) return;
     const rowId = `order-custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -8607,11 +8773,14 @@ window.addOrderCustomRow = function() {
     div.id = rowId;
     div.className = 'formulary-custom-row';
     div.innerHTML = `
-        <input name="orderCustomName" type="text" placeholder="Medication or supplement" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomStrength" type="text" placeholder="Strength" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomUnits" type="text" placeholder="Units" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomQty" type="text" placeholder="Order qty" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomNotes" type="text" placeholder="Notes" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomLineId" type="hidden" value="${escapeHtml(values.id || '')}">
+        <input name="orderCustomName" type="text" placeholder="Medication or supplement" value="${escapeHtml(values.name || '')}" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomStrength" type="text" placeholder="Strength" value="${escapeHtml(values.strength || '')}" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomUnits" type="text" placeholder="Units" value="${escapeHtml(values.units || '')}" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomQty" type="text" placeholder="Order qty" value="${escapeHtml(values.requestedQty || '')}" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomPrice" type="text" placeholder="Price" value="${escapeHtml(values.estimatedUnitPrice || '')}" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomLink" type="url" placeholder="Purchase link" value="${escapeHtml(values.purchaseLink || '')}" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomNotes" type="text" placeholder="Notes" value="${escapeHtml(values.notes || '')}" oninput="renderOrderBuilderPreview()">
         <button type="button" onclick="document.getElementById('${rowId}').remove(); renderOrderBuilderPreview();">Remove</button>`;
     container.appendChild(div);
     window.renderOrderBuilderPreview?.();
@@ -8623,7 +8792,88 @@ function inventoryReorderCandidates() {
     return db.inventory.filter(med => ids.has(med.id));
 }
 
-window.createInventoryOrder = async function() {
+function preserveOrderLineState(nextLine, previousLine) {
+    if (!previousLine) return nextLine;
+    return {
+        ...nextLine,
+        id: previousLine.id || nextLine.id,
+        receivedQty: previousLine.receivedQty || 0,
+        actualUnitPrice: previousLine.actualUnitPrice || '',
+        actualTotal: previousLine.actualTotal || '',
+        status: previousLine.status === 'received' ? 'received' : nextLine.status,
+        barcodeCodes: Array.from(new Set([...asArray(previousLine.barcodeCodes), ...asArray(nextLine.barcodeCodes)]))
+    };
+}
+
+function buildInventoryOrderLinesFromResult(result, existingOrder = null) {
+    const existingLines = existingOrder?.lines || [];
+    const findExistingInventoryLine = id => existingLines.find(line => line.medId === id && !line.formularyId && line.status !== 'received');
+    const findExistingFormularyLine = id => existingLines.find(line => line.formularyId === id && line.status !== 'received');
+    const lines = [];
+
+    asArray(result.candidateMedIds).forEach(id => {
+        const med = db.inventory.find(item => item.id === id);
+        if (!med) return;
+        const line = orderLineFromInventory(med, 'Auto-added from low/expired stock');
+        line.requestedQty = result[`candidateQty-${id}`] || '';
+        line.estimatedUnitPrice = result[`candidatePrice-${id}`] || line.estimatedUnitPrice || '';
+        line.purchaseLink = result[`candidateLink-${id}`] || line.purchaseLink || '';
+        lines.push(preserveOrderLineState(line, findExistingInventoryLine(id)));
+    });
+    asArray(result.otherInventoryIds).forEach(id => {
+        const med = db.inventory.find(item => item.id === id);
+        if (!med) return;
+        const line = orderLineFromInventory(med, 'Added from current inventory');
+        line.requestedQty = result[`otherInventoryQty-${id}`] || '';
+        line.estimatedUnitPrice = result[`otherInventoryPrice-${id}`] || line.estimatedUnitPrice || '';
+        line.purchaseLink = result[`otherInventoryLink-${id}`] || line.purchaseLink || '';
+        if (!lines.some(existing => existing.medId && existing.medId === line.medId)) {
+            lines.push(preserveOrderLineState(line, findExistingInventoryLine(id)));
+        }
+    });
+    asArray(result.formularyOrderIds).forEach(id => {
+        const item = db.formularyItems.find(candidate => candidate.id === id);
+        if (!item) return;
+        const line = orderLineFromFormulary(item);
+        line.requestedQty = result[`formularyQty-${id}`] || line.requestedQty || '';
+        line.estimatedUnitPrice = result[`formularyPrice-${id}`] || line.estimatedUnitPrice || '';
+        line.purchaseLink = result[`formularyLink-${id}`] || line.purchaseLink || '';
+        if (!lines.some(existing => existing.formularyId && existing.formularyId === line.formularyId)) {
+            lines.push(preserveOrderLineState(line, findExistingFormularyLine(id)));
+        }
+    });
+    result.customRows.forEach(item => {
+        const previous = item.lineId ? existingLines.find(line => line.id === item.lineId) : null;
+        lines.push(preserveOrderLineState({
+            id: item.lineId || `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            sourceType: 'new',
+            medId: '',
+            formularyId: '',
+            name: item.name,
+            strength: item.strength,
+            units: item.units,
+            inventoryUnit: item.units || 'unit',
+            requestedQty: item.requestedQty,
+            receivedQty: 0,
+            estimatedUnitPrice: item.estimatedUnitPrice || '',
+            actualUnitPrice: '',
+            actualTotal: '',
+            purchaseLink: item.purchaseLink || '',
+            barcodeCodes: [],
+            notes: item.notes,
+            status: 'open'
+        }, previous));
+    });
+    return lines;
+}
+
+window.createInventoryOrder = async function(editOrderId = '') {
+    const editOrder = editOrderId ? db.inventoryOrders?.find(order => order.id === editOrderId) : null;
+    const isEdit = !!editOrder;
+    const existingLines = editOrder?.lines || [];
+    const existingInventoryLine = medId => existingLines.find(line => line.medId === medId && !line.formularyId && line.status !== 'received');
+    const existingFormularyLine = formularyId => existingLines.find(line => line.formularyId === formularyId && line.status !== 'received');
+    const customExistingLines = existingLines.filter(line => !line.medId && !line.formularyId && line.status !== 'received');
     const candidates = inventoryReorderCandidates();
     const candidateIds = new Set(candidates.map(med => med.id));
     const defaultOrderName = `Inventory Order ${new Date().toLocaleDateString()}`;
@@ -8631,37 +8881,53 @@ window.createInventoryOrder = async function() {
         const inputId = `order-candidate-${index}`;
         const expired = getInventoryStatusGroups().expired.some(item => item.id === med.id);
         const reason = expired ? 'Expired' : 'Low stock';
+        const existing = existingInventoryLine(med.id);
+        const checked = isEdit ? !!existing : true;
+        const price = existing?.estimatedUnitPrice || med.lastUnitPrice || '';
+        const link = existing?.purchaseLink || med.purchaseLink || '';
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
-            <input id="${inputId}" name="candidateMedIds" type="checkbox" value="${escapeHtml(med.id)}" checked onchange="renderOrderBuilderPreview()">
+            <input id="${inputId}" name="candidateMedIds" type="checkbox" value="${escapeHtml(med.id)}" ${checked ? 'checked' : ''} onchange="renderOrderBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(reason)} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || med.minThreshold || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
-            <span></span>
+            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || med.minThreshold || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
+            <input name="candidatePrice-${escapeHtml(med.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
+            <input name="candidateLink-${escapeHtml(med.id)}" type="url" placeholder="Purchase link" value="${escapeHtml(link)}" style="width:150px;" oninput="renderOrderBuilderPreview()">
         </div>`;
     }).join('');
     const otherInventoryChoices = sortByName(db.inventory.filter(med => !candidateIds.has(med.id)), inventoryDisplayName).map((med, index) => {
         const inputId = `order-other-inventory-${index}`;
+        const existing = existingInventoryLine(med.id);
+        const price = existing?.estimatedUnitPrice || med.lastUnitPrice || '';
+        const link = existing?.purchaseLink || med.purchaseLink || '';
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
-            <input id="${inputId}" name="otherInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" onchange="renderOrderBuilderPreview()">
+            <input id="${inputId}" name="otherInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''} onchange="renderOrderBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
-            <span></span>
+            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
+            <input name="otherInventoryPrice-${escapeHtml(med.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
+            <input name="otherInventoryLink-${escapeHtml(med.id)}" type="url" placeholder="Purchase link" value="${escapeHtml(link)}" style="width:150px;" oninput="renderOrderBuilderPreview()">
         </div>`;
     }).join('');
     const formularyChoices = sortByName(db.formularyItems || [], formularyItemName).map((item, index) => {
         const inputId = `order-formulary-${index}`;
+        const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+        const existing = existingFormularyLine(item.id);
+        const price = existing?.estimatedUnitPrice || item.lastUnitPrice || med?.lastUnitPrice || '';
+        const link = existing?.purchaseLink || item.purchaseLink || med?.purchaseLink || '';
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(formularyItemName(item).toLowerCase())} ${escapeHtml(String(item.notes || '').toLowerCase())}">
-            <input id="${inputId}" name="formularyOrderIds" type="checkbox" value="${escapeHtml(item.id)}" onchange="renderOrderBuilderPreview()">
+            <input id="${inputId}" name="formularyOrderIds" type="checkbox" value="${escapeHtml(item.id)}" ${existing ? 'checked' : ''} onchange="renderOrderBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(formularyItemName(item))}</strong><br><span class="form-help">${escapeHtml(item.notes || 'Formulary item')}</span></label>
-            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(item.targetQty || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
-            <span></span>
+            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || item.targetQty || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
+            <input name="formularyPrice-${escapeHtml(item.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
+            <input name="formularyLink-${escapeHtml(item.id)}" type="url" placeholder="Purchase link" value="${escapeHtml(link)}" style="width:150px;" oninput="renderOrderBuilderPreview()">
         </div>`;
     }).join('');
-    const orderPromise = showActionModal('Create Inventory Order', `
+    const modalTitle = isEdit ? `Edit Order: ${inventoryOrderName(editOrder)}` : 'Create Inventory Order';
+    const confirmText = isEdit ? 'Save Order' : 'Create Order';
+    const orderPromise = showActionModal(modalTitle, `
         <div data-action-modal-size="wide" class="inventory-builder-layout">
             <div class="inventory-builder-source">
-                <div style="font-size:11px; margin-bottom:6px;">Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary, current inventory, or new items as needed.</div>
+                <div style="font-size:11px; margin-bottom:6px;">${isEdit ? 'Edit this order with the same tools used to create it. Use the pending order panel to remove items quickly.' : 'Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary, current inventory, or new items as needed.'}</div>
                 <div class="field-row" style="margin-bottom:6px;">
-                    <label>Order name:</label><input name="orderName" type="text" value="${escapeHtml(defaultOrderName)}" style="width:260px;">
+                    <label>Order name:</label><input name="orderName" type="text" value="${escapeHtml(isEdit ? inventoryOrderName(editOrder) : defaultOrderName)}" style="width:260px;">
                 </div>
                 <div class="field-row" style="margin-bottom:6px;">
                     <label>Search:</label><input id="order-builder-search" class="inventory-builder-search" type="text" placeholder="Find inventory or formulary item..." oninput="filterOrderBuilder()">
@@ -8675,78 +8941,71 @@ window.createInventoryOrder = async function() {
                 <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-formulary Item</button></div>
                 <div id="order-custom-list"></div>
                 <div class="field-row-stacked" style="margin-top:8px;">
-                    <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;"></textarea>
+                    <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;">${escapeHtml(isEdit ? editOrder.note || '' : '')}</textarea>
                 </div>
             </div>
             <div class="inventory-builder-selected">
-                <div class="inventory-builder-panel-title">Pending order</div>
+                <div class="inventory-builder-panel-title">${isEdit ? 'Edited order' : 'Pending order'}</div>
                 <div id="order-builder-preview" class="inventory-builder-panel"></div>
             </div>
         </div>
-    `, 'Create Order', body => {
+    `, confirmText, body => {
         const base = collectNamedInputs(body);
         base.customRows = Array.from(body.querySelectorAll('.formulary-custom-row')).map(row => ({
+            lineId: row.querySelector('[name="orderCustomLineId"]')?.value || '',
             name: row.querySelector('[name="orderCustomName"]')?.value.trim() || '',
             strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
             units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
             requestedQty: row.querySelector('[name="orderCustomQty"]')?.value.trim() || '',
+            estimatedUnitPrice: row.querySelector('[name="orderCustomPrice"]')?.value.trim() || '',
+            purchaseLink: row.querySelector('[name="orderCustomLink"]')?.value.trim() || '',
             notes: row.querySelector('[name="orderCustomNotes"]')?.value.trim() || ''
         })).filter(item => item.name);
         return base;
     });
+    if (isEdit) customExistingLines.forEach(line => window.addOrderCustomRow(line));
     window.renderOrderBuilderPreview?.();
     const result = await orderPromise;
-    if (!result) return;
+    if (!result) {
+        if (isEdit) await viewInventoryOrderLog();
+        return;
+    }
 
-    const lines = [];
-    asArray(result.candidateMedIds).forEach(id => {
-        const med = db.inventory.find(item => item.id === id);
-        if (!med) return;
-        const line = orderLineFromInventory(med, 'Auto-added from low/expired stock');
-        line.requestedQty = result[`candidateQty-${id}`] || '';
-        lines.push(line);
-    });
-    asArray(result.otherInventoryIds).forEach(id => {
-        const med = db.inventory.find(item => item.id === id);
-        if (!med) return;
-        const line = orderLineFromInventory(med, 'Added from current inventory');
-        line.requestedQty = result[`otherInventoryQty-${id}`] || '';
-        if (!lines.some(existing => existing.medId && existing.medId === line.medId)) lines.push(line);
-    });
-    asArray(result.formularyOrderIds).forEach(id => {
-        const item = db.formularyItems.find(candidate => candidate.id === id);
-        if (!item) return;
-        const line = orderLineFromFormulary(item);
-        line.requestedQty = result[`formularyQty-${id}`] || line.requestedQty || '';
-        if (!lines.some(existing => existing.medId && existing.medId === line.medId)) lines.push(line);
-    });
-    result.customRows.forEach(item => lines.push({
-        id: `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-        sourceType: 'new',
-        medId: '',
-        formularyId: '',
-        name: item.name,
-        strength: item.strength,
-        units: item.units,
-        inventoryUnit: item.units || 'unit',
-        requestedQty: item.requestedQty,
-        receivedQty: 0,
-        barcodeCodes: [],
-        notes: item.notes,
-        status: 'open'
-    }));
+    const lines = buildInventoryOrderLinesFromResult(result, editOrder);
     if (lines.length === 0) {
-        await appAlert('Add at least one item to create an order.');
+        await appAlert(`Add at least one item to ${isEdit ? 'save' : 'create'} an order.`);
+        if (isEdit) await viewInventoryOrderLog();
         return;
     }
     db.inventoryOrders = db.inventoryOrders || [];
     const orderName = String(result.orderName || '').trim() || defaultOrderName;
+    if (isEdit) {
+        editOrder.name = orderName;
+        editOrder.note = result.orderNote || '';
+        editOrder.lines = lines;
+        editOrder.status = editOrder.lines.every(line => line.status === 'received') ? 'received'
+            : editOrder.lines.some(line => line.status === 'received') ? 'partial'
+            : 'open';
+        editOrder.estimatedTotal = orderEstimatedTotal(editOrder);
+        editOrder.actualTotal = orderActualTotal(editOrder);
+        db.history.unshift({
+            id: Date.now().toString(),
+            timestamp: new Date().toLocaleString(),
+            medName: orderName,
+            details: `Edited inventory order with ${lines.length} item${lines.length === 1 ? '' : 's'}.`
+        });
+        await sync();
+        await viewInventoryOrderLog();
+        return;
+    }
     db.inventoryOrders.unshift({
         id: `order_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         name: orderName,
         createdAt: new Date().toISOString(),
         status: 'open',
         note: result.orderNote || '',
+        estimatedTotal: lines.reduce((sum, line) => sum + orderLineEstimatedTotal(line), 0),
+        actualTotal: 0,
         lines
     });
     db.history.unshift({
@@ -8966,7 +9225,7 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
     return med;
 }
 
-async function receiveOrderLine(line, receivedQty, barcode) {
+async function receiveOrderLine(line, receivedQty, barcode, cost = {}) {
     const normalizedBarcode = normalizeMedicationCode(barcode);
     let med = line.medId ? db.inventory.find(item => item.id === line.medId) : null;
     const barcodeMatch = normalizedBarcode ? findInventoryByBarcode(normalizedBarcode) : null;
@@ -8995,14 +9254,22 @@ async function receiveOrderLine(line, receivedQty, barcode) {
     if (normalizedBarcode) addMedicationBarcode(med, normalizedBarcode);
     med.stock = parseAmount(med.stock, 0) + parseAmount(receivedQty, 0);
     if (parseAmount(med.maxCapacity, 0) < parseAmount(med.stock, 0)) med.maxCapacity = med.stock;
+    const actualUnitPrice = String(cost.actualUnitPrice || '').trim();
+    const actualTotal = String(cost.actualTotal || '').trim();
+    if (actualUnitPrice) med.lastUnitPrice = actualUnitPrice;
+    if (line.purchaseLink) med.purchaseLink = line.purchaseLink;
     line.medId = med.id;
     line.receivedQty = parseAmount(line.receivedQty, 0) + parseAmount(receivedQty, 0);
+    line.actualUnitPrice = actualUnitPrice || line.actualUnitPrice || line.estimatedUnitPrice || '';
+    line.actualTotal = actualTotal || line.actualUnitPrice || line.actualTotal || '';
     line.status = 'received';
     if (normalizedBarcode) {
         line.barcodeCodes = Array.from(new Set([...asArray(line.barcodeCodes), normalizedBarcode]));
         const formulary = line.formularyId ? db.formularyItems.find(item => item.id === line.formularyId) : null;
         if (formulary) {
             formulary.medId = formulary.medId || med.id;
+            if (line.actualUnitPrice) formulary.lastUnitPrice = line.actualUnitPrice;
+            if (line.purchaseLink) formulary.purchaseLink = line.purchaseLink;
             formulary.barcodeCodes = Array.from(new Set([...asArray(formulary.barcodeCodes), normalizedBarcode]));
         }
     }
@@ -9030,13 +9297,17 @@ window.receiveInventoryOrder = async function() {
     const order = db.inventoryOrders.find(item => item.id === selectResult.orderId);
     if (!order) return;
     const lineOptions = order.lines.map(line => `<option value="${escapeHtml(line.id)}">${escapeHtml(`${line.name} ${line.strength || ''}`)}</option>`).join('');
-    const lineRows = order.lines.map(line => `
-        <div class="order-line-item ${line.status === 'received' ? 'receive-line-received' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}">
+    const lineRows = order.lines.map(line => {
+        const isNewNonInventory = isOrderLineNewNonInventory(line);
+        return `
+        <div class="order-line-item ${line.status === 'received' ? 'receive-line-received' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}">
             <input name="receiveLine" type="checkbox" value="${escapeHtml(line.id)}" ${selectResult.receiveMode === 'manual' && line.status !== 'received' ? 'checked' : ''}>
-            <div><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${line.status === 'received' ? ' - received' : ''}</span></div>
+            <div><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${line.estimatedUnitPrice ? ` - est. ${escapeHtml(formatCurrency(line.estimatedUnitPrice))}` : ''}${line.status === 'received' ? ` - received${orderLineActualTotal(line) > 0 ? ` (${escapeHtml(formatCurrency(orderLineActualTotal(line)))})` : ''}` : ''}</span>${line.purchaseLink ? `<br><span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}</div>
             <input name="receiveQty" data-line-id="${escapeHtml(line.id)}" type="number" step="any" value="${escapeHtml(line.requestedQty || '1')}" style="width:80px;">
+            <input name="receiveActualUnitPrice" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Actual price" value="${escapeHtml(line.actualUnitPrice || line.estimatedUnitPrice || '')}" style="width:92px;">
             <input name="receiveBarcode" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Barcode / QR code" value="" style="width:170px;">
-        </div>`).join('');
+        </div>`;
+    }).join('');
     const scanPanel = selectResult.receiveMode === 'scan'
         ? `<div class="receive-scan-panel">
             <div class="field-row">
@@ -9054,6 +9325,8 @@ window.receiveInventoryOrder = async function() {
             lineId: row.dataset.lineId,
             selected: row.querySelector('[name="receiveLine"]')?.checked === true,
             qty: row.querySelector('[name="receiveQty"]')?.value || '',
+            actualUnitPrice: row.querySelector('[name="receiveActualUnitPrice"]')?.value || '',
+            actualTotal: '',
             barcode: row.querySelector('[name="receiveBarcode"]')?.value || ''
         }))
     }));
@@ -9063,7 +9336,7 @@ window.receiveInventoryOrder = async function() {
         const line = order.lines.find(item => item.id === received.lineId);
         const qty = parseAmount(received.qty, NaN);
         if (!line || !Number.isFinite(qty) || qty <= 0) continue;
-        if (await receiveOrderLine(line, qty, received.barcode)) receivedCount++;
+        if (await receiveOrderLine(line, qty, received.barcode, received)) receivedCount++;
     }
     if (receivedCount === 0) {
         await appAlert('No order lines were received.');
@@ -9071,13 +9344,272 @@ window.receiveInventoryOrder = async function() {
     }
     order.status = order.lines.every(line => line.status === 'received') ? 'received' : 'partial';
     order.receivedAt = order.status === 'received' ? new Date().toISOString() : '';
+    order.estimatedTotal = orderEstimatedTotal(order);
+    order.actualTotal = orderActualTotal(order);
     db.history.unshift({
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
         medName: inventoryOrderName(order),
-        details: `Received ${receivedCount} item${receivedCount === 1 ? '' : 's'} from order created ${new Date(order.createdAt).toLocaleString()}.`
+        details: `Received ${receivedCount} item${receivedCount === 1 ? '' : 's'} from order created ${new Date(order.createdAt).toLocaleString()}.${order.actualTotal > 0 ? ` Actual total: ${formatCurrency(order.actualTotal)}.` : ''}`
     });
     await sync();
+};
+
+function inventoryOrderPdfBody(order) {
+    const estimated = orderEstimatedTotal(order);
+    const actual = orderActualTotal(order);
+    const rows = (order.lines || []).map(line => `
+        <tr>
+            <td>${escapeHtml(line.name || '')}</td>
+            <td>${escapeHtml(line.strength || '')}</td>
+            <td>${escapeHtml(line.units || '')}</td>
+            <td>${escapeHtml(line.requestedQty || '')}</td>
+            <td>${escapeHtml(line.receivedQty ? `${formatAmount(parseAmount(line.receivedQty))} ${line.inventoryUnit || ''}` : '')}</td>
+            <td>${escapeHtml(line.estimatedUnitPrice ? formatCurrency(line.estimatedUnitPrice) : '')}</td>
+            <td>${escapeHtml(orderLineActualTotal(line) > 0 ? formatCurrency(orderLineActualTotal(line)) : '')}</td>
+            <td>${escapeHtml(line.status || 'open')}</td>
+            <td>${line.purchaseLink ? `<a href="${escapeHtml(line.purchaseLink)}">${escapeHtml(line.purchaseLink)}</a>` : ''}</td>
+            <td>${escapeHtml(line.notes || '')}</td>
+        </tr>`).join('');
+    return `<h2>${escapeHtml(inventoryOrderName(order))}</h2>
+        <p>
+            Created: ${escapeHtml(order.createdAt ? new Date(order.createdAt).toLocaleString() : '')}<br>
+            Status: ${escapeHtml(order.status || 'open')}${order.receivedAt ? `<br>Received: ${escapeHtml(new Date(order.receivedAt).toLocaleString())}` : ''}<br>
+            Estimated Total: <strong>${escapeHtml(formatCurrency(estimated))}</strong>${actual > 0 ? `<br>Actual Total: <strong>${escapeHtml(formatCurrency(actual))}</strong>` : ''}
+        </p>
+        ${order.note ? `<p><strong>Order note:</strong> ${escapeHtml(order.note)}</p>` : ''}
+        <table>
+            <thead>
+                <tr><th>Item</th><th>Strength</th><th>Units</th><th>Requested</th><th>Received</th><th>Estimated Price</th><th>Actual Price</th><th>Status</th><th>Purchase Link</th><th>Notes</th></tr>
+            </thead>
+            <tbody>${rows || '<tr><td colspan="10">No order lines saved.</td></tr>'}</tbody>
+        </table>`;
+}
+
+function closeActionModalForFollowup() {
+    document.getElementById('action-modal-cancel')?.click();
+}
+
+function orderLineLogHtml(line) {
+    const med = line.medId ? db.inventory.find(item => item.id === line.medId) : null;
+    const stockText = med ? `Stock now: ${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}` : 'Not linked to inventory';
+    const isNewNonInventory = isOrderLineNewNonInventory(line);
+    return `<div class="order-log-line ${isNewNonInventory ? 'order-new-noninventory' : ''}">
+        <strong>${escapeHtml(line.name || '')} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong>
+        <span>Requested: ${escapeHtml(line.requestedQty || 'N/A')} ${escapeHtml(line.inventoryUnit || '')}</span>
+        <span>Received: ${escapeHtml(line.receivedQty ? `${formatAmount(parseAmount(line.receivedQty))} ${line.inventoryUnit || ''}` : 'None yet')}</span>
+        <span>Est: ${escapeHtml(orderLineEstimatedTotal(line) > 0 ? formatCurrency(orderLineEstimatedTotal(line)) : 'N/A')}</span>
+        <span>Actual: ${escapeHtml(orderLineActualTotal(line) > 0 ? formatCurrency(orderLineActualTotal(line)) : 'N/A')}</span>
+        <span>${escapeHtml(stockText)}</span>
+        ${line.purchaseLink ? `<span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}
+    </div>`;
+}
+
+function inventoryOrderLogCard(order, receivedSection = false) {
+    const estimated = orderEstimatedTotal(order);
+    const actual = orderActualTotal(order);
+    const canEditReceived = (order.lines || []).some(line => parseAmount(line.receivedQty, 0) > 0 || line.status === 'received');
+    const canEditActive = !receivedSection && order.status !== 'received';
+    return `<div class="inventory-order-card">
+        <div class="inventory-order-card-head">
+            <div>
+                <strong>${escapeHtml(inventoryOrderName(order))}</strong>
+                <div class="form-help">Created ${escapeHtml(order.createdAt ? new Date(order.createdAt).toLocaleString() : 'Unknown')} | ${escapeHtml(order.status || 'open')}${order.receivedAt ? ` | Received ${escapeHtml(new Date(order.receivedAt).toLocaleString())}` : ''}</div>
+                <div class="order-total-line">Estimated ${escapeHtml(formatCurrency(estimated))}${actual > 0 ? ` | Actual ${escapeHtml(formatCurrency(actual))}` : ''}</div>
+            </div>
+            <div class="inventory-order-card-actions">
+                ${canEditActive ? `<button type="button" onclick="editActiveInventoryOrder('${escapeHtml(order.id)}')">Edit Order</button>` : ''}
+                ${receivedSection && canEditReceived ? `<button type="button" onclick="editReceivedInventoryOrder('${escapeHtml(order.id)}')">Modify Received</button>` : ''}
+                <button type="button" onclick="printInventoryOrderPdf('${escapeHtml(order.id)}')">PDF</button>
+                <button type="button" onclick="deleteInventoryOrder('${escapeHtml(order.id)}')">Delete</button>
+            </div>
+        </div>
+        <div class="inventory-order-lines">${(order.lines || []).map(orderLineLogHtml).join('') || '<div class="empty-state">No order lines saved.</div>'}</div>
+    </div>`;
+}
+
+function inventoryOrderLogHtml() {
+    const orders = (db.inventoryOrders || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const openOrders = orders.filter(order => order.status !== 'received' && order.status !== 'partial');
+    const receivedOrders = orders.filter(order => order.status === 'received' || order.status === 'partial');
+    return `<div data-action-modal-size="wide" class="inventory-order-log">
+        <div class="form-help">Created orders can be deleted here. Received orders stay in this log and can be corrected after receiving.</div>
+        <fieldset>
+            <legend>Created Orders</legend>
+            ${openOrders.length ? openOrders.map(order => inventoryOrderLogCard(order, false)).join('') : '<div class="empty-state">No open created orders.</div>'}
+        </fieldset>
+        <fieldset style="margin-top:8px;">
+            <legend>Received Order Log</legend>
+            ${receivedOrders.length ? receivedOrders.map(order => inventoryOrderLogCard(order, true)).join('') : '<div class="empty-state">No received orders logged yet.</div>'}
+        </fieldset>
+    </div>`;
+}
+
+window.viewInventoryOrderLog = async function() {
+    if (!db.inventoryOrders?.length) {
+        await appAlert('No inventory orders have been created yet.');
+        return;
+    }
+    await showActionModal('Inventory Order Log', inventoryOrderLogHtml(), 'Close');
+};
+
+window.deleteInventoryOrder = async function(orderId) {
+    const order = db.inventoryOrders?.find(item => item.id === orderId);
+    if (!order) return;
+    closeActionModalForFollowup();
+    const hasReceivedStock = (order.lines || []).some(line => parseAmount(line.receivedQty, 0) > 0);
+    const message = hasReceivedStock
+        ? 'Delete this order record from the log? Inventory quantities that were already received will remain unchanged.'
+        : 'Delete this created order?';
+    if (!await appConfirm(message, 'Delete Inventory Order')) {
+        await viewInventoryOrderLog();
+        return;
+    }
+    db.inventoryOrders = (db.inventoryOrders || []).filter(item => item.id !== orderId);
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: inventoryOrderName(order),
+        details: 'Deleted inventory order record.'
+    });
+    await sync();
+    if (db.inventoryOrders.length) await viewInventoryOrderLog();
+};
+
+window.editActiveInventoryOrder = async function(orderId) {
+    const order = db.inventoryOrders?.find(item => item.id === orderId);
+    if (!order) return;
+    closeActionModalForFollowup();
+    if (order.status === 'received') {
+        await appAlert('This order has already been fully received. Use Modify Received instead.');
+        await viewInventoryOrderLog();
+        return;
+    }
+    await createInventoryOrder(orderId);
+};
+
+window.editReceivedInventoryOrder = async function(orderId) {
+    const order = db.inventoryOrders?.find(item => item.id === orderId);
+    if (!order) return;
+    closeActionModalForFollowup();
+    const receivedLines = (order.lines || []).filter(line => parseAmount(line.receivedQty, 0) > 0 || line.status === 'received');
+    if (receivedLines.length === 0) {
+        await appAlert('No received items are available to modify for this order.');
+        await viewInventoryOrderLog();
+        return;
+    }
+    const rows = receivedLines.map(line => `
+        <div class="order-edit-line" data-line-id="${escapeHtml(line.id)}">
+            <div>
+                <strong>${escapeHtml(line.name || '')} ${escapeHtml(line.strength || '')}</strong>
+                <div class="form-help">Requested: ${escapeHtml(line.requestedQty || 'N/A')} ${escapeHtml(line.inventoryUnit || '')}</div>
+            </div>
+            <label>Received qty:<input name="editReceivedQty" type="number" step="any" value="${escapeHtml(line.receivedQty || '')}"></label>
+            <label>Actual price:<input name="editActualPrice" type="text" value="${escapeHtml(line.actualUnitPrice || line.actualTotal || '')}"></label>
+            <label>Barcode:<input name="editBarcode" type="text" value=""></label>
+            <label>Purchase link:<input name="editPurchaseLink" type="url" value="${escapeHtml(line.purchaseLink || '')}"></label>
+            <label>Notes:<input name="editLineNotes" type="text" value="${escapeHtml(line.notes || '')}"></label>
+        </div>`).join('');
+    const result = await showActionModal(`Modify Received Order: ${inventoryOrderName(order)}`, `
+        <div data-action-modal-size="wide">
+            <div class="form-help">Changing received quantity adjusts the linked inventory stock by the difference.</div>
+            <div class="order-edit-list">${rows}</div>
+        </div>
+    `, 'Save Changes', body => ({
+        lines: Array.from(body.querySelectorAll('.order-edit-line')).map(row => ({
+            lineId: row.dataset.lineId,
+            receivedQty: row.querySelector('[name="editReceivedQty"]')?.value || '',
+            actualPrice: row.querySelector('[name="editActualPrice"]')?.value || '',
+            barcode: row.querySelector('[name="editBarcode"]')?.value || '',
+            purchaseLink: row.querySelector('[name="editPurchaseLink"]')?.value || '',
+            notes: row.querySelector('[name="editLineNotes"]')?.value || ''
+        }))
+    }));
+    if (!result) {
+        await viewInventoryOrderLog();
+        return;
+    }
+    let changed = 0;
+    for (const edit of result.lines) {
+        const line = order.lines.find(item => item.id === edit.lineId);
+        if (!line) continue;
+        const nextQty = parseAmount(edit.receivedQty, NaN);
+        if (!Number.isFinite(nextQty) || nextQty < 0) {
+            await appAlert(`Received quantity for ${line.name || 'an item'} must be zero or greater.`);
+            await viewInventoryOrderLog();
+            return;
+        }
+        const med = line.medId ? db.inventory.find(item => item.id === line.medId) : null;
+        const previousQty = parseAmount(line.receivedQty, 0);
+        const delta = nextQty - previousQty;
+        if (delta !== 0 && med) {
+            if (parseAmount(med.stock, 0) + delta < 0) {
+                await appAlert(`Cannot reduce ${med.name} below zero stock.`);
+                await viewInventoryOrderLog();
+                return;
+            }
+            med.stock = parseAmount(med.stock, 0) + delta;
+            if (parseAmount(med.maxCapacity, 0) < parseAmount(med.stock, 0)) med.maxCapacity = med.stock;
+        }
+        const normalizedBarcode = normalizeMedicationCode(edit.barcode);
+        if (normalizedBarcode) {
+            const conflict = await warnBarcodeConflict(normalizedBarcode, med?.id || line.medId || '');
+            if (conflict) {
+                await viewInventoryOrderLog();
+                return;
+            }
+            if (med) addMedicationBarcode(med, normalizedBarcode);
+            line.barcodeCodes = Array.from(new Set([...asArray(line.barcodeCodes), normalizedBarcode]));
+        }
+        line.receivedQty = nextQty;
+        line.actualUnitPrice = String(edit.actualPrice || '').trim();
+        line.actualTotal = line.actualUnitPrice;
+        line.purchaseLink = String(edit.purchaseLink || '').trim();
+        line.notes = edit.notes || '';
+        line.status = nextQty > 0 ? 'received' : 'open';
+        if (med) {
+            if (line.actualUnitPrice) med.lastUnitPrice = line.actualUnitPrice;
+            if (line.purchaseLink) med.purchaseLink = line.purchaseLink;
+        }
+        changed++;
+    }
+    order.status = order.lines.every(line => line.status === 'received') ? 'received'
+        : order.lines.some(line => line.status === 'received') ? 'partial'
+        : 'open';
+    order.receivedAt = order.status === 'received' ? (order.receivedAt || new Date().toISOString()) : '';
+    order.actualTotal = orderActualTotal(order);
+    order.estimatedTotal = orderEstimatedTotal(order);
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medName: inventoryOrderName(order),
+        details: `Modified received order log for ${changed} item${changed === 1 ? '' : 's'}.`
+    });
+    await sync();
+    await viewInventoryOrderLog();
+};
+
+window.printInventoryOrderPdf = async function(orderId = '') {
+    const orders = (db.inventoryOrders || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    if (orders.length === 0) {
+        await appAlert('No inventory orders have been created yet.');
+        return;
+    }
+    if (orderId) {
+        const selected = orders.find(item => item.id === orderId);
+        if (!selected) return;
+        closeActionModalForFollowup();
+        await saveReportPdf(`Inventory Order - ${inventoryOrderName(selected)}`, inventoryOrderPdfBody(selected), `Inventory_Order_${inventoryOrderName(selected)}`);
+        return;
+    }
+    const options = orders.map(order => `<option value="${escapeHtml(order.id)}">${escapeHtml(inventoryOrderLabel(order))}</option>`).join('');
+    const result = await showActionModal('Inventory Order PDF', `
+        <div class="field-row"><label>Order:</label><select name="orderId" style="width:420px;">${options}</select></div>
+    `, 'Generate PDF');
+    if (!result) return;
+    const order = orders.find(item => item.id === result.orderId);
+    if (!order) return;
+    await saveReportPdf(`Inventory Order - ${inventoryOrderName(order)}`, inventoryOrderPdfBody(order), `Inventory_Order_${inventoryOrderName(order)}`);
 };
 
 window.clearInventorySearch = function() {

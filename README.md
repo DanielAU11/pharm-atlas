@@ -20,7 +20,7 @@ PharmAtlas helps users organize the practical details that make medication routi
 - Print medication labels, inventory labels, daily labels, regimen labels, and prepack labels.
 - Verify prepacks by scanning QR/barcodes or marking items prepacked manually.
 - Track inventory quantities, low-stock alerts, expiration dates, storage, control level, prescriber, assignment, notes, photos, and multiple barcode aliases per item.
-- Create and edit a master formulary, generate formulary PDFs, create named inventory orders, and receive orders by manual entry or scanning.
+- Create and edit a master formulary, generate formulary PDFs, create named inventory orders, edit active orders, print order PDFs, and receive orders by manual entry or scanning.
 - Monitor blood pressure, heart rate, glucose, weight, temperature, INR, drug levels, and other custom therapeutic labs.
 - Generate PDF reports for schedules, monitored values, inventory, missed doses, and reorder planning.
 - Maintain member profiles with diagnoses, providers, allergies, intolerances, monitoring goals, calendars, active orders, PRN orders, completed schedules, and administration logs.
@@ -46,6 +46,8 @@ Every X hours orders include future time previews and can adjust future schedule
 PharmAtlas supports tablets, capsules, liquids, granules, packets, inhalations, sprays, drops, creams, ointments, gels, topical packets, topical solutions, patches, suppositories, containers, and flexible custom units.
 
 Inventory items can have photos, multiple QR/barcode codes, multiple assigned members, and formulation-specific stock behavior.
+
+Inventory ordering includes a created-order log and a received-order log. Active orders can be reopened in the same builder used to create them, while received orders can be corrected later with stock adjustments. New non-inventory items are highlighted in yellow through the pending order panel, order log, and receiving workflow so users can recognize items that still need product details during intake.
 
 ### Prepackaging
 

@@ -170,7 +170,20 @@ ipcMain.handle('save-db', (event, data) => {
 });
 
 ipcMain.handle('load-db', () => {
-    if (!fs.existsSync(dbPath)) return { family: [], inventory: [], schedules: [], history: [], recipes: [], vitals: [], orderSets: [], prescribers: [], reminderLog: [], prepackQueues: [], formularyItems: [], inventoryOrders: [] };
+    if (!fs.existsSync(dbPath)) return {
+        family: [],
+        inventory: [],
+        schedules: [],
+        history: [],
+        recipes: [],
+        vitals: [],
+        orderSets: [],
+        prescribers: [],
+        reminderLog: [],
+        prepackQueues: [],
+        formularyItems: [],
+        inventoryOrders: []
+    };
     const data = fs.readFileSync(dbPath, 'utf8');
     return JSON.parse(data);
 });

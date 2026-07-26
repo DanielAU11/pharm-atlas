@@ -471,6 +471,8 @@
                             <button type="button" onclick="viewFormulary()"><span class="win98-icon icon-view"></span>View Formulary</button>
                             <button type="button" onclick="createInventoryOrder()"><span class="win98-icon icon-order"></span>Create Order</button>
                             <button type="button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive Order</button>
+                            <button type="button" onclick="viewInventoryOrderLog()"><span class="win98-icon icon-view"></span>Order Log</button>
+                            <button type="button" onclick="printInventoryOrderPdf()"><span class="win98-icon icon-order"></span>Order PDF</button>
                         </div>
                         <div id="inventory-workflow-summary" class="inventory-workflow-summary"></div>
                         <div class="sunken-panel" style="height: 800px; width: 100%; overflow-y: scroll;">
@@ -828,6 +830,17 @@
             </fieldset>
 
             <fieldset style="margin-top:10px;">
+                <legend>Medication Schedule Calendar</legend>
+                <div class="calendar-controls">
+                    <button type="button" onclick="shiftMemberCalendar(-7)">Previous 7 Days</button>
+                    <strong id="member-calendar-range"></strong>
+                    <button type="button" onclick="shiftMemberCalendar(7)">Next 7 Days</button>
+                    <button type="button" onclick="resetMemberCalendar()">Today</button>
+                </div>
+                <div id="member-calendar-grid" class="member-calendar-grid"></div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
                 <legend>Active Medications</legend>
                 <div id="member-active-meds-list"></div>
             </fieldset>
@@ -843,14 +856,8 @@
             </fieldset>
 
             <fieldset style="margin-top:10px;">
-                <legend>Medication Schedule Calendar</legend>
-                <div class="calendar-controls">
-                    <button type="button" onclick="shiftMemberCalendar(-7)">Previous 7 Days</button>
-                    <strong id="member-calendar-range"></strong>
-                    <button type="button" onclick="shiftMemberCalendar(7)">Next 7 Days</button>
-                    <button type="button" onclick="resetMemberCalendar()">Today</button>
-                </div>
-                <div id="member-calendar-grid" class="member-calendar-grid"></div>
+                <legend>Medication Adherence</legend>
+                <div id="member-adherence-chart"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
