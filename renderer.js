@@ -1699,6 +1699,46 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
     });
 }
 
+function showChildActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay child-action-modal';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="window action-modal-window">
+            <div class="title-bar">
+                <div class="title-bar-text">${escapeHtml(title)}</div>
+                <div class="title-bar-controls">
+                    <button aria-label="Close" data-child-modal-close></button>
+                </div>
+            </div>
+            <div class="window-body">
+                <div class="child-action-modal-body">${bodyHtml}</div>
+                <div class="field-row" style="justify-content:flex-end; margin-top:10px;">
+                    <button data-child-modal-ok>${escapeHtml(confirmText)}</button>
+                    <button data-child-modal-cancel>Cancel</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    enhanceButtonIcons(modal);
+    const body = modal.querySelector('.child-action-modal-body');
+    const ok = modal.querySelector('[data-child-modal-ok]');
+    const cancel = modal.querySelector('[data-child-modal-cancel]');
+    const close = modal.querySelector('[data-child-modal-close]');
+    return new Promise(resolve => {
+        const cleanup = value => {
+            ok.onclick = null;
+            cancel.onclick = null;
+            close.onclick = null;
+            modal.remove();
+            resolve(value);
+        };
+        ok.onclick = () => cleanup(collectFn ? collectFn(body) : collectNamedInputs(body));
+        cancel.onclick = () => cleanup(null);
+        close.onclick = () => cleanup(null);
+    });
+}
+
 async function appAlert(message, title = 'PharmAtlas') {
     await showActionModal(title, `<div style="font-size:11px; padding:4px 0;">${escapeHtml(message)}</div>`, 'OK');
 }
@@ -4009,7 +4049,7 @@ window.restockMedKitItem = async function(kitId, itemId) {
         setMedKitMessage('This kit item is not linked to an inventory medication anymore.', 'error');
         return;
     }
-    const result = await showActionModal('Restock Med Kit Item', `
+    const result = await showChildActionModal('Restock Med Kit Item', `
         <div style="font-size:11px; margin-bottom:8px;">
             Add more <strong>${escapeHtml(inventoryDisplayName(med))}</strong> to <strong>${escapeHtml(medKitName(kit))}</strong>.
         </div>
@@ -4052,7 +4092,7 @@ window.adjustMedKitItemQuantity = async function(kitId, itemId) {
     const med = kitItemMed(item);
     const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
     const currentQty = parseAmount(item.qty, 0);
-    const result = await showActionModal('Adjust Med Kit Quantity', `
+    const result = await showChildActionModal('Adjust Med Kit Quantity', `
         <div style="font-size:11px; margin-bottom:8px;">
             Correct the kit count for <strong>${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'this item')}</strong>.
         </div>
@@ -4094,7 +4134,7 @@ window.returnOrDiscardMedKitItem = async function(kitId, itemId) {
     const med = kitItemMed(item);
     const qty = parseAmount(item.qty, 0);
     const unit = med ? inventoryUnitFor(med) : item.unit || 'unit';
-    const result = await showActionModal('Return/Discard Kit Item', `
+    const result = await showChildActionModal('Return/Discard Kit Item', `
         <div style="font-size:11px; margin-bottom:8px;">
             Remove <strong>${escapeHtml(formatAmount(qty))} ${escapeHtml(unit)}</strong> of
             <strong>${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'this item')}</strong>
