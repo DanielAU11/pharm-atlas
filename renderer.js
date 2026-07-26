@@ -39,6 +39,7 @@ let prepackScanTimer = null;
 let pendingScheduleOrders = [];
 let pendingNewMedImage = null;
 let pendingModalMedImage = null;
+let modalBarcodeCodes = [];
 let orderSetRowCounter = 0;
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -182,6 +183,32 @@ function findInventoryByBarcode(code) {
     return db.inventory.find(med => medicationCodes(med).includes(normalized)) || null;
 }
 
+function barcodeConflictItems(code, excludedMedId = '') {
+    const normalized = normalizeMedicationCode(code);
+    if (!normalized) return [];
+    return db.inventory.filter(med =>
+        med.id !== excludedMedId && medicationCodes(med).includes(normalized)
+    );
+}
+
+function barcodeConflictHtml(code, conflicts) {
+    const items = conflicts.map(med =>
+        `<li>${escapeHtml(inventoryDisplayName(med))}</li>`
+    ).join('');
+    return `<div class="barcode-warning">
+        The barcode/QR code <strong>${escapeHtml(normalizeMedicationCode(code))}</strong> already matches:
+        <ul>${items}</ul>
+        Use a different code or edit the existing inventory item instead.
+    </div>`;
+}
+
+async function warnBarcodeConflict(code, excludedMedId = '') {
+    const conflicts = barcodeConflictItems(code, excludedMedId);
+    if (conflicts.length === 0) return false;
+    await showActionModal('Barcode Conflict', barcodeConflictHtml(code, conflicts), 'OK');
+    return true;
+}
+
 function createMedicationCode() {
     let code = '';
     do {
@@ -218,11 +245,73 @@ window.generateMedicationCode = function(inputId) {
     if (input) input.value = createMedicationCode();
 };
 
+function collectProfileBarcodeCodes(includePendingInput = true) {
+    const pendingInput = includePendingInput
+        ? normalizeMedicationCode(document.getElementById('modal-barcode-code')?.value)
+        : '';
+    return Array.from(new Set([
+        ...modalBarcodeCodes.map(normalizeMedicationCode),
+        pendingInput
+    ].filter(Boolean)));
+}
+
+function renderModalBarcodeCodes() {
+    const container = document.getElementById('modal-barcode-list');
+    if (!container) return;
+    const codes = collectProfileBarcodeCodes(false);
+    if (codes.length === 0) {
+        container.innerHTML = '<span class="barcode-code-empty">No codes assigned yet.</span>';
+        return;
+    }
+    container.innerHTML = codes.map((code, index) => `
+        <div class="barcode-code-row ${index === 0 ? 'primary' : ''}">
+            <span>
+                <strong>${index === 0 ? 'Primary' : 'Alias'}</strong>
+                ${escapeHtml(code)}
+            </span>
+            ${index === 0
+                ? '<span class="barcode-code-primary">prints on labels</span>'
+                : `<button type="button" data-code="${escapeHtml(code)}" onclick="setPrimaryModalBarcodeCode(this.dataset.code)">Make Primary</button>`}
+            <button type="button" data-code="${escapeHtml(code)}" onclick="removeModalBarcodeCode(this.dataset.code)">X</button>
+        </div>
+    `).join('');
+}
+
+window.addModalBarcodeCode = async function() {
+    const input = document.getElementById('modal-barcode-code');
+    const code = normalizeMedicationCode(input?.value || createMedicationCode());
+    if (!code) return;
+    if (code.length > 100) {
+        await appAlert('Enter a QR/barcode code containing no more than 100 characters.');
+        return;
+    }
+    if (modalBarcodeCodes.map(normalizeMedicationCode).includes(code)) {
+        await appAlert('That QR/barcode code is already assigned to this medication.');
+        if (input) input.value = '';
+        return;
+    }
+    if (await warnBarcodeConflict(code, currentEditingMedId)) return;
+    modalBarcodeCodes = [...modalBarcodeCodes, code];
+    if (input) input.value = '';
+    renderModalBarcodeCodes();
+};
+
+window.removeModalBarcodeCode = function(code) {
+    const normalized = normalizeMedicationCode(code);
+    modalBarcodeCodes = modalBarcodeCodes.filter(item => normalizeMedicationCode(item) !== normalized);
+    renderModalBarcodeCodes();
+};
+
+window.setPrimaryModalBarcodeCode = function(code) {
+    const normalized = normalizeMedicationCode(code);
+    if (!normalized) return;
+    modalBarcodeCodes = [normalized, ...modalBarcodeCodes.filter(item => normalizeMedicationCode(item) !== normalized)];
+    renderModalBarcodeCodes();
+};
+
 function medicationCodeIsAvailable(code, excludedMedId = '') {
     const normalized = normalizeMedicationCode(code);
-    return normalized && !db.inventory.some(med =>
-        med.id !== excludedMedId && medicationCodes(med).includes(normalized)
-    );
+    return normalized && barcodeConflictItems(normalized, excludedMedId).length === 0;
 }
 
 function medicationQrDataUrl(code) {
@@ -1373,10 +1462,13 @@ function ensureActionModal() {
     modal.className = 'modal-overlay';
     modal.style.display = 'none';
     modal.innerHTML = `
-        <div class="window" style="width:420px;">
+        <div class="window action-modal-window">
             <div class="title-bar">
                 <div class="title-bar-text" id="action-modal-title">Action</div>
-                <div class="title-bar-controls"><button aria-label="Close" id="action-modal-x"></button></div>
+                <div class="title-bar-controls">
+                    <button aria-label="Minimize" id="action-modal-min"></button>
+                    <button aria-label="Close" id="action-modal-x"></button>
+                </div>
             </div>
             <div class="window-body">
                 <div id="action-modal-body"></div>
@@ -1388,6 +1480,121 @@ function ensureActionModal() {
         </div>`;
     document.body.appendChild(modal);
     return modal;
+}
+
+const workspaceTasks = new Map();
+let activeMemberTaskId = '';
+
+function updateWorkspaceTaskbar() {
+    const taskbar = document.getElementById('workspace-taskbar');
+    if (!taskbar) return;
+    const tasks = Array.from(workspaceTasks.values());
+    taskbar.classList.toggle('has-tasks', tasks.length > 0);
+    taskbar.innerHTML = tasks.map(task => `
+        <div class="taskbar-task ${task.active ? 'is-active' : ''} ${task.type ? `taskbar-${escapeHtml(task.type)}` : ''} ${task.sex ? `taskbar-sex-${escapeHtml(task.sex)}` : ''}" style="${task.color ? `--patient-color:${escapeHtml(task.color)};` : ''}" title="${escapeHtml(task.label)}">
+            <button type="button" class="taskbar-button" onclick="restoreWorkspaceTask('${escapeHtml(task.id)}')">
+                ${task.iconHtml || '<span class="win98-icon icon-view"></span>'}
+                <span class="taskbar-label">${escapeHtml(task.label)}</span>
+            </button>
+            <button type="button" class="taskbar-close" onclick="event.stopPropagation(); closeWorkspaceTask('${escapeHtml(task.id)}')" title="Close">X</button>
+        </div>
+    `).join('');
+}
+
+function registerWorkspaceTask(id, label, restoreFn, options = {}) {
+    workspaceTasks.forEach(task => { task.active = false; });
+    workspaceTasks.set(id, {
+        id,
+        label,
+        restoreFn,
+        active: true,
+        type: options.type || 'window',
+        iconHtml: options.iconHtml || '',
+        color: options.color || '',
+        sex: options.sex || ''
+    });
+    updateWorkspaceTaskbar();
+}
+
+window.restoreWorkspaceTask = function(id) {
+    const task = workspaceTasks.get(id);
+    if (!task) return;
+    if (id !== 'action-modal') {
+        const actionModal = document.getElementById('action-modal');
+        if (actionModal) actionModal.style.display = 'none';
+    }
+    if (!id.startsWith('member-modal-')) {
+        const memberModal = document.getElementById('member-modal');
+        if (memberModal) memberModal.style.display = 'none';
+    }
+    workspaceTasks.forEach(item => { item.active = item.id === id; });
+    updateWorkspaceTaskbar();
+    task.restoreFn?.();
+};
+
+function setWorkspaceTaskActive(id, active) {
+    const task = workspaceTasks.get(id);
+    if (!task) return;
+    task.active = active;
+    updateWorkspaceTaskbar();
+}
+
+function removeWorkspaceTask(id) {
+    workspaceTasks.delete(id);
+    if (activeMemberTaskId === id) activeMemberTaskId = '';
+    updateWorkspaceTaskbar();
+}
+
+window.closeWorkspaceTask = async function(id) {
+    if (id === 'action-modal') {
+        document.getElementById('action-modal-x')?.click();
+        return;
+    }
+    if (id.startsWith('member-modal-')) {
+        const modal = document.getElementById('member-modal');
+        if (activeMemberTaskId === id && modal) {
+            await saveMemberFromProfile({ closeAfter: true });
+            return;
+        }
+        removeWorkspaceTask(id);
+    }
+};
+
+function iconClassForButtonText(text) {
+    const value = String(text || '').toLowerCase();
+    if (!value) return '';
+    if (value.includes('label') || value.includes('print')) return 'icon-label';
+    if (value.includes('schedule') || value.includes('calendar') || value.includes('today') || value.includes('day')) return 'icon-calendar';
+    if (value.includes('prepack')) return 'icon-box';
+    if (value.includes('regimen')) return 'icon-regimen';
+    if (value.includes('monitor') || value.includes('vital') || value.includes('reading')) return 'icon-monitor';
+    if (value.includes('inventory') || value.includes('stock') || value.includes('restock')) return 'icon-inventory';
+    if (value.includes('formulary')) return 'icon-formulary';
+    if (value.includes('order') || value.includes('receive')) return value.includes('receive') ? 'icon-receive' : 'icon-order';
+    if (value.includes('profile') || value.includes('person') || value.includes('member') || value.includes('provider')) return 'icon-family';
+    if (value.includes('view') || value.includes('open') || value.includes('pdf') || value.includes('report')) return 'icon-view';
+    if (value.includes('clear') || value.includes('remove') || value.includes('delete') || value.includes('cancel')) return 'icon-clear';
+    if (value.includes('add') || value.includes('save') || value.includes('generate')) return 'icon-view';
+    return '';
+}
+
+function enhanceButtonIcons(root = document) {
+    root.querySelectorAll('button').forEach(button => {
+        if (
+            button.dataset.iconEnhanced === 'true' ||
+            button.querySelector('.win98-icon') ||
+            button.closest('.title-bar-controls') ||
+            button.classList.contains('taskbar-button') ||
+            button.classList.contains('taskbar-close') ||
+            button.classList.contains('inventory-builder-remove')
+        ) return;
+        const iconClass = iconClassForButtonText(button.textContent);
+        if (!iconClass) return;
+        const icon = document.createElement('span');
+        icon.className = `win98-icon ${iconClass}`;
+        button.prepend(icon);
+        button.dataset.iconEnhanced = 'true';
+    });
 }
 
 function collectNamedInputs(container) {
@@ -1413,27 +1620,56 @@ function collectNamedInputs(container) {
 
 function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) {
     const modal = ensureActionModal();
+    const windowEl = modal.querySelector('.action-modal-window');
     const body = modal.querySelector('#action-modal-body');
     const ok = modal.querySelector('#action-modal-ok');
     const cancel = modal.querySelector('#action-modal-cancel');
     const close = modal.querySelector('#action-modal-x');
+    const minimize = modal.querySelector('#action-modal-min');
+    const isTaskbarWindow = bodyHtml.includes('data-action-modal-size="wide"');
+    const taskId = 'action-modal';
 
     modal.querySelector('#action-modal-title').innerText = title;
     body.innerHTML = bodyHtml;
+    windowEl?.classList.toggle('action-modal-window-wide', isTaskbarWindow);
     ok.innerText = confirmText;
+    enhanceButtonIcons(body);
+    if (minimize) minimize.style.display = isTaskbarWindow ? '' : 'none';
     modal.style.display = 'flex';
+    if (isTaskbarWindow) {
+        registerWorkspaceTask(taskId, title, () => {
+            modal.style.display = 'flex';
+            setWorkspaceTaskActive(taskId, true);
+        }, {
+            type: 'function',
+            iconHtml: title.toLowerCase().includes('order')
+                ? '<span class="win98-icon icon-order"></span>'
+                : '<span class="win98-icon icon-formulary"></span>'
+        });
+    } else {
+        removeWorkspaceTask(taskId);
+    }
 
     return new Promise(resolve => {
         const cleanup = value => {
             ok.onclick = null;
             cancel.onclick = null;
             close.onclick = null;
+            if (minimize) minimize.onclick = null;
+            windowEl?.classList.remove('action-modal-window-wide');
+            removeWorkspaceTask(taskId);
             modal.style.display = 'none';
             resolve(value);
         };
         ok.onclick = () => cleanup(collectFn ? collectFn(body) : collectNamedInputs(body));
         cancel.onclick = () => cleanup(null);
         close.onclick = () => cleanup(null);
+        if (minimize) {
+            minimize.onclick = () => {
+                modal.style.display = 'none';
+                setWorkspaceTaskActive(taskId, false);
+            };
+        }
     });
 }
 
@@ -2695,10 +2931,124 @@ window.removeCompletedOrderSet = async function(orderSetId) {
     if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
 };
 
-window.openMemberModal = function(id = null) {
-    currentEditingMemberId = id;
+function memberTaskIdFor(memberId) {
+    return `member-modal-${memberId || 'new'}`;
+}
+
+function memberTaskLabel(member) {
+    if (!member) return 'New Member Profile';
+    const relation = member.middleName ? ` ${member.middleName}` : '';
+    return `${member.firstName || ''}${relation} ${member.lastName || ''}`.trim() || 'Member Profile';
+}
+
+function memberTaskIconHtml(member) {
+    const sex = String(member?.sex || '').toLowerCase();
+    const sexClass = sex === 'female' ? 'female' : 'male';
+    const color = member?.calendarColor || (sexClass === 'female' ? '#c04682' : '#1f66b5');
+    return `<span class="taskbar-patient-icon ${sexClass}" style="--patient-color:${escapeHtml(color)}"><span></span></span>`;
+}
+
+function memberFormHasAnyInput() {
+    return ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-addr', 'm-phone', 'm-email']
+        .some(fieldId => String(document.getElementById(fieldId)?.value || '').trim());
+}
+
+function collectMemberFormData() {
+    const vitalGoals = collectMemberGoals();
+    if (!vitalGoals) return null;
+    const typedDiagnoses = String(document.getElementById('m-diag').value || '')
+        .split(/[\n,;]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    const diagnosesList = Array.from(new Set([...getHiddenJson('m-diagnoses-data'), ...typedDiagnoses]));
+    const prescriberIds = getHiddenJson('m-prescriber-ids-data');
+    const allergies = normalizeMemberAllergies({ allergies: getHiddenJson('m-allergies-data') });
+    const firstName = document.getElementById('m-first').value.trim();
+    const lastName = document.getElementById('m-last').value.trim();
+    if (!firstName || !lastName) {
+        alert("First and Last Name required.");
+        return null;
+    }
+    return {
+        firstName,
+        middleName: document.getElementById('m-middle').value,
+        lastName,
+        sex: document.getElementById('m-sex').value,
+        age: document.getElementById('m-age').value,
+        dob: document.getElementById('m-dob').value,
+        providers: document.getElementById('m-providers').value,
+        diagnoses: diagnosesList.join(', '),
+        diagnosesList,
+        allergies,
+        address: document.getElementById('m-addr').value,
+        phone: document.getElementById('m-phone').value,
+        email: document.getElementById('m-email').value,
+        prescriberIds,
+        notificationPrefs: {
+            medicationReminders: document.getElementById('m-notify-enabled')?.checked !== false,
+            emailReminders: document.getElementById('m-email-reminders')?.checked === true
+        },
+        calendarColor: document.getElementById('m-calendar-color').value || '#000080',
+        vitalGoals,
+        name: `${firstName} ${lastName}`
+    };
+}
+
+function registerMemberTask(member, active = true) {
+    if (!member?.id) return;
+    const taskId = memberTaskIdFor(member.id);
+    activeMemberTaskId = taskId;
+    registerWorkspaceTask(taskId, memberTaskLabel(member), () => {
+        openMemberModal(member.id);
+        setWorkspaceTaskActive(taskId, true);
+    }, {
+        type: 'patient',
+        iconHtml: memberTaskIconHtml(member),
+        color: member.calendarColor || '',
+        sex: String(member.sex || '').toLowerCase()
+    });
+    if (!active) setWorkspaceTaskActive(taskId, false);
+}
+
+async function saveMemberFromProfile({ closeAfter = true } = {}) {
+    const data = collectMemberFormData();
+    if (!data) return false;
+    let savedMember = null;
+    if (currentEditingMemberId) {
+        const index = db.family.findIndex(m => m.id === currentEditingMemberId);
+        if (index >= 0) {
+            db.family[index] = { ...db.family[index], ...data };
+            savedMember = db.family[index];
+        } else {
+            savedMember = { id: currentEditingMemberId, ...data };
+            db.family.push(savedMember);
+        }
+    } else {
+        savedMember = { id: Date.now().toString(), ...data };
+        db.family.push(savedMember);
+        currentEditingMemberId = savedMember.id;
+    }
+    await sync();
+    registerMemberTask(savedMember, !closeAfter);
+    if (closeAfter) closeMemberModal();
+    return true;
+}
+
+async function autosaveVisibleMemberBeforeSwitch(nextTaskId) {
+    const modal = document.getElementById('member-modal');
+    if (modal?.style.display !== 'flex' || !activeMemberTaskId || activeMemberTaskId === nextTaskId) return true;
+    if (!currentEditingMemberId && !memberFormHasAnyInput()) return true;
+    const saved = await saveMemberFromProfile({ closeAfter: false });
+    if (saved && activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+    return saved;
+}
+
+window.openMemberModal = async function(id = null) {
     const modal = document.getElementById('member-modal');
     const title = document.getElementById('member-modal-title');
+    const requestedTaskId = memberTaskIdFor(id);
+    if (!await autosaveVisibleMemberBeforeSwitch(requestedTaskId)) return;
+    currentEditingMemberId = id;
 
 
     // Helper function to set value only if element exists
@@ -2737,7 +3087,7 @@ window.openMemberModal = function(id = null) {
         const m = db.family.find(member => member.id === id);
         if (m) {
             if (title) {
-                title.innerText = `${m.firstName} ${m.lastName}`;
+                title.innerHTML = `${memberTaskIconHtml(m)} <span>${escapeHtml(`${m.firstName} ${m.lastName}`)}</span>`;
             }
             // 2. Fill fields safely
             safeSet('m-first', m.firstName);
@@ -2890,7 +3240,7 @@ window.openMemberModal = function(id = null) {
             renderMemberCalendar(m.id);
         }
     } else {
-        if (title) title.innerText = "Add New Member";
+        if (title) title.innerHTML = `${memberTaskIconHtml(null)} <span>Add New Member</span>`;
         const profileVitals = document.getElementById('member-vitals-trends');
         if (profileVitals) profileVitals.innerHTML = '<div style="font-size:11px;">Save member before logging vitals.</div>';
         const adminLog = document.getElementById('member-admin-log');
@@ -2900,7 +3250,19 @@ window.openMemberModal = function(id = null) {
         if (prnMedsContainer) prnMedsContainer.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before adding PRN medication orders.</div>';
     }
 
-    if (modal) modal.style.display = 'flex';
+    if (modal) {
+        modal.style.display = 'flex';
+        const taskMember = id ? db.family.find(member => member.id === id) : null;
+        if (taskMember) registerMemberTask(taskMember);
+        else registerWorkspaceTask(requestedTaskId, 'New Member Profile', () => openMemberModal(null), {
+            type: 'patient',
+            iconHtml: memberTaskIconHtml(null),
+            color: '',
+            sex: ''
+        });
+        activeMemberTaskId = requestedTaskId;
+        enhanceButtonIcons(modal);
+    }
 };
 
 
@@ -3043,52 +3405,29 @@ window.saveOrderModification = async function() {
 };
 
 window.saveMember = async function() {
-    const vitalGoals = collectMemberGoals();
-    if (!vitalGoals) return;
-    const typedDiagnoses = String(document.getElementById('m-diag').value || '')
-        .split(/[\n,;]+/)
-        .map(item => item.trim())
-        .filter(Boolean);
-    const diagnosesList = Array.from(new Set([...getHiddenJson('m-diagnoses-data'), ...typedDiagnoses]));
-    const prescriberIds = getHiddenJson('m-prescriber-ids-data');
-    const allergies = normalizeMemberAllergies({ allergies: getHiddenJson('m-allergies-data') });
-
-    const data = {
-        firstName: document.getElementById('m-first').value,
-        middleName: document.getElementById('m-middle').value,
-        lastName: document.getElementById('m-last').value,
-        sex: document.getElementById('m-sex').value,
-        age: document.getElementById('m-age').value,
-        dob: document.getElementById('m-dob').value,
-        providers: document.getElementById('m-providers').value,
-        diagnoses: diagnosesList.join(', '),
-        diagnosesList,
-        allergies,
-        address: document.getElementById('m-addr').value,
-        phone: document.getElementById('m-phone').value,
-        email: document.getElementById('m-email').value,
-        prescriberIds,
-        notificationPrefs: {
-            medicationReminders: document.getElementById('m-notify-enabled')?.checked !== false,
-            emailReminders: document.getElementById('m-email-reminders')?.checked === true
-        },
-        calendarColor: document.getElementById('m-calendar-color').value || '#000080',
-        vitalGoals,
-        //prescribedMeds: document.getElementById('m-meds').value,
-        name: `${document.getElementById('m-first').value} ${document.getElementById('m-last').value}`
-    };
-    if (!data.firstName || !data.lastName) return alert("First and Last Name required.");
-    if (currentEditingMemberId) {
-        const index = db.family.findIndex(m => m.id === currentEditingMemberId);
-        db.family[index] = { ...db.family[index], ...data };
-    } else {
-        db.family.push({ id: Date.now().toString(), ...data });
-    }
-    await sync();
-    closeMemberModal();
+    await saveMemberFromProfile({ closeAfter: true });
 };
 
-window.closeMemberModal = () => document.getElementById('member-modal').style.display = 'none';
+window.minimizeMemberModal = async function() {
+    const modal = document.getElementById('member-modal');
+    if (!modal) return;
+    if (!currentEditingMemberId && !memberFormHasAnyInput()) {
+        modal.style.display = 'none';
+        if (activeMemberTaskId) removeWorkspaceTask(activeMemberTaskId);
+        return;
+    }
+    if (currentEditingMemberId || memberFormHasAnyInput()) {
+        const saved = await saveMemberFromProfile({ closeAfter: false });
+        if (!saved) return;
+    }
+    modal.style.display = 'none';
+    if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+};
+
+window.closeMemberModal = () => {
+    document.getElementById('member-modal').style.display = 'none';
+    if (activeMemberTaskId) removeWorkspaceTask(activeMemberTaskId);
+};
 
 // --- INVENTORY ---
 window.addInventory = async function() {
@@ -3119,8 +3458,11 @@ window.addInventory = async function() {
     if (document.getElementById('med-assignment-mode')?.value === 'selected' && inventoryAssignedMemberIds.length === 0) {
         return alert("Select at least one member or change assignment to all members.");
     }
-    if (barcodeCode.length > 100 || !medicationCodeIsAvailable(barcodeCode)) {
-        return alert("Enter a unique QR code containing no more than 100 characters.");
+    if (barcodeCode.length > 100) {
+        return alert("Enter a QR code containing no more than 100 characters.");
+    }
+    if (await warnBarcodeConflict(barcodeCode)) {
+        return;
     }
 
     // --- NEW COMBINATION LOGIC ---
@@ -3418,7 +3760,10 @@ window.openMedProfile = function(id) {
     document.getElementById('modal-notes').value = med.notes || "";
     document.getElementById('modal-storage').value = med.storage || "";
     document.getElementById('modal-control-level').value = med.controlLevel || "N/A";
-    document.getElementById('modal-barcode-code').value = med.barcodeCode || createMedicationCode();
+    modalBarcodeCodes = medicationCodes(med);
+    if (modalBarcodeCodes.length === 0) modalBarcodeCodes = [createMedicationCode()];
+    document.getElementById('modal-barcode-code').value = '';
+    renderModalBarcodeCodes();
     const formulationSelect = document.getElementById('modal-formulation');
     addSelectOptionIfMissing(formulationSelect, med.formulation || 'Other');
     formulationSelect.value = med.formulation || 'Other';
@@ -3451,14 +3796,20 @@ window.saveMedProfile = async function() {
     if (med) {
         // 1. Update text fields
         const updatedName = document.getElementById('modal-med-name').value.trim();
-        const barcodeCode = normalizeMedicationCode(document.getElementById('modal-barcode-code').value);
+        let barcodeCodes = collectProfileBarcodeCodes(true);
+        if (barcodeCodes.length === 0) barcodeCodes = [createMedicationCode()];
         if (!updatedName) {
             await appAlert('Medication name is required.');
             return;
         }
-        if (barcodeCode.length > 100 || !medicationCodeIsAvailable(barcodeCode, med.id)) {
-            await appAlert('Enter a unique QR code containing no more than 100 characters.');
+        if (barcodeCodes.some(code => code.length > 100)) {
+            await appAlert('Enter QR/barcode codes containing no more than 100 characters.');
             return;
+        }
+        for (const code of barcodeCodes) {
+            if (await warnBarcodeConflict(code, med.id)) {
+                return;
+            }
         }
         const profileAssignedMemberIds = collectMedicationAssignment('modal');
         if (document.getElementById('modal-assignment-mode')?.value === 'selected' && profileAssignedMemberIds.length === 0) {
@@ -3528,8 +3879,8 @@ window.saveMedProfile = async function() {
         med.expiry = document.getElementById('modal-expiry').value;
         med.prescriberId = document.getElementById('modal-prescriber')?.value || '';
         med.assignedMemberIds = profileAssignedMemberIds;
-        med.barcodeCode = barcodeCode;
-        med.barcodeCodes = Array.from(new Set([barcodeCode, ...medicationCodes(med)].filter(Boolean)));
+        med.barcodeCode = barcodeCodes[0];
+        med.barcodeCodes = barcodeCodes;
         med.formulation = formulation;
         med.isCombination = isCombination;
         med.components = components;
@@ -3576,6 +3927,7 @@ window.saveMedProfile = async function() {
         // Clear the file input for next time
         if (imageInput) imageInput.value = '';
         pendingModalMedImage = null;
+        modalBarcodeCodes = [];
         updateImageDropzone('modal-image-dropzone', null);
 
         closeMedModal();
@@ -3583,7 +3935,13 @@ window.saveMedProfile = async function() {
 };
 
 
-window.closeMedModal = () => document.getElementById('med-modal').style.display = 'none';
+window.closeMedModal = () => {
+    modalBarcodeCodes = [];
+    const input = document.getElementById('modal-barcode-code');
+    if (input) input.value = '';
+    renderModalBarcodeCodes();
+    document.getElementById('med-modal').style.display = 'none';
+};
 
 // --- ORDER SETS ---
 function frequencyOptionsHtml(selected = 'QD') {
@@ -4098,6 +4456,10 @@ window.saveOrderSet = async function() {
 window.editOrderSet = function(id) {
     const set = db.orderSets.find(orderSet => orderSet.id === id);
     if (!set) return;
+    const memberModal = document.getElementById('member-modal');
+    if (memberModal?.style.display === 'flex') {
+        minimizeMemberModal();
+    }
     document.getElementById('order-set-edit-id').value = set.id;
     document.getElementById('order-set-member').value = set.memberId;
     document.getElementById('order-set-name').value = set.name;
@@ -4402,7 +4764,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
             orderSetId: row.schedule.orderSetId || '',
             orderSetName: row.schedule.orderSetName || '',
             isPrepackAdded: row.schedule.prepackAdded === true || addedScheduleIds.has(row.schedule.id),
-            barcodeCode: normalizeMedicationCode(row.med.barcodeCode),
+            barcodeCode: medicationCodes(row.med)[0] || '',
             status: 'pending',
             scannedCode: ''
         });
@@ -4434,7 +4796,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
             orderSetId: firstRow.schedule.orderSetId || '',
             orderSetName: firstRow.schedule.orderSetName || '',
             isPrepackAdded: firstRow.schedule.prepackAdded === true || addedScheduleIds.has(firstRow.schedule.id),
-            barcodeCode: normalizeMedicationCode(firstRow.med.barcodeCode),
+            barcodeCode: medicationCodes(firstRow.med)[0] || '',
             status: 'pending',
             scannedCode: ''
         };
@@ -4812,7 +5174,8 @@ window.schedulePrepackScan = function(queueId) {
         const day = queue?.days?.[queue.currentDayIndex || 0];
         const nextItem = day?.items.find(candidate => candidate.status !== 'correct');
         const med = nextItem && db.inventory.find(candidate => candidate.id === nextItem.medId);
-        const expectedLength = normalizeMedicationCode(med?.barcodeCode || nextItem?.barcodeCode).length;
+        const expectedCodes = med ? medicationCodes(med) : [normalizeMedicationCode(nextItem?.barcodeCode)].filter(Boolean);
+        const expectedLength = (expectedCodes[0] || '').length;
         const typedLength = normalizeMedicationCode(input?.value).length;
         if (typedLength >= Math.min(Math.max(expectedLength, 1), 4)) window.scanPrepackCode(queueId);
     }, 180);
@@ -4828,10 +5191,10 @@ window.scanPrepackCode = async function(queueId) {
     const scannedCode = normalizeMedicationCode(input.value);
     if (!scannedCode) return;
     const med = db.inventory.find(candidate => candidate.id === item.medId);
-    const expectedCode = normalizeMedicationCode(med?.barcodeCode || item.barcodeCode);
+    const expectedCodes = med ? medicationCodes(med) : [normalizeMedicationCode(item.barcodeCode)].filter(Boolean);
     item.scannedCode = scannedCode;
     item.scannedAt = new Date().toISOString();
-    item.status = scannedCode === expectedCode ? 'correct' : 'wrong';
+    item.status = expectedCodes.includes(scannedCode) ? 'correct' : 'wrong';
     if (item.status === 'correct') item.verificationMethod = 'scan';
     input.value = '';
     updatePrepackQueueStatus(queue);
@@ -7849,6 +8212,163 @@ function sortByName(list, getName = item => item.name || '') {
     return list.slice().sort((a, b) => getName(a).localeCompare(getName(b), undefined, { sensitivity: 'base' }));
 }
 
+function inventoryOrderName(order) {
+    return String(order?.name || '').trim() || `Inventory Order - ${order?.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'unsaved'}`;
+}
+
+function inventoryOrderLabel(order) {
+    const created = order?.createdAt ? new Date(order.createdAt).toLocaleString() : 'No date';
+    return `${inventoryOrderName(order)} - ${created} - ${order?.status || 'open'} - ${order?.lines?.length || 0} item(s)`;
+}
+
+function modalNamedValue(body, name) {
+    const escapedName = cssEscape(name);
+    return body?.querySelector(`[name="${escapedName}"]`)?.value || '';
+}
+
+function cssEscape(value) {
+    return typeof CSS !== 'undefined' && CSS.escape
+        ? CSS.escape(String(value))
+        : String(value).replace(/["\\]/g, '\\$&');
+}
+
+function filterInventoryBuilder(inputId, itemSelector) {
+    const body = document.getElementById('action-modal-body');
+    const query = String(body?.querySelector(`#${inputId}`)?.value || '').trim().toLowerCase();
+    body?.querySelectorAll(itemSelector).forEach(item => {
+        item.classList.toggle('is-hidden', query && !String(item.dataset.search || '').includes(query));
+    });
+}
+
+function renderBuilderPreview(targetId, items, emptyText = 'Nothing selected yet.') {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    target.innerHTML = items.length
+        ? items.map(item => `
+            <div class="inventory-builder-preview-item">
+                <div class="inventory-builder-preview-text">
+                    <strong>${escapeHtml(item.name)}</strong>
+                    <div>${escapeHtml([item.strength, item.units].filter(Boolean).join(' | ') || 'No strength/units entered')}</div>
+                    ${item.qty ? `<div>Qty: ${escapeHtml(item.qty)}</div>` : ''}
+                    ${item.notes ? `<div class="form-help">${escapeHtml(item.notes)}</div>` : ''}
+                </div>
+                <button type="button" class="inventory-builder-remove"
+                    data-builder-name="${escapeHtml(item.removeName || '')}"
+                    data-builder-value="${escapeHtml(item.removeValue || '')}"
+                    data-builder-row="${escapeHtml(item.removeRow || '')}"
+                    data-builder-render="${escapeHtml(item.removeRender || '')}"
+                    onclick="removePendingBuilderSelection(this)">X</button>
+            </div>`).join('')
+        : `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+}
+
+window.removePendingBuilderSelection = function(button) {
+    const body = document.getElementById('action-modal-body');
+    const rowId = button?.dataset.builderRow || '';
+    const inputName = button?.dataset.builderName || '';
+    const inputValue = button?.dataset.builderValue || '';
+    const renderName = button?.dataset.builderRender || '';
+    if (rowId) {
+        document.getElementById(rowId)?.remove();
+    } else if (body && inputName && inputValue) {
+        body.querySelectorAll(`input[name="${cssEscape(inputName)}"]`).forEach(input => {
+            if (input.value === inputValue) input.checked = false;
+        });
+    }
+    if (renderName && typeof window[renderName] === 'function') window[renderName]();
+};
+
+window.filterFormularyBuilder = function() {
+    filterInventoryBuilder('formulary-builder-search', '.formulary-builder-source-item');
+};
+
+window.renderFormularyBuilderPreview = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const items = [];
+    body.querySelectorAll('input[name="formularyInventoryIds"]:checked').forEach(input => {
+        const med = db.inventory.find(item => item.id === input.value);
+        if (!med) return;
+        items.push({
+            name: inventoryDisplayName(med),
+            strength: formatMedStrength(med),
+            units: formatInventoryUnits(med),
+            qty: modalNamedValue(body, `targetQty-${med.id}`),
+            notes: modalNamedValue(body, `notes-${med.id}`),
+            removeName: 'formularyInventoryIds',
+            removeValue: med.id,
+            removeRender: 'renderFormularyBuilderPreview'
+        });
+    });
+    body.querySelectorAll('.formulary-custom-row').forEach(row => {
+        const name = row.querySelector('[name="customName"]')?.value.trim() || '';
+        if (!name) return;
+        items.push({
+            name,
+            strength: row.querySelector('[name="customStrength"]')?.value.trim() || '',
+            units: row.querySelector('[name="customUnits"]')?.value.trim() || '',
+            qty: row.querySelector('[name="customTargetQty"]')?.value.trim() || '',
+            notes: row.querySelector('[name="customNotes"]')?.value.trim() || '',
+            removeRow: row.id,
+            removeRender: 'renderFormularyBuilderPreview'
+        });
+    });
+    renderBuilderPreview('formulary-builder-preview', items, 'Select or add items to build your formulary.');
+};
+
+window.filterOrderBuilder = function() {
+    filterInventoryBuilder('order-builder-search', '.order-builder-source-item');
+};
+
+window.renderOrderBuilderPreview = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const items = [];
+    body.querySelectorAll('input[name="candidateMedIds"]:checked, input[name="otherInventoryIds"]:checked').forEach(input => {
+        const med = db.inventory.find(item => item.id === input.value);
+        if (!med) return;
+        const qtyName = input.name === 'candidateMedIds' ? `candidateQty-${med.id}` : `otherInventoryQty-${med.id}`;
+        items.push({
+            name: inventoryDisplayName(med),
+            strength: formatMedStrength(med),
+            units: formatInventoryUnits(med),
+            qty: modalNamedValue(body, qtyName),
+            notes: input.name === 'candidateMedIds' ? 'Low/expired stock' : 'Current inventory',
+            removeName: input.name,
+            removeValue: med.id,
+            removeRender: 'renderOrderBuilderPreview'
+        });
+    });
+    body.querySelectorAll('input[name="formularyOrderIds"]:checked').forEach(input => {
+        const item = db.formularyItems.find(candidate => candidate.id === input.value);
+        if (!item) return;
+        items.push({
+            name: formularyItemName(item),
+            strength: item.strength || '',
+            units: item.units || '',
+            qty: modalNamedValue(body, `formularyQty-${item.id}`),
+            notes: item.notes || 'Formulary item',
+            removeName: 'formularyOrderIds',
+            removeValue: item.id,
+            removeRender: 'renderOrderBuilderPreview'
+        });
+    });
+    body.querySelectorAll('.formulary-custom-row').forEach(row => {
+        const name = row.querySelector('[name="orderCustomName"]')?.value.trim() || '';
+        if (!name) return;
+        items.push({
+            name,
+            strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
+            units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+            qty: row.querySelector('[name="orderCustomQty"]')?.value.trim() || '',
+            notes: row.querySelector('[name="orderCustomNotes"]')?.value.trim() || '',
+            removeRow: row.id,
+            removeRender: 'renderOrderBuilderPreview'
+        });
+    });
+    renderBuilderPreview('order-builder-preview', items, 'Select or add items to stage this order.');
+};
+
 function formularyPdfBody() {
     const rows = sortByName(db.formularyItems || [], formularyItemName).map(item => {
         const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
@@ -7861,7 +8381,7 @@ function formularyPdfBody() {
             <td>${escapeHtml(item.notes || '')}</td>
         </tr>`;
     }).join('');
-    return `<h2>Reorder Formulary</h2>
+    return `<h2>Formulary</h2>
         <table>
             <thead><tr><th>Item</th><th>Strength</th><th>Units</th><th>Target Qty</th><th>Current Stock</th><th>Notes</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6">No formulary items saved.</td></tr>'}</tbody>
@@ -7877,7 +8397,7 @@ function renderInventoryWorkflowSummary() {
     container.innerHTML = `
         <div class="inventory-workflow-card"><strong>Formulary</strong>${formularyCount} reorder item${formularyCount === 1 ? '' : 's'} saved.</div>
         <div class="inventory-workflow-card"><strong>Open Orders</strong>${openOrders.length} order${openOrders.length === 1 ? '' : 's'} waiting to be received.</div>
-        <div class="inventory-workflow-card"><strong>Latest Order</strong>${latestOrder ? `${escapeHtml(new Date(latestOrder.createdAt).toLocaleString())} - ${escapeHtml(latestOrder.status || 'open')}` : 'No orders created yet.'}</div>`;
+        <div class="inventory-workflow-card"><strong>Latest Order</strong>${latestOrder ? `${escapeHtml(inventoryOrderName(latestOrder))}<br>${escapeHtml(new Date(latestOrder.createdAt).toLocaleString())} - ${escapeHtml(latestOrder.status || 'open')}` : 'No orders created yet.'}</div>`;
 }
 
 window.addFormularyCustomRow = function(values = {}) {
@@ -7887,18 +8407,28 @@ window.addFormularyCustomRow = function(values = {}) {
     const div = document.createElement('div');
     div.className = 'formulary-custom-row';
     div.innerHTML = `
-        <input name="customName" type="text" placeholder="Medication or supplement" value="${escapeHtml(values.name || '')}">
-        <input name="customStrength" type="text" placeholder="Strength" value="${escapeHtml(values.strength || '')}">
-        <input name="customUnits" type="text" placeholder="Units" value="${escapeHtml(values.units || '')}">
-        <input name="customTargetQty" type="text" placeholder="Target qty" value="${escapeHtml(values.targetQty || '')}">
-        <input name="customNotes" type="text" placeholder="Notes" value="${escapeHtml(values.notes || '')}">
-        <button type="button" onclick="document.getElementById('${rowId}').remove()">Remove</button>`;
+        <input name="customName" type="text" placeholder="Medication or supplement" value="${escapeHtml(values.name || '')}" oninput="renderFormularyBuilderPreview()">
+        <input name="customStrength" type="text" placeholder="Strength" value="${escapeHtml(values.strength || '')}" oninput="renderFormularyBuilderPreview()">
+        <input name="customUnits" type="text" placeholder="Units" value="${escapeHtml(values.units || '')}" oninput="renderFormularyBuilderPreview()">
+        <input name="customTargetQty" type="text" placeholder="Target qty" value="${escapeHtml(values.targetQty || '')}" oninput="renderFormularyBuilderPreview()">
+        <input name="customNotes" type="text" placeholder="Notes" value="${escapeHtml(values.notes || '')}" oninput="renderFormularyBuilderPreview()">
+        <button type="button" onclick="document.getElementById('${rowId}').remove(); renderFormularyBuilderPreview();">Remove</button>`;
     div.id = rowId;
     container.appendChild(div);
+    window.renderFormularyBuilderPreview?.();
 };
 
 window.toggleAllFormularyChoices = function(checked) {
     document.querySelectorAll('#action-modal-body input[name="formularyInventoryIds"]').forEach(input => { input.checked = checked; });
+    window.renderFormularyBuilderPreview?.();
+};
+
+window.filterFormularyView = function() {
+    const body = document.getElementById('action-modal-body');
+    const query = String(body?.querySelector('#formulary-view-search')?.value || '').trim().toLowerCase();
+    body?.querySelectorAll('.formulary-view-card').forEach(card => {
+        card.classList.toggle('is-hidden', query && !String(card.dataset.search || '').includes(query));
+    });
 };
 
 window.createEditFormulary = async function() {
@@ -7908,24 +8438,36 @@ window.createEditFormulary = async function() {
     const inventoryChoices = sortByName(db.inventory, inventoryDisplayName).map((med, index) => {
         const existing = byMedId.get(med.id);
         const inputId = `formulary-med-${index}`;
-        return `<div class="formulary-item">
-            <input id="${inputId}" name="formularyInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''}>
+        const searchText = inventorySearchText(med);
+        return `<div class="formulary-item inventory-builder-source-item formulary-builder-source-item" data-search="${escapeHtml(searchText)}">
+            <input id="${inputId}" name="formularyInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''} onchange="renderFormularyBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="targetQty-${escapeHtml(med.id)}" type="text" placeholder="Target qty" value="${escapeHtml(existing?.targetQty || '')}" style="width:80px;">
-            <input name="notes-${escapeHtml(med.id)}" type="text" placeholder="Notes" value="${escapeHtml(existing?.notes || '')}" style="width:150px;">
+            <input name="targetQty-${escapeHtml(med.id)}" type="text" placeholder="Target qty" value="${escapeHtml(existing?.targetQty || '')}" style="width:80px;" oninput="renderFormularyBuilderPreview()">
+            <input name="notes-${escapeHtml(med.id)}" type="text" placeholder="Notes" value="${escapeHtml(existing?.notes || '')}" style="width:150px;" oninput="renderFormularyBuilderPreview()">
         </div>`;
     }).join('');
 
     const formularyPromise = showActionModal('Create/edit Formulary', `
-        <div style="font-size:11px; margin-bottom:6px;">Select inventory items to keep on your reorder formulary. Add free-text items for products not currently in inventory.</div>
-        <div class="field-row" style="margin-bottom:6px;">
-            <button type="button" onclick="toggleAllFormularyChoices(true)">Select All Inventory</button>
-            <button type="button" onclick="toggleAllFormularyChoices(false)">Deselect All Inventory</button>
-            <button type="button" onclick="addFormularyCustomRow()">Add Non-inventory Item</button>
+        <div data-action-modal-size="wide" class="inventory-builder-layout">
+            <div class="inventory-builder-source">
+                <div style="font-size:11px; margin-bottom:6px;">Select inventory items to keep on your reorder formulary. Add free-text items for products not currently in inventory.</div>
+                <div class="field-row" style="margin-bottom:6px;">
+                    <label>Search:</label><input id="formulary-builder-search" class="inventory-builder-search" type="text" placeholder="Find inventory item..." oninput="filterFormularyBuilder()">
+                </div>
+                <div class="field-row" style="margin-bottom:6px;">
+                    <button type="button" onclick="toggleAllFormularyChoices(true)">Select All Inventory</button>
+                    <button type="button" onclick="toggleAllFormularyChoices(false)">Deselect All Inventory</button>
+                    <button type="button" onclick="addFormularyCustomRow()">Add Non-inventory Item</button>
+                </div>
+                <div class="formulary-grid">${inventoryChoices || '<div class="empty-state">No inventory items yet.</div>'}</div>
+                <div style="font-size:11px; margin:8px 0 4px;"><strong>Non-inventory formulary items</strong></div>
+                <div id="formulary-custom-list"></div>
+            </div>
+            <div class="inventory-builder-selected">
+                <div class="inventory-builder-panel-title">Pending formulary</div>
+                <div id="formulary-builder-preview" class="inventory-builder-panel"></div>
+            </div>
         </div>
-        <div class="formulary-grid">${inventoryChoices || '<div class="empty-state">No inventory items yet.</div>'}</div>
-        <div style="font-size:11px; margin:8px 0 4px;"><strong>Non-inventory formulary items</strong></div>
-        <div id="formulary-custom-list"></div>
     `, 'Save Formulary', body => {
         const base = collectNamedInputs(body);
         base.customRows = Array.from(body.querySelectorAll('.formulary-custom-row')).map(row => ({
@@ -7938,6 +8480,7 @@ window.createEditFormulary = async function() {
         return base;
     });
     customItems.forEach(item => window.addFormularyCustomRow(item));
+    window.renderFormularyBuilderPreview?.();
     const result = await formularyPromise;
     if (!result) return;
 
@@ -7972,25 +8515,52 @@ window.createEditFormulary = async function() {
 };
 
 window.viewFormulary = async function() {
+    window.editFormularyAfterView = false;
     const items = sortByName(db.formularyItems || [], formularyItemName);
-    const rows = items.map(item => {
+    const cards = items.map(item => {
         const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
-        return `<tr>
-            <td>${escapeHtml(formularyItemName(item))}</td>
-            <td>${escapeHtml(med ? `${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}` : 'Not in inventory')}</td>
-            <td>${escapeHtml(item.targetQty || '')}</td>
-            <td>${escapeHtml(item.notes || '')}</td>
-        </tr>`;
+        const searchText = [
+            formularyItemName(item),
+            med ? formatMedStrength(med) : item.strength,
+            med ? formatInventoryUnits(med) : item.units,
+            item.targetQty,
+            item.notes
+        ].filter(Boolean).join(' ').toLowerCase();
+        return `<div class="formulary-view-card" data-search="${escapeHtml(searchText)}">
+            <div class="formulary-view-main">
+                <strong>${escapeHtml(formularyItemName(item))}</strong>
+                <span>${escapeHtml(med ? 'Inventory item' : 'Non-inventory item')}</span>
+            </div>
+            <div class="formulary-view-meta">
+                <div><small>Current</small><b>${escapeHtml(med ? `${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}` : 'Not in inventory')}</b></div>
+                <div><small>Target</small><b>${escapeHtml(item.targetQty || '-')}</b></div>
+                <div><small>Strength</small><b>${escapeHtml(med ? formatMedStrength(med) : (item.strength || '-'))}</b></div>
+                <div><small>Units</small><b>${escapeHtml(med ? formatInventoryUnits(med) : (item.units || '-'))}</b></div>
+            </div>
+            ${item.notes ? `<div class="formulary-view-notes">${escapeHtml(item.notes)}</div>` : ''}
+        </div>`;
     }).join('');
     const result = await showActionModal('View Formulary', `
-        <div class="sunken-panel" style="background:white; max-height:420px; overflow:auto;">
-            <table class="interactive" style="width:100%;">
-                <thead><tr><th>Item</th><th>Current Stock</th><th>Target Qty</th><th>Notes</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="4">No formulary items saved.</td></tr>'}</tbody>
-            </table>
+        <div data-action-modal-size="wide" class="formulary-view">
+            <div class="formulary-view-toolbar">
+                <div>
+                    <strong>Master Formulary</strong>
+                    <div class="form-help">${items.length} item${items.length === 1 ? '' : 's'} saved. Editing updates this same list.</div>
+                </div>
+                <div class="field-row">
+                    <label>Search:</label><input id="formulary-view-search" type="text" placeholder="Find formulary item..." oninput="filterFormularyView()">
+                    <button type="button" onclick="window.editFormularyAfterView = true; document.getElementById('action-modal-cancel')?.click();">Edit Formulary</button>
+                </div>
+            </div>
+            <div id="formulary-view-list" class="formulary-view-list">${cards || '<div class="empty-state">No formulary items saved.</div>'}</div>
         </div>
     `, 'Generate PDF');
-    if (result) await saveReportPdf('Formulary Reorder List', formularyPdfBody(), 'Formulary');
+    if (window.editFormularyAfterView) {
+        window.editFormularyAfterView = false;
+        await createEditFormulary();
+        return;
+    }
+    if (result) await saveReportPdf('Formulary', formularyPdfBody(), 'Formulary');
 };
 
 function orderLineFromInventory(med, reason = '') {
@@ -8037,13 +8607,14 @@ window.addOrderCustomRow = function() {
     div.id = rowId;
     div.className = 'formulary-custom-row';
     div.innerHTML = `
-        <input name="orderCustomName" type="text" placeholder="Medication or supplement">
-        <input name="orderCustomStrength" type="text" placeholder="Strength">
-        <input name="orderCustomUnits" type="text" placeholder="Units">
-        <input name="orderCustomQty" type="text" placeholder="Order qty">
-        <input name="orderCustomNotes" type="text" placeholder="Notes">
-        <button type="button" onclick="document.getElementById('${rowId}').remove()">Remove</button>`;
+        <input name="orderCustomName" type="text" placeholder="Medication or supplement" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomStrength" type="text" placeholder="Strength" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomUnits" type="text" placeholder="Units" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomQty" type="text" placeholder="Order qty" oninput="renderOrderBuilderPreview()">
+        <input name="orderCustomNotes" type="text" placeholder="Notes" oninput="renderOrderBuilderPreview()">
+        <button type="button" onclick="document.getElementById('${rowId}').remove(); renderOrderBuilderPreview();">Remove</button>`;
     container.appendChild(div);
+    window.renderOrderBuilderPreview?.();
 };
 
 function inventoryReorderCandidates() {
@@ -8055,47 +8626,62 @@ function inventoryReorderCandidates() {
 window.createInventoryOrder = async function() {
     const candidates = inventoryReorderCandidates();
     const candidateIds = new Set(candidates.map(med => med.id));
+    const defaultOrderName = `Inventory Order ${new Date().toLocaleDateString()}`;
     const candidateChoices = sortByName(candidates, inventoryDisplayName).map((med, index) => {
         const inputId = `order-candidate-${index}`;
         const expired = getInventoryStatusGroups().expired.some(item => item.id === med.id);
         const reason = expired ? 'Expired' : 'Low stock';
-        return `<div class="formulary-item">
-            <input id="${inputId}" name="candidateMedIds" type="checkbox" value="${escapeHtml(med.id)}" checked>
+        return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
+            <input id="${inputId}" name="candidateMedIds" type="checkbox" value="${escapeHtml(med.id)}" checked onchange="renderOrderBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(reason)} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || med.minThreshold || '')}" style="width:90px;">
+            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || med.minThreshold || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <span></span>
         </div>`;
     }).join('');
     const otherInventoryChoices = sortByName(db.inventory.filter(med => !candidateIds.has(med.id)), inventoryDisplayName).map((med, index) => {
         const inputId = `order-other-inventory-${index}`;
-        return `<div class="formulary-item">
-            <input id="${inputId}" name="otherInventoryIds" type="checkbox" value="${escapeHtml(med.id)}">
+        return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
+            <input id="${inputId}" name="otherInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" onchange="renderOrderBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || '')}" style="width:90px;">
+            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(med.maxCapacity || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <span></span>
         </div>`;
     }).join('');
     const formularyChoices = sortByName(db.formularyItems || [], formularyItemName).map((item, index) => {
         const inputId = `order-formulary-${index}`;
-        return `<div class="formulary-item">
-            <input id="${inputId}" name="formularyOrderIds" type="checkbox" value="${escapeHtml(item.id)}">
+        return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(formularyItemName(item).toLowerCase())} ${escapeHtml(String(item.notes || '').toLowerCase())}">
+            <input id="${inputId}" name="formularyOrderIds" type="checkbox" value="${escapeHtml(item.id)}" onchange="renderOrderBuilderPreview()">
             <label for="${inputId}"><strong>${escapeHtml(formularyItemName(item))}</strong><br><span class="form-help">${escapeHtml(item.notes || 'Formulary item')}</span></label>
-            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(item.targetQty || '')}" style="width:90px;">
+            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(item.targetQty || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <span></span>
         </div>`;
     }).join('');
-    const result = await showActionModal('Create Inventory Order', `
-        <div style="font-size:11px; margin-bottom:6px;">Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary or new items as needed.</div>
-        <div style="font-size:11px; margin:4px 0;"><strong>Low or expired inventory</strong></div>
-        <div class="formulary-grid">${candidateChoices || '<div class="empty-state">No low-stock or expired inventory items.</div>'}</div>
-        <div style="font-size:11px; margin:8px 0 4px;"><strong>Add other current inventory</strong></div>
-        <div class="formulary-grid">${otherInventoryChoices || '<div class="empty-state">No other inventory items available.</div>'}</div>
-        <div style="font-size:11px; margin:8px 0 4px;"><strong>Add from formulary</strong></div>
-        <div class="formulary-grid">${formularyChoices || '<div class="empty-state">No formulary items saved.</div>'}</div>
-        <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-formulary Item</button></div>
-        <div id="order-custom-list"></div>
-        <div class="field-row-stacked" style="margin-top:8px;">
-            <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;"></textarea>
+    const orderPromise = showActionModal('Create Inventory Order', `
+        <div data-action-modal-size="wide" class="inventory-builder-layout">
+            <div class="inventory-builder-source">
+                <div style="font-size:11px; margin-bottom:6px;">Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary, current inventory, or new items as needed.</div>
+                <div class="field-row" style="margin-bottom:6px;">
+                    <label>Order name:</label><input name="orderName" type="text" value="${escapeHtml(defaultOrderName)}" style="width:260px;">
+                </div>
+                <div class="field-row" style="margin-bottom:6px;">
+                    <label>Search:</label><input id="order-builder-search" class="inventory-builder-search" type="text" placeholder="Find inventory or formulary item..." oninput="filterOrderBuilder()">
+                </div>
+                <div style="font-size:11px; margin:4px 0;"><strong>Low or expired inventory</strong></div>
+                <div class="formulary-grid">${candidateChoices || '<div class="empty-state">No low-stock or expired inventory items.</div>'}</div>
+                <div style="font-size:11px; margin:8px 0 4px;"><strong>Add other current inventory</strong></div>
+                <div class="formulary-grid">${otherInventoryChoices || '<div class="empty-state">No other inventory items available.</div>'}</div>
+                <div style="font-size:11px; margin:8px 0 4px;"><strong>Add from formulary</strong></div>
+                <div class="formulary-grid">${formularyChoices || '<div class="empty-state">No formulary items saved.</div>'}</div>
+                <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-formulary Item</button></div>
+                <div id="order-custom-list"></div>
+                <div class="field-row-stacked" style="margin-top:8px;">
+                    <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;"></textarea>
+                </div>
+            </div>
+            <div class="inventory-builder-selected">
+                <div class="inventory-builder-panel-title">Pending order</div>
+                <div id="order-builder-preview" class="inventory-builder-panel"></div>
+            </div>
         </div>
     `, 'Create Order', body => {
         const base = collectNamedInputs(body);
@@ -8108,6 +8694,8 @@ window.createInventoryOrder = async function() {
         })).filter(item => item.name);
         return base;
     });
+    window.renderOrderBuilderPreview?.();
+    const result = await orderPromise;
     if (!result) return;
 
     const lines = [];
@@ -8152,8 +8740,10 @@ window.createInventoryOrder = async function() {
         return;
     }
     db.inventoryOrders = db.inventoryOrders || [];
+    const orderName = String(result.orderName || '').trim() || defaultOrderName;
     db.inventoryOrders.unshift({
         id: `order_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: orderName,
         createdAt: new Date().toISOString(),
         status: 'open',
         note: result.orderNote || '',
@@ -8162,7 +8752,7 @@ window.createInventoryOrder = async function() {
     db.history.unshift({
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
-        medName: 'Inventory Order',
+        medName: orderName,
         details: `Created reorder with ${lines.length} item${lines.length === 1 ? '' : 's'}.`
     });
     await sync();
@@ -8177,14 +8767,14 @@ window.markReceiveLineScanned = function() {
     let lineId = lineSelect?.value || '';
     if (!lineId) {
         const matchedMed = findInventoryByBarcode(code);
-        const matchedRow = matchedMed && body.querySelector(`.order-line-item[data-med-id="${CSS.escape(matchedMed.id)}"]`);
+        const matchedRow = matchedMed && body.querySelector(`.order-line-item[data-med-id="${cssEscape(matchedMed.id)}"]`);
         lineId = matchedRow?.dataset.lineId || '';
     }
     if (!lineId) {
         void appAlert('Select the order line this new barcode belongs to.');
         return;
     }
-    const row = body.querySelector(`.order-line-item[data-line-id="${CSS.escape(lineId)}"]`);
+    const row = body.querySelector(`.order-line-item[data-line-id="${cssEscape(lineId)}"]`);
     if (!row) return;
     row.querySelector('[name="receiveLine"]').checked = true;
     row.querySelector('[name="receiveBarcode"]').value = code;
@@ -8192,42 +8782,187 @@ window.markReceiveLineScanned = function() {
     if (codeInput) codeInput.value = '';
 };
 
+function formulationOptionsHtml(selected = 'Other') {
+    return Object.keys(formulationDoseUnits).map(value =>
+        `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value === 'mL' ? 'Liquid (mL)' : value === 'Other' ? 'Unit Dose' : value)}</option>`
+    ).join('');
+}
+
+function strengthUnitOptionsHtml(selected = '') {
+    return componentUnitOptions.map(value =>
+        `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`
+    ).join('');
+}
+
+function perUnitOptionsHtml(selected = '') {
+    return componentPerUnitOptions.map(value =>
+        `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value || 'unit')}</option>`
+    ).join('');
+}
+
+window.updateReceiveIntakeDefaults = function() {
+    const formulation = document.getElementById('receive-new-formulation')?.value || 'Other';
+    const behavior = document.getElementById('receive-new-inventory-behavior')?.value || 'per-dose';
+    const stockUnit = document.getElementById('receive-new-inventory-unit');
+    const adminUnit = document.getElementById('receive-new-administration-unit');
+    const suggestedUnit = behavior === 'container-finish' ? 'bottle' : (formulationDoseUnits[formulation] || 'unit');
+    if (stockUnit && !stockUnit.value) stockUnit.value = suggestedUnit;
+    if (adminUnit && !adminUnit.value) adminUnit.value = formulationDoseUnits[formulation] || suggestedUnit;
+};
+
+window.updateReceiveAssignmentMode = function() {
+    const mode = document.getElementById('receive-new-assignment-mode')?.value || 'all';
+    const list = document.getElementById('receive-new-assigned-members');
+    if (list) list.style.display = mode === 'selected' ? 'grid' : 'none';
+};
+
 async function promptNewInventoryFromOrderLine(line, barcode, qty) {
-    const result = await showActionModal(`New Inventory Item: ${line.name}`, `
-        <div style="font-size:11px; margin-bottom:6px;">This received item is not in inventory yet. Enter the inventory details to add it.</div>
-        <div class="field-row"><label>Name:</label><input name="name" type="text" value="${escapeHtml(line.name || '')}" style="width:260px;"></div>
-        <div class="field-row" style="margin-top:8px;"><label>Strength:</label><input name="strength" type="text" value="${escapeHtml(line.strength || '')}" style="width:120px;"><label>Units:</label><input name="units" type="text" value="${escapeHtml(line.units || '')}" style="width:90px;"></div>
-        <div class="field-row" style="margin-top:8px;"><label>Stock unit:</label><input name="inventoryUnit" type="text" value="${escapeHtml(line.inventoryUnit || line.units || 'unit')}" style="width:90px;"><span class="form-help">Qty received comes from the order line.</span></div>
-        <div class="field-row" style="margin-top:8px;"><label>Formulation:</label><input name="formulation" type="text" value="${escapeHtml(line.formulation || 'Other')}" style="width:120px;"><label>Alert at:</label><input name="minThreshold" type="number" step="any" value="5" style="width:60px;"><label>Expiry:</label><input name="expiry" type="date"></div>
-        <div class="field-row-stacked" style="margin-top:8px;"><label>Notes:</label><textarea name="notes" rows="2" style="width:100%; resize:none;">${escapeHtml(line.notes || '')}</textarea></div>
-    `, 'Add to Inventory');
+    const unitParts = String(line.units || '').split('/');
+    const selectedUnit = unitParts[0] || 'mg';
+    const selectedPerUnit = unitParts[1] || '';
+    const receivedBarcode = normalizeMedicationCode(barcode) || createMedicationCode();
+    const assignmentChoices = db.family.map(member => `
+        <label class="receive-intake-member">
+            <input name="receiveAssignedMemberIds" type="checkbox" value="${escapeHtml(member.id)}">
+            ${escapeHtml(memberDisplayName(member))}
+        </label>`).join('');
+    const intakePromise = showActionModal(`New Inventory Intake: ${line.name}`, `
+        <div data-action-modal-size="wide" class="receive-intake">
+            <div class="receive-intake-banner">
+                <strong>This item is not in inventory yet.</strong>
+                <span>Enter the product details from the package being received. The scanned/generated QR code will be saved to this medication.</span>
+            </div>
+            <div class="receive-intake-grid">
+                <fieldset>
+                    <legend>Product Identity</legend>
+                    <div class="field-row-stacked"><label>Name</label><input name="name" type="text" value="${escapeHtml(line.name || '')}"></div>
+                    <div class="field-row" style="margin-top:6px;">
+                        <label>QR / barcode:</label><input id="receive-new-barcode" name="barcodeCode" type="text" value="${escapeHtml(receivedBarcode)}" style="width:220px;">
+                        <button type="button" onclick="generateMedicationCode('receive-new-barcode')">Generate</button>
+                    </div>
+                    <div class="field-row" style="margin-top:6px;">
+                        <label>Formulation:</label>
+                        <select id="receive-new-formulation" name="formulation" onchange="updateReceiveIntakeDefaults()">${formulationOptionsHtml(line.formulation || 'Other')}</select>
+                        <label>Control:</label>
+                        <select name="controlLevel">
+                            <option value="N/A">N/A</option><option value="C-II">C-II</option><option value="C-III">C-III</option><option value="C-IV">C-IV</option><option value="C-V">C-V</option>
+                        </select>
+                    </div>
+                </fieldset>
+                <fieldset>
+                    <legend>Strength & Stock</legend>
+                    <div class="field-row">
+                        <label>Strength:</label><input name="strength" type="number" min="0" step="any" value="${escapeHtml(line.strength || '')}" style="width:80px;">
+                        <select name="units" style="width:90px;">${strengthUnitOptionsHtml(selectedUnit)}</select>
+                        <label>per</label><input name="perAmount" type="number" min="0.001" step="any" value="1" style="width:55px;">
+                        <select name="perUnit" style="width:90px;">${perUnitOptionsHtml(selectedPerUnit)}</select>
+                    </div>
+                    <div class="field-row" style="margin-top:6px;">
+                        <label>Qty received:</label><input name="qtyReceived" type="number" step="any" value="${escapeHtml(qty || line.requestedQty || 1)}" style="width:70px;">
+                        <label>Alert at:</label><input name="minThreshold" type="number" step="any" value="5" style="width:60px;">
+                    </div>
+                    <div class="field-row" style="margin-top:6px;">
+                        <label>Track as:</label>
+                        <select id="receive-new-inventory-behavior" name="inventoryBehavior" onchange="updateReceiveIntakeDefaults()">
+                            <option value="per-dose">Individual dose units</option>
+                            <option value="container-finish">Whole containers</option>
+                        </select>
+                    </div>
+                    <div class="field-row" style="margin-top:6px;">
+                        <label>Stock unit:</label><input id="receive-new-inventory-unit" name="inventoryUnit" type="text" value="" style="width:90px;">
+                        <label>Give/apply as:</label><input id="receive-new-administration-unit" name="administrationUnit" type="text" value="" style="width:100px;">
+                    </div>
+                </fieldset>
+                <fieldset>
+                    <legend>Safety & Assignment</legend>
+                    <div class="field-row">
+                        <label>Expiry:</label><input name="expiry" type="date">
+                        <label>Storage:</label>
+                        <select name="storage"><option value="Room Temp">Room Temp</option><option value="Refrigerated">Refrigerated</option><option value="Frozen">Frozen</option></select>
+                    </div>
+                    <div class="field-row" style="margin-top:6px;">
+                        <label>Assign to:</label>
+                        <select id="receive-new-assignment-mode" name="assignmentMode" onchange="updateReceiveAssignmentMode()">
+                            <option value="all">All members</option>
+                            <option value="selected">Selected members</option>
+                        </select>
+                    </div>
+                    <div id="receive-new-assigned-members" class="receive-intake-members">${assignmentChoices || '<span class="form-help">No members saved yet.</span>'}</div>
+                </fieldset>
+                <fieldset>
+                    <legend>Notes</legend>
+                    <textarea name="notes" rows="7" style="width:100%; resize:none;">${escapeHtml(line.notes || '')}</textarea>
+                </fieldset>
+            </div>
+        </div>
+    `, 'Add to Inventory', body => {
+        const values = collectNamedInputs(body);
+        values.assignedMemberIds = asArray(values.receiveAssignedMemberIds);
+        return values;
+    });
+    window.updateReceiveIntakeDefaults?.();
+    window.updateReceiveAssignmentMode?.();
+    const result = await intakePromise;
     if (!result) return null;
-    const parsedStrength = parseAmount(result.strength, NaN);
+    if (!result.name?.trim()) {
+        await appAlert('Medication name is required.');
+        return null;
+    }
+    if (result.assignmentMode === 'selected' && asArray(result.assignedMemberIds).length === 0) {
+        await appAlert('Select at least one member or assign the item to all members.');
+        return null;
+    }
+    const finalBarcode = normalizeMedicationCode(result.barcodeCode) || createMedicationCode();
+    if (finalBarcode.length > 100 || await warnBarcodeConflict(finalBarcode)) return null;
+    const strengthAmount = parseAmount(result.strength, NaN);
+    if (!Number.isFinite(strengthAmount) || strengthAmount <= 0) {
+        await appAlert('Strength must be greater than 0.');
+        return null;
+    }
+    const perAmount = parseAmount(result.perAmount, 1);
+    const perUnit = result.perUnit || '';
+    const activeUnit = result.units || selectedUnit || 'mg';
+    const hasDenominator = perUnit && Number.isFinite(perAmount) && perAmount > 0;
+    const finalStrength = hasDenominator ? strengthAmount / perAmount : strengthAmount;
+    const finalUnits = hasDenominator ? `${activeUnit}/${perUnit}` : activeUnit;
+    const displayStrength = hasDenominator
+        ? (perAmount === 1 ? `${formatAmount(strengthAmount)}${activeUnit}/${perUnit}` : `${formatAmount(strengthAmount)}${activeUnit}/${formatAmount(perAmount)}${perUnit}`)
+        : `${formatAmount(strengthAmount)}${activeUnit}`;
+    const formulation = result.formulation || line.formulation || 'Other';
+    const inventoryBehavior = result.inventoryBehavior || 'per-dose';
+    const inventoryUnit = result.inventoryUnit || (inventoryBehavior === 'container-finish' ? 'bottle' : (formulationDoseUnits[formulation] || 'unit'));
     const med = {
         id: Date.now().toString(),
-        name: result.name || line.name,
-        strength: Number.isFinite(parsedStrength) ? parsedStrength : (result.strength || line.strength || ''),
-        units: result.units || line.units || '',
-        displayStrength: result.strength || line.strength || '',
-        formulation: result.formulation || 'Other',
-        inventoryUnit: result.inventoryUnit || 'unit',
-        administrationUnit: result.inventoryUnit || result.units || 'unit',
-        inventoryBehavior: 'per-dose',
+        name: result.name.trim(),
+        strength: finalStrength,
+        units: finalUnits,
+        displayStrength,
+        strengthAmount,
+        activeUnit,
+        perAmount: hasDenominator ? perAmount : null,
+        perUnit: hasDenominator ? perUnit : '',
+        formulation,
+        inventoryUnit,
+        administrationUnit: result.administrationUnit || inventoryUnit,
+        inventoryBehavior,
         stock: 0,
         maxCapacity: 0,
         expiry: result.expiry || '',
-        isLiquid: String(result.units || '').includes('/'),
+        storage: result.storage || 'Room Temp',
+        controlLevel: result.controlLevel || 'N/A',
+        isLiquid: finalUnits.includes('/') || formulation === 'mL',
         isCombination: false,
         components: [],
         minThreshold: parseAmount(result.minThreshold, 5),
         prescriberId: '',
-        assignedMemberIds: [],
-        barcodeCode: normalizeMedicationCode(barcode) || createMedicationCode(),
-        barcodeCodes: [],
-        notes: result.notes || ''
+        assignedMemberIds: result.assignmentMode === 'selected' ? asArray(result.assignedMemberIds) : [],
+        barcodeCode: finalBarcode,
+        barcodeCodes: [finalBarcode],
+        notes: result.notes || '',
+        _intakeReceivedQty: parseAmount(result.qtyReceived, qty)
     };
-    med.barcodeCodes = medicationCodes(med);
     db.inventory.push(med);
+    line.barcodeCodes = Array.from(new Set([...asArray(line.barcodeCodes), finalBarcode]));
     return med;
 }
 
@@ -8235,6 +8970,10 @@ async function receiveOrderLine(line, receivedQty, barcode) {
     const normalizedBarcode = normalizeMedicationCode(barcode);
     let med = line.medId ? db.inventory.find(item => item.id === line.medId) : null;
     const barcodeMatch = normalizedBarcode ? findInventoryByBarcode(normalizedBarcode) : null;
+    if (normalizedBarcode && med && barcodeMatch && barcodeMatch.id !== med.id) {
+        await warnBarcodeConflict(normalizedBarcode, med.id);
+        return false;
+    }
     if (!med && barcodeMatch) med = barcodeMatch;
     if (!med) {
         const lineName = String(line.name || '').trim().toLowerCase();
@@ -8244,7 +8983,14 @@ async function receiveOrderLine(line, receivedQty, barcode) {
             (!lineStrength || String(formatMedStrength(item) || '').trim().toLowerCase() === lineStrength)
         ) || null;
     }
-    if (!med) med = await promptNewInventoryFromOrderLine(line, normalizedBarcode, receivedQty);
+    if (normalizedBarcode && !med && await warnBarcodeConflict(normalizedBarcode)) return false;
+    if (!med) {
+        med = await promptNewInventoryFromOrderLine(line, normalizedBarcode, receivedQty);
+        if (med && Number.isFinite(parseAmount(med._intakeReceivedQty, NaN))) {
+            receivedQty = parseAmount(med._intakeReceivedQty, receivedQty);
+            delete med._intakeReceivedQty;
+        }
+    }
     if (!med) return false;
     if (normalizedBarcode) addMedicationBarcode(med, normalizedBarcode);
     med.stock = parseAmount(med.stock, 0) + parseAmount(receivedQty, 0);
@@ -8269,7 +9015,7 @@ window.receiveInventoryOrder = async function() {
         await appAlert('No inventory orders have been created yet.');
         return;
     }
-    const orderOptions = orders.map(order => `<option value="${escapeHtml(order.id)}">${escapeHtml(new Date(order.createdAt).toLocaleString())} - ${escapeHtml(order.status || 'open')} - ${order.lines?.length || 0} item(s)</option>`).join('');
+    const orderOptions = orders.map(order => `<option value="${escapeHtml(order.id)}">${escapeHtml(inventoryOrderLabel(order))}</option>`).join('');
     const selectResult = await showActionModal('Receive Order', `
         <div class="field-row"><label>Order:</label><select name="orderId" style="width:360px;">${orderOptions}</select></div>
         <div class="field-row" style="margin-top:8px;">
@@ -8300,7 +9046,7 @@ window.receiveInventoryOrder = async function() {
             </div>
         </div>`
         : '';
-    const result = await showActionModal(`Receive Order: ${new Date(order.createdAt).toLocaleDateString()}`, `
+    const result = await showActionModal(`Receive Order: ${inventoryOrderName(order)}`, `
         ${scanPanel}
         <div class="order-line-list">${lineRows}</div>
     `, 'Receive Selected', body => ({
@@ -8328,7 +9074,7 @@ window.receiveInventoryOrder = async function() {
     db.history.unshift({
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
-        medName: 'Inventory Order',
+        medName: inventoryOrderName(order),
         details: `Received ${receivedCount} item${receivedCount === 1 ? '' : 's'} from order created ${new Date(order.createdAt).toLocaleString()}.`
     });
     await sync();
@@ -8468,6 +9214,7 @@ sortedInventory.forEach(med => {
     renderInventoryStatus();
     renderInventoryWorkflowSummary();
     renderVitalDashboard();
+    enhanceButtonIcons();
 }
 window.calculateLiveDose = function() {
     const medId = document.getElementById('sched-strength-display').value;
@@ -8795,6 +9542,7 @@ window.printInventoryLabel = async function(medId) {
     if (!med) return;
     if (!med.barcodeCode) {
         med.barcodeCode = createMedicationCode();
+        med.barcodeCodes = medicationCodes(med);
         await window.api.save(db);
     }
     previewLabelHtml(inventoryLabelHtml(med));
@@ -8846,6 +9594,7 @@ window.printAllInventoryLabels = async function() {
     selectedMeds.forEach(med => {
         if (med.barcodeCode) return;
         med.barcodeCode = createMedicationCode();
+        med.barcodeCodes = medicationCodes(med);
         codesAdded = true;
     });
     if (codesAdded) await window.api.save(db);

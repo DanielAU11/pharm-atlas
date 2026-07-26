@@ -27,6 +27,133 @@ body {
     flex-direction: column;
 }
 
+.workspace-taskbar {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 5px;
+    border-top: 1px solid #ffffff;
+    border-bottom: 1px solid #808080;
+    background: linear-gradient(90deg, #b8b8b8, #d8d8d8 45%, #bdbdbd);
+    overflow-x: auto;
+    min-height: 34px;
+    flex: 0 0 auto;
+}
+
+.workspace-taskbar.has-tasks {
+    display: flex;
+}
+
+.taskbar-task {
+    display: inline-grid;
+    grid-template-columns: minmax(120px, 220px) 22px;
+    align-items: stretch;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+    min-height: 26px;
+}
+
+.taskbar-task.is-active {
+    border-style: inset;
+    background: #ffffff;
+}
+
+.taskbar-patient {
+    background: linear-gradient(90deg, #dcebff, #d8d8d8);
+}
+
+.taskbar-patient.taskbar-sex-female {
+    background: linear-gradient(90deg, #ffe0ee, #d8d8d8);
+}
+
+.taskbar-patient.is-active {
+    background: linear-gradient(90deg, #ffffff, #eaf3ff);
+}
+
+.taskbar-patient.taskbar-sex-female.is-active {
+    background: linear-gradient(90deg, #ffffff, #fff0f7);
+}
+
+.taskbar-function {
+    background: linear-gradient(90deg, #fff4c2, #d8d8d8);
+}
+
+.taskbar-button {
+    min-width: 0;
+    justify-content: flex-start;
+    overflow: hidden;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
+    padding: 2px 5px;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.taskbar-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.taskbar-close {
+    min-width: 20px;
+    width: 22px;
+    padding: 0;
+    color: #800000;
+    font-weight: bold;
+}
+
+.taskbar-patient-icon {
+    position: relative;
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    border: 1px solid #000000;
+    background: #ffffff;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #808080;
+}
+
+.taskbar-patient-icon::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 2px;
+    width: 6px;
+    height: 6px;
+    background: var(--patient-color, #1f66b5);
+    border: 1px solid #000000;
+    border-radius: 50%;
+}
+
+.taskbar-patient-icon::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    bottom: 2px;
+    width: 10px;
+    height: 6px;
+    background: var(--patient-color, #1f66b5);
+    border: 1px solid #000000;
+}
+
+.taskbar-patient-icon.female::after {
+    background: linear-gradient(90deg, var(--patient-color, #c04682), #ffd0e4);
+}
+
+#member-modal-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#member-modal-title .taskbar-patient-icon {
+    background: #ffffff;
+}
+
 .tabs {
     flex: 1;
     min-height: 0;
@@ -208,38 +335,113 @@ fieldset {
 }
 
 .win98-icon {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     display: inline-block;
-    vertical-align: -2px;
+    flex: 0 0 16px;
+    vertical-align: -3px;
     margin-right: 4px;
-    border: 1px solid #000;
-    background: #c0c0c0;
-    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #808080;
-    position: relative;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 16px 16px;
 }
 
-.win98-icon::after {
-    content: "";
-    position: absolute;
-    inset: 3px;
-    background: #000080;
+menu[role="tablist"] a,
+button {
+    align-items: center;
 }
 
-.icon-dashboard::after { background: linear-gradient(90deg, #008080 0 45%, #ffffff 45% 55%, #008000 55%); }
-.icon-calendar::after { background: repeating-linear-gradient(0deg, #ffffff 0 3px, #000080 3px 4px); }
-.icon-box::after { background: linear-gradient(135deg, #c08000 0 50%, #ffff80 50%); }
-.icon-regimen::after { background: repeating-linear-gradient(90deg, #008000 0 3px, #ffffff 3px 4px); }
-.icon-monitor::after { background: linear-gradient(180deg, #00a000 0 35%, #000 35% 45%, #ff0000 45%); }
-.icon-inventory::after { background: linear-gradient(90deg, #ff8080 0 35%, #ffffff 35% 65%, #0080ff 65%); }
-.icon-info::after { background: #0000a0; border-radius: 50%; }
-.icon-family::after { background: radial-gradient(circle at 35% 35%, #000080 0 3px, transparent 4px), radial-gradient(circle at 70% 60%, #008080 0 3px, transparent 4px); }
-.icon-clear::after { background: #ff0000; }
-.icon-label::after { background: linear-gradient(180deg, #ffffff 0 60%, #000 60% 70%, #ffffff 70%); }
-.icon-formulary::after { background: repeating-linear-gradient(0deg, #ffffff 0 2px, #008000 2px 4px); }
-.icon-view::after { background: radial-gradient(circle, #ffffff 0 35%, #000080 36% 70%, transparent 71%); }
-.icon-order::after { background: linear-gradient(180deg, #ffff80 0 45%, #c08000 45%); }
-.icon-receive::after { background: linear-gradient(135deg, #00a000 0 50%, #ffffff 50%); }
+.icon-dashboard { background-image: url("assets/ui-icons/dashboard.ico"); }
+.icon-calendar { background-image: url("assets/ui-icons/calendar.ico"); }
+.icon-box { background-image: url("assets/ui-icons/prepackage.ico"); }
+.icon-regimen { background-image: url("assets/ui-icons/regimens.ico"); }
+.icon-monitor { background-image: url("assets/ui-icons/monitoring.ico"); }
+.icon-inventory { background-image: url("assets/ui-icons/inventory.ico"); }
+.icon-info { background-image: url("assets/ui-icons/drug-info.ico"); }
+.icon-family { background-image: url("assets/ui-icons/members.ico"); }
+.icon-clear { background-image: url("assets/ui-icons/clear.ico"); }
+.icon-label { background-image: url("assets/ui-icons/label.ico"); }
+.icon-formulary { background-image: url("assets/ui-icons/formulary.ico"); }
+.icon-view { background-image: url("assets/ui-icons/view.ico"); }
+.icon-order { background-image: url("assets/ui-icons/order.ico"); }
+.icon-receive { background-image: url("assets/ui-icons/receive.ico"); }
+
+.barcode-warning {
+    color: #b00000;
+    font-weight: bold;
+    border: 2px inset #ffffff;
+    background: #fff0f0;
+    padding: 8px;
+    font-size: 11px;
+}
+
+.barcode-entry-row {
+    flex-wrap: wrap;
+}
+
+.barcode-code-list {
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    min-height: 24px;
+    max-height: 96px;
+    overflow-y: auto;
+    padding: 4px;
+    margin: 4px 0 0 70px;
+    width: 390px;
+    box-sizing: border-box;
+}
+
+.barcode-code-empty {
+    color: #606060;
+    font-style: italic;
+}
+
+.barcode-code-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 5px;
+    border-bottom: 1px dotted #a0a0a0;
+    padding: 3px 0;
+}
+
+.barcode-code-row:last-child {
+    border-bottom: 0;
+}
+
+.barcode-code-row span:first-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.barcode-code-row strong {
+    color: #000080;
+    margin-right: 4px;
+}
+
+.barcode-code-row.primary {
+    background: #eaffea;
+}
+
+.barcode-code-primary {
+    color: #008000;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.action-modal-window {
+    width: min(520px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+}
+
+.action-modal-window > .window-body {
+    max-height: calc(100vh - 62px);
+    overflow: auto;
+}
+
+.action-modal-window-wide {
+    width: min(1180px, calc(100vw - 24px));
+}
 
 .inventory-workflow-summary {
     display: grid;
@@ -266,7 +468,7 @@ fieldset {
 .order-line-list {
     display: grid;
     gap: 5px;
-    max-height: 330px;
+    max-height: 260px;
     overflow-y: auto;
     background: #ffffff;
     padding: 6px;
@@ -276,20 +478,244 @@ fieldset {
 .formulary-item,
 .order-line-item {
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     gap: 6px;
     align-items: center;
     border-bottom: 1px dotted #c0c0c0;
     padding-bottom: 4px;
     font-size: 11px;
+    min-width: 0;
+}
+
+.formulary-item label,
+.order-line-item label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.inventory-builder-source .formulary-item {
+    grid-template-columns: auto minmax(240px, 1fr) 88px minmax(110px, 165px);
+    align-items: center;
+}
+
+.inventory-builder-source .formulary-item > input[type="text"] {
+    grid-column: auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inventory-builder-source .formulary-item > span {
+    grid-column: auto;
+}
+
+.inventory-builder-source .formulary-item input[name^="candidateQty-"],
+.inventory-builder-source .formulary-item input[name^="otherInventoryQty-"],
+.inventory-builder-source .formulary-item input[name^="formularyQty-"],
+.inventory-builder-source .formulary-item input[name^="targetQty-"] {
+    width: 78px !important;
+}
+
+.inventory-builder-source .formulary-item input[name^="notes-"] {
+    width: 150px !important;
 }
 
 .formulary-custom-row {
     display: grid;
-    grid-template-columns: 1.4fr 100px 80px 80px 1fr auto;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(110px, 0.8fr) minmax(100px, 0.7fr) minmax(100px, 0.7fr) minmax(180px, 1fr) auto;
     gap: 5px;
     align-items: center;
     margin-bottom: 4px;
+    min-width: 0;
+}
+
+.formulary-custom-row input {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inventory-builder-layout {
+    display: grid;
+    grid-template-columns: minmax(480px, 1fr) minmax(300px, 380px);
+    gap: 8px;
+    align-items: start;
+}
+
+.inventory-builder-source,
+.inventory-builder-selected {
+    min-width: 0;
+}
+
+.inventory-builder-search {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inventory-builder-panel {
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 6px;
+    min-height: 260px;
+    max-height: 615px;
+    overflow-y: auto;
+    font-size: 11px;
+}
+
+.inventory-builder-panel-title {
+    color: #000080;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.inventory-builder-preview-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    border-bottom: 1px dotted #c0c0c0;
+    padding: 5px 0;
+}
+
+.inventory-builder-preview-item:last-child {
+    border-bottom: 0;
+}
+
+.inventory-builder-preview-item strong {
+    color: #000080;
+}
+
+.inventory-builder-preview-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.inventory-builder-remove {
+    min-width: 24px;
+    height: 22px;
+    padding: 0 6px;
+    color: #800000;
+    font-weight: bold;
+}
+
+.inventory-builder-source-item.is-hidden {
+    display: none;
+}
+
+.formulary-view {
+    min-width: 0;
+}
+
+.formulary-view-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    padding: 6px;
+    margin-bottom: 8px;
+    border: 2px inset #ffffff;
+    background: linear-gradient(90deg, #ffffff, #e8f2ff);
+}
+
+.formulary-view-toolbar strong {
+    color: #000080;
+}
+
+.formulary-view-toolbar input {
+    width: 220px;
+}
+
+.formulary-view-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+    gap: 6px;
+    max-height: 510px;
+    overflow-y: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 6px;
+}
+
+.formulary-view-card {
+    border: 2px outset #ffffff;
+    background: #f4f4f4;
+    padding: 6px;
+    min-width: 0;
+}
+
+.formulary-view-card.is-hidden {
+    display: none;
+}
+
+.formulary-view-main {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px dotted #808080;
+    padding-bottom: 4px;
+    margin-bottom: 5px;
+}
+
+.formulary-view-main strong {
+    color: #000080;
+    overflow-wrap: anywhere;
+}
+
+.formulary-view-main span {
+    color: #008000;
+    white-space: nowrap;
+    font-size: 10px;
+}
+
+.formulary-view-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.formulary-view-meta div {
+    border: 1px solid #c0c0c0;
+    background: #ffffff;
+    padding: 3px;
+    min-width: 0;
+}
+
+.formulary-view-meta small {
+    display: block;
+    color: #404040;
+}
+
+.formulary-view-meta b {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.formulary-view-notes {
+    margin-top: 5px;
+    border: 1px solid #c0c0c0;
+    background: #fffde8;
+    padding: 4px;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) {
+    .inventory-builder-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .formulary-custom-row {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+
+    .formulary-view-toolbar {
+        display: block;
+    }
+
+    .formulary-view-toolbar .field-row {
+        margin-top: 6px;
+    }
+
+    .receive-intake-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .receive-scan-panel {
@@ -298,6 +724,60 @@ fieldset {
     padding: 6px;
     margin-bottom: 6px;
     font-size: 11px;
+}
+
+.receive-intake-banner {
+    display: grid;
+    gap: 3px;
+    padding: 7px;
+    margin-bottom: 8px;
+    border: 2px inset #ffffff;
+    background: #fffde8;
+    color: #000000;
+}
+
+.receive-intake-banner strong {
+    color: #000080;
+}
+
+.receive-intake-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
+    gap: 8px;
+}
+
+.receive-intake-grid fieldset {
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+.receive-intake-grid input,
+.receive-intake-grid select,
+.receive-intake-grid textarea {
+    box-sizing: border-box;
+}
+
+.receive-intake-grid .field-row {
+    flex-wrap: wrap;
+}
+
+.receive-intake-members {
+    display: none;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 3px;
+    max-height: 92px;
+    overflow-y: auto;
+    margin-top: 6px;
+    padding: 4px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.receive-intake-member {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
 }
 
 .receive-line-received {

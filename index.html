@@ -32,6 +32,7 @@
                 <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug/Vaccine Information</a></li>
                 <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')"><span class="win98-icon icon-family"></span>Members</a></li>
             </menu>
+            <div id="workspace-taskbar" class="workspace-taskbar"></div>
 
         <!-- Tab Content Container -->
         <div class="window app-panel-window" role="tabpanel">
@@ -633,11 +634,13 @@
                         </select>
                     </div>
                     <div id="modal-assigned-members" class="member-assignment-list"></div>
-                    <div class="field-row">
-                        <label for="modal-barcode-code">QR code:</label>
-                        <input id="modal-barcode-code" type="text" style="width:170px;">
+                    <div class="field-row barcode-entry-row">
+                        <label for="modal-barcode-code">QR / barcode:</label>
+                        <input id="modal-barcode-code" type="text" style="width:170px;" placeholder="Scan, paste, or generate">
                         <button type="button" onclick="generateMedicationCode('modal-barcode-code')">Generate</button>
+                        <button type="button" onclick="addModalBarcodeCode()">Add Code</button>
                     </div>
+                    <div id="modal-barcode-list" class="barcode-code-list"></div>
                 </div>
             </div>
             <fieldset class="med-profile-details">
@@ -716,6 +719,7 @@
         <div class="title-bar">
             <div class="title-bar-text" id="member-modal-title">Add New Member</div>
             <div class="title-bar-controls">
+                <button aria-label="Minimize" onclick="minimizeMemberModal()"></button>
                 <button aria-label="Close" onclick="closeMemberModal()"></button>
             </div>
         </div>
