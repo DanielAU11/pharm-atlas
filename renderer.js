@@ -11,7 +11,8 @@ const emptyDb = {
     prepackQueues: [],
     formularyItems: [],
     inventoryOrders: [],
-    medKits: []
+    medKits: [],
+    settings: {}
 };
 let db = { ...emptyDb };
 let currentEditingMedId = null;
@@ -59,10 +60,11 @@ let orderSetRowCounter = 0;
 
 window.addEventListener('DOMContentLoaded', async () => {
     const loadedData = await window.api.load();
-    db = { ...emptyDb, ...loadedData };
+    db = { ...emptyDb, ...loadedData, settings: { ...emptyDb.settings, ...(loadedData?.settings || {}) } };
     const medicationCodesAdded = ensureMedicationCodes();
     const completionStatesAdded = updateScheduleCompletionStates();
     renderAll();
+    refreshDataLocation();
     renderFrequencyControls('sched');
     updateInventoryEntryMode();
     setupImageDropzone('med-image-dropzone', image => { pendingNewMedImage = image; });
@@ -800,11 +802,70 @@ function getFieldIds(prefix) {
         };
 }
 
+async function refreshDataLocation(location = null) {
+    if (!window.api?.getDataLocation && !location) return;
+    try {
+        const info = location || await window.api.getDataLocation();
+        const status = document.getElementById('data-location-status');
+        const pathEl = document.getElementById('data-location-path');
+        if (status) status.textContent = info?.usingDefault ? 'Local desktop data folder' : 'Synced desktop data folder';
+        if (pathEl) pathEl.textContent = info?.dataDir || 'Data folder unavailable in this build.';
+    } catch (error) {
+        console.error(error);
+        const pathEl = document.getElementById('data-location-path');
+        if (pathEl) pathEl.textContent = 'Unable to read data folder.';
+    }
+}
+
+async function applyDataLocationResult(result, message) {
+    if (!result) return;
+    if (result.data) {
+        db = { ...emptyDb, ...result.data, settings: { ...emptyDb.settings, ...(result.data?.settings || {}) } };
+        pendingScheduleOrders = [];
+        activePrepackQueueId = null;
+        renderAll();
+    }
+    await refreshDataLocation(result);
+    await appAlert(`${message}\n\nCurrent data folder:\n${result.dataDir}`, 'Data Folder Updated');
+}
+
+window.chooseDesktopSyncFolder = async function() {
+    if (!window.api?.chooseSyncFolder) {
+        await appAlert('Desktop sync folder support is not available in this build. Restart the desktop app and try again.');
+        return;
+    }
+    if (!await appConfirm('Choose a folder managed by OneDrive, Google Drive Desktop, Dropbox, or another sync app. PharmAtlas will store db.json and medication images there. Continue?', 'Use Synced Folder')) return;
+    try {
+        const result = await window.api.chooseSyncFolder();
+        await applyDataLocationResult(result, 'PharmAtlas is now using the selected synced folder.');
+    } catch (error) {
+        console.error(error);
+        await appAlert('Unable to switch to that folder. Make sure the folder is available and writable.', 'Sync Folder Failed');
+    }
+};
+
+window.useLocalDesktopDataFolder = async function() {
+    if (!window.api?.useDefaultDataFolder) {
+        await appAlert('Local data folder support is not available in this build. Restart the desktop app and try again.');
+        return;
+    }
+    if (!await appConfirm('Switch back to the local Desktop\\PharmAtlasData folder? PharmAtlas can copy your current synced data back there.', 'Use Local Folder')) return;
+    try {
+        const result = await window.api.useDefaultDataFolder();
+        await applyDataLocationResult(result, 'PharmAtlas is now using the local desktop data folder.');
+    } catch (error) {
+        console.error(error);
+        await appAlert('Unable to switch back to the local folder.', 'Local Folder Failed');
+    }
+};
+
 window.renderFrequencyControls = function(prefix, existingTimes = null) {
     const ids = getFieldIds(prefix);
     const freq = document.getElementById(ids.freq).value;
     const container = document.getElementById(ids.timeFields);
     if (!container) return;
+    const startWrap = document.getElementById(prefix === 'mod' ? 'mod-start-date-wrap' : 'sched-start-date-wrap');
+    if (startWrap) startWrap.style.display = freq === 'QOD' ? 'none' : '';
     const endInput = document.getElementById(prefix === 'mod' ? 'mod-end' : 'sched-end');
     if (endInput) {
         endInput.disabled = freq === 'ONCE';
@@ -819,6 +880,11 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
     const weekdayContainer = document.getElementById(ids.weekdayContainer);
     const prnContainer = document.getElementById(ids.prnContainer);
     if (qodContainer) qodContainer.style.display = freq === 'QOD' ? 'block' : 'none';
+    if (freq === 'QOD') {
+        const qodStartInput = document.getElementById(ids.qodStart);
+        const startInput = document.getElementById(prefix === 'mod' ? 'mod-start' : 'sched-start');
+        if (qodStartInput && !qodStartInput.value) qodStartInput.value = startInput?.value || localDateKey();
+    }
     if (intervalContainer) intervalContainer.style.display = freq === 'QXH' ? 'flex' : 'none';
     if (weekIntervalContainer) weekIntervalContainer.style.display = freq === 'QXW' ? 'flex' : 'none';
     if (monthlyContainer) monthlyContainer.style.display = freq === 'Monthly' ? 'flex' : 'none';
@@ -3500,7 +3566,9 @@ window.saveOrderModification = async function() {
         const frequencyDetails = collectFrequencyDetails('mod');
         if (!frequencyDetails) return;
 
-        const requestedStartDate = document.getElementById('mod-start').value;
+        const requestedStartDate = frequencyDetails.freq === 'QOD'
+            ? (document.getElementById('mod-qod-start-date')?.value || document.getElementById('mod-start').value)
+            : document.getElementById('mod-start').value;
         const today = localDateKey();
         const shouldApplyQxhForward = frequencyDetails.freq === 'QXH' &&
             previousStartDate &&
@@ -6836,6 +6904,16 @@ function historyEntryMatchesScheduleInstance(entry, schedule, instance) {
     if (!entry || !schedule || !instance) return false;
     if (entry.scheduleInstanceKey === instance.key) return true;
     if (entry.scheduleId && entry.scheduleId !== schedule.id) return false;
+    const actual = historyEntryDateTime(entry);
+    const offSchedule = ['late', 'early'].includes(entry.doseStatus || '') ||
+        (actual.date && entry.scheduledDate && actual.date !== entry.scheduledDate);
+    if (offSchedule &&
+        entry.memberId === schedule.memberId &&
+        entry.medId === schedule.medId &&
+        actual.date === instance.date &&
+        entry.scheduledTime === instance.time) {
+        return true;
+    }
     return entry.memberId === schedule.memberId &&
         entry.medId === schedule.medId &&
         entry.scheduledDate === instance.date &&
@@ -6855,9 +6933,12 @@ function scheduleDateHistoryEntries(schedule, date) {
 function historyEntryMatchesScheduleDate(entry, schedule, date) {
     if (!entry || !schedule || !date) return false;
     if (entry.scheduleId && entry.scheduleId !== schedule.id) return false;
+    const actual = historyEntryDateTime(entry);
+    const offSchedule = ['late', 'early'].includes(entry.doseStatus || '') ||
+        (actual.date && entry.scheduledDate && actual.date !== entry.scheduledDate);
     return entry.memberId === schedule.memberId &&
         entry.medId === schedule.medId &&
-        entry.scheduledDate === date;
+        (entry.scheduledDate === date || (offSchedule && actual.date === date));
 }
 
 function findHistoryForModifiedScheduleInstance(schedule, instance) {
@@ -7700,7 +7781,10 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
     const med = db.inventory.find(m => m.id === medId);
     const member = db.family.find(m => m.id === memberId);
 
-    const startDate = document.getElementById('sched-start').value;
+    const selectedFreq = document.getElementById('sched-freq')?.value || '';
+    const startDate = selectedFreq === 'QOD'
+        ? (document.getElementById('qod-start-date')?.value || document.getElementById('sched-start').value)
+        : document.getElementById('sched-start').value;
     const rawEndDate = document.getElementById('sched-end').value || "Ongoing";
 
     const instructions = document.getElementById('sched-instructions').value;
@@ -8102,7 +8186,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         : '';
     const noteText = actual.doseNote ? `; Note: ${actual.doseNote}` : '';
     const overrideText = actual.prnLimitOverride ? '; PRN maximum override confirmed' : '';
-    db.history.unshift({
+    const historyEntry = {
         id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
         timestamp: formatActualTimestamp(actual),
         memberId: sched.memberId,
@@ -8121,18 +8205,45 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         stockDelta: isGivenDose ? stockPlan.qtyToSubtract : (usesContainerTracking(med) ? 0 : parseAmount(sched.doseQty, 0)),
         stockLogDetail: stockPlan.logDetail,
         details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${overrideText}${noteText}`
-    });
+    };
+    db.history.unshift(historyEntry);
 
     if (sched.isOneTime) markScheduleCompleted(sched);
-    updateIntervalAnchorAfterAdministration(sched, actual);
+    updateSchedulePatternAfterAdministration(sched, actual, historyEntry);
     return true;
 }
 
-function updateIntervalAnchorAfterAdministration(schedule, actual) {
-    if (!schedule || schedule.freq !== 'QXH' || !['late', 'early'].includes(actual?.doseStatus || 'given')) return;
+function shiftedWeekdays(weekdays, dayDelta) {
+    const days = Array.isArray(weekdays) ? weekdays.map(Number).filter(Number.isFinite) : [];
+    return Array.from(new Set(days.map(day => ((day + dayDelta) % 7 + 7) % 7))).sort((a, b) => a - b);
+}
+
+function updateSchedulePatternAfterAdministration(schedule, actual, historyEntry = null) {
+    if (!schedule || !['late', 'early'].includes(actual?.doseStatus || 'given')) return;
     if (!actual.actualDate || !actual.actualTime) return;
-    schedule.rollingAnchorDate = actual.actualDate;
-    schedule.rollingAnchorTime = actual.actualTime;
+    if (schedule.freq === 'QXH') {
+        schedule.rollingAnchorDate = actual.actualDate;
+        schedule.rollingAnchorTime = actual.actualTime;
+        return;
+    }
+    const dayDelta = daysBetween(actual.actualDate, actual.scheduledDate);
+    if (!Number.isFinite(dayDelta) || dayDelta === 0) return;
+    if (schedule.freq === 'QOD') {
+        schedule.qodStart = actual.actualDate;
+        if (historyEntry) historyEntry.scheduleShiftDeltaDays = dayDelta;
+        return;
+    }
+    if (schedule.freq === 'QW') {
+        schedule.startDate = actual.actualDate;
+        if (historyEntry) historyEntry.scheduleShiftDeltaDays = dayDelta;
+        return;
+    }
+    if (schedule.freq === 'QXW' || schedule.freq === 'XPW') {
+        schedule.weekdays = shiftedWeekdays(schedule.weekdays, dayDelta);
+        if (schedule.startDate) schedule.startDate = dateKeyPlusDays(schedule.startDate, dayDelta) || schedule.startDate;
+        if (schedule.monthlyAnchor) schedule.monthlyAnchor = dateKeyPlusDays(schedule.monthlyAnchor, dayDelta) || schedule.monthlyAnchor;
+        if (historyEntry) historyEntry.scheduleShiftDeltaDays = dayDelta;
+    }
 }
 
 function recalculateIntervalAnchorFromHistory(schedule) {
@@ -8996,13 +9107,26 @@ window.filterOrderBuilder = function() {
     filterInventoryBuilder('order-builder-search', '.order-builder-source-item');
 };
 
+window.orderBuilderSelectionChanged = function(input) {
+    if (input?.checked && input.dataset.medId) {
+        const body = document.getElementById('action-modal-body');
+        body?.querySelectorAll('input[data-order-source="true"]').forEach(other => {
+            if (other !== input && other.dataset.medId === input.dataset.medId) other.checked = false;
+        });
+    }
+    window.renderOrderBuilderPreview();
+};
+
 window.renderOrderBuilderPreview = function() {
     const body = document.getElementById('action-modal-body');
     if (!body) return;
     const items = [];
+    const selectedMedIds = new Set();
     body.querySelectorAll('input[name="candidateMedIds"]:checked, input[name="otherInventoryIds"]:checked').forEach(input => {
         const med = db.inventory.find(item => item.id === input.value);
         if (!med) return;
+        if (selectedMedIds.has(med.id)) return;
+        selectedMedIds.add(med.id);
         const qtyName = input.name === 'candidateMedIds' ? `candidateQty-${med.id}` : `otherInventoryQty-${med.id}`;
         const priceName = input.name === 'candidateMedIds' ? `candidatePrice-${med.id}` : `otherInventoryPrice-${med.id}`;
         const linkName = input.name === 'candidateMedIds' ? `candidateLink-${med.id}` : `otherInventoryLink-${med.id}`;
@@ -9026,6 +9150,8 @@ window.renderOrderBuilderPreview = function() {
         const item = db.formularyItems.find(candidate => candidate.id === input.value);
         if (!item) return;
         const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+        if (med && selectedMedIds.has(med.id)) return;
+        if (med) selectedMedIds.add(med.id);
         const qty = modalNamedValue(body, `formularyQty-${item.id}`);
         const unitPrice = modalNamedValue(body, `formularyPrice-${item.id}`);
         items.push({
@@ -9049,12 +9175,20 @@ window.renderOrderBuilderPreview = function() {
         items.push({
             name,
             strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
-            units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+            units: [
+                row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+                row.querySelector('[name="orderCustomPerUnit"]')?.value.trim() || ''
+            ].filter(Boolean).join('/'),
+            formulation: row.querySelector('[name="orderCustomFormulation"]')?.value.trim() || '',
             qty: row.querySelector('[name="orderCustomQty"]')?.value.trim() || '',
             unitPrice: row.querySelector('[name="orderCustomPrice"]')?.value.trim() || '',
             purchaseLink: row.querySelector('[name="orderCustomLink"]')?.value.trim() || '',
             lineTotal: parseMoney(row.querySelector('[name="orderCustomPrice"]')?.value, 0),
-            notes: row.querySelector('[name="orderCustomNotes"]')?.value.trim() || '',
+            notes: [
+                row.querySelector('[name="orderCustomFormulation"]')?.value.trim() || '',
+                row.querySelector('[name="orderCustomInventoryUnit"]')?.value.trim() ? `Stock unit: ${row.querySelector('[name="orderCustomInventoryUnit"]')?.value.trim()}` : '',
+                row.querySelector('[name="orderCustomNotes"]')?.value.trim() || ''
+            ].filter(Boolean).join(' | '),
             isNewNonInventory: true,
             removeRow: row.id,
             removeRender: 'renderOrderBuilderPreview'
@@ -9288,7 +9422,14 @@ function orderLineFromFormulary(item) {
         name: med?.name || item.name,
         strength: med ? formatMedStrength(med) : (item.strength || ''),
         units: med ? formatInventoryUnits(med) : (item.units || ''),
+        formulation: med?.formulation || item.formulation || 'Other',
+        strengthAmount: item.strengthAmount || item.strength || '',
+        activeUnit: item.activeUnit || item.units || '',
+        perAmount: item.perAmount || '',
+        perUnit: item.perUnit || '',
         inventoryUnit: med ? inventoryUnitFor(med) : (item.units || 'unit'),
+        expiry: item.expiry || '',
+        storage: item.storage || '',
         requestedQty: item.targetQty || '',
         receivedQty: 0,
         estimatedUnitPrice: item.lastUnitPrice || med?.lastUnitPrice || '',
@@ -9307,17 +9448,34 @@ window.addOrderCustomRow = function(values = {}) {
     const rowId = `order-custom-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const div = document.createElement('div');
     div.id = rowId;
-    div.className = 'formulary-custom-row';
+    div.className = 'formulary-custom-row order-custom-card';
+    const selectedUnit = String(values.activeUnit || values.units || '').split('/')[0] || 'mg';
+    const selectedPerUnit = values.perUnit || String(values.units || '').split('/')[1] || '';
     div.innerHTML = `
         <input name="orderCustomLineId" type="hidden" value="${escapeHtml(values.id || '')}">
-        <input name="orderCustomName" type="text" placeholder="Medication or supplement" value="${escapeHtml(values.name || '')}" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomStrength" type="text" placeholder="Strength" value="${escapeHtml(values.strength || '')}" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomUnits" type="text" placeholder="Units" value="${escapeHtml(values.units || '')}" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomQty" type="text" placeholder="Order qty" value="${escapeHtml(values.requestedQty || '')}" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomPrice" type="text" placeholder="Price" value="${escapeHtml(values.estimatedUnitPrice || '')}" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomLink" type="url" placeholder="Purchase link" value="${escapeHtml(values.purchaseLink || '')}" oninput="renderOrderBuilderPreview()">
-        <input name="orderCustomNotes" type="text" placeholder="Notes" value="${escapeHtml(values.notes || '')}" oninput="renderOrderBuilderPreview()">
-        <button type="button" onclick="document.getElementById('${rowId}').remove(); renderOrderBuilderPreview();">Remove</button>`;
+        <div class="order-custom-head">
+            <strong>New non-inventory item</strong>
+            <button type="button" onclick="document.getElementById('${rowId}').remove(); renderOrderBuilderPreview();">Remove</button>
+        </div>
+        <label>Name<input name="orderCustomName" type="text" placeholder="Medication or supplement name" value="${escapeHtml(values.name || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Formulation<select name="orderCustomFormulation" onchange="renderOrderBuilderPreview()">${formulationOptionsHtml(values.formulation || 'Other')}</select></label>
+        <label>Strength amount<input name="orderCustomStrength" type="text" placeholder="e.g. 0.63, 150" value="${escapeHtml(values.strengthAmount || values.strength || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Strength unit<select name="orderCustomUnits" onchange="renderOrderBuilderPreview()">${strengthUnitOptionsHtml(selectedUnit)}</select></label>
+        <label>Per amount<input name="orderCustomPerAmount" type="number" min="0.001" step="any" placeholder="1" value="${escapeHtml(values.perAmount || '1')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Per unit<select name="orderCustomPerUnit" onchange="renderOrderBuilderPreview()">${perUnitOptionsHtml(selectedPerUnit)}</select></label>
+        <label>Order quantity<input name="orderCustomQty" type="text" placeholder="Amount to order" value="${escapeHtml(values.requestedQty || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Stock unit<input name="orderCustomInventoryUnit" type="text" placeholder="bottle, tablet, mL" value="${escapeHtml(values.inventoryUnit || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Estimated price<input name="orderCustomPrice" type="text" placeholder="Line price" value="${escapeHtml(values.estimatedUnitPrice || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Purchase link<input name="orderCustomLink" type="url" placeholder="https://..." value="${escapeHtml(values.purchaseLink || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Expiry if known<input name="orderCustomExpiry" type="date" value="${escapeHtml(values.expiry || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Storage<select name="orderCustomStorage" onchange="renderOrderBuilderPreview()">
+            <option value="" ${!values.storage ? 'selected' : ''}>Unknown</option>
+            <option value="Room Temp" ${values.storage === 'Room Temp' ? 'selected' : ''}>Room Temp</option>
+            <option value="Refrigerated" ${values.storage === 'Refrigerated' ? 'selected' : ''}>Refrigerated</option>
+            <option value="Frozen" ${values.storage === 'Frozen' ? 'selected' : ''}>Frozen</option>
+        </select></label>
+        <label>Barcode if known<input name="orderCustomBarcode" type="text" placeholder="Scan or type code" value="${escapeHtml(asArray(values.barcodeCodes)[0] || values.barcodeCode || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label class="order-custom-wide">Notes<input name="orderCustomNotes" type="text" placeholder="Notes, package size, preferred brand, etc." value="${escapeHtml(values.notes || '')}" oninput="renderOrderBuilderPreview()"></label>`;
     container.appendChild(div);
     window.renderOrderBuilderPreview?.();
 };
@@ -9374,7 +9532,7 @@ function buildInventoryOrderLinesFromResult(result, existingOrder = null) {
         line.requestedQty = result[`formularyQty-${id}`] || line.requestedQty || '';
         line.estimatedUnitPrice = result[`formularyPrice-${id}`] || line.estimatedUnitPrice || '';
         line.purchaseLink = result[`formularyLink-${id}`] || line.purchaseLink || '';
-        if (!lines.some(existing => existing.formularyId && existing.formularyId === line.formularyId)) {
+        if (!lines.some(existing => (line.medId && existing.medId === line.medId) || (existing.formularyId && existing.formularyId === line.formularyId))) {
             lines.push(preserveOrderLineState(line, findExistingFormularyLine(id)));
         }
     });
@@ -9388,14 +9546,22 @@ function buildInventoryOrderLinesFromResult(result, existingOrder = null) {
             name: item.name,
             strength: item.strength,
             units: item.units,
-            inventoryUnit: item.units || 'unit',
+            formulation: item.formulation || 'Other',
+            strengthAmount: item.strength,
+            activeUnit: item.units || 'mg',
+            perAmount: item.perAmount || '1',
+            perUnit: item.perUnit || '',
+            inventoryUnit: item.inventoryUnit || item.units || 'unit',
+            expiry: item.expiry || '',
+            storage: item.storage || '',
             requestedQty: item.requestedQty,
             receivedQty: 0,
             estimatedUnitPrice: item.estimatedUnitPrice || '',
             actualUnitPrice: '',
             actualTotal: '',
             purchaseLink: item.purchaseLink || '',
-            barcodeCodes: [],
+            barcodeCode: item.barcodeCode || '',
+            barcodeCodes: normalizeMedicationCode(item.barcodeCode) ? [normalizeMedicationCode(item.barcodeCode)] : [],
             notes: item.notes,
             status: 'open'
         }, previous));
@@ -9422,7 +9588,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
         const price = existing?.estimatedUnitPrice || med.lastUnitPrice || '';
         const link = existing?.purchaseLink || med.purchaseLink || '';
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
-            <input id="${inputId}" name="candidateMedIds" type="checkbox" value="${escapeHtml(med.id)}" ${checked ? 'checked' : ''} onchange="renderOrderBuilderPreview()">
+            <input id="${inputId}" name="candidateMedIds" data-order-source="true" data-med-id="${escapeHtml(med.id)}" type="checkbox" value="${escapeHtml(med.id)}" ${checked ? 'checked' : ''} onchange="orderBuilderSelectionChanged(this)">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(reason)} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
             <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || med.minThreshold || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <input name="candidatePrice-${escapeHtml(med.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
@@ -9435,7 +9601,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
         const price = existing?.estimatedUnitPrice || med.lastUnitPrice || '';
         const link = existing?.purchaseLink || med.purchaseLink || '';
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
-            <input id="${inputId}" name="otherInventoryIds" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''} onchange="renderOrderBuilderPreview()">
+            <input id="${inputId}" name="otherInventoryIds" data-order-source="true" data-med-id="${escapeHtml(med.id)}" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''} onchange="orderBuilderSelectionChanged(this)">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
             <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <input name="otherInventoryPrice-${escapeHtml(med.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
@@ -9449,7 +9615,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
         const price = existing?.estimatedUnitPrice || item.lastUnitPrice || med?.lastUnitPrice || '';
         const link = existing?.purchaseLink || item.purchaseLink || med?.purchaseLink || '';
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(formularyItemName(item).toLowerCase())} ${escapeHtml(String(item.notes || '').toLowerCase())}">
-            <input id="${inputId}" name="formularyOrderIds" type="checkbox" value="${escapeHtml(item.id)}" ${existing ? 'checked' : ''} onchange="renderOrderBuilderPreview()">
+            <input id="${inputId}" name="formularyOrderIds" data-order-source="true" data-med-id="${escapeHtml(med?.id || '')}" type="checkbox" value="${escapeHtml(item.id)}" ${existing ? 'checked' : ''} onchange="orderBuilderSelectionChanged(this)">
             <label for="${inputId}"><strong>${escapeHtml(formularyItemName(item))}</strong><br><span class="form-help">${escapeHtml(item.notes || 'Formulary item')}</span></label>
             <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || item.targetQty || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <input name="formularyPrice-${escapeHtml(item.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
@@ -9492,6 +9658,13 @@ window.createInventoryOrder = async function(editOrderId = '') {
             name: row.querySelector('[name="orderCustomName"]')?.value.trim() || '',
             strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
             units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+            formulation: row.querySelector('[name="orderCustomFormulation"]')?.value.trim() || '',
+            perAmount: row.querySelector('[name="orderCustomPerAmount"]')?.value.trim() || '',
+            perUnit: row.querySelector('[name="orderCustomPerUnit"]')?.value.trim() || '',
+            inventoryUnit: row.querySelector('[name="orderCustomInventoryUnit"]')?.value.trim() || '',
+            expiry: row.querySelector('[name="orderCustomExpiry"]')?.value.trim() || '',
+            storage: row.querySelector('[name="orderCustomStorage"]')?.value.trim() || '',
+            barcodeCode: row.querySelector('[name="orderCustomBarcode"]')?.value.trim() || '',
             requestedQty: row.querySelector('[name="orderCustomQty"]')?.value.trim() || '',
             estimatedUnitPrice: row.querySelector('[name="orderCustomPrice"]')?.value.trim() || '',
             purchaseLink: row.querySelector('[name="orderCustomLink"]')?.value.trim() || '',
@@ -9613,9 +9786,13 @@ window.updateReceiveAssignmentMode = function() {
 
 async function promptNewInventoryFromOrderLine(line, barcode, qty) {
     const unitParts = String(line.units || '').split('/');
-    const selectedUnit = unitParts[0] || 'mg';
-    const selectedPerUnit = unitParts[1] || '';
-    const receivedBarcode = normalizeMedicationCode(barcode) || createMedicationCode();
+    const selectedUnit = line.activeUnit || unitParts[0] || 'mg';
+    const selectedPerUnit = line.perUnit || unitParts[1] || '';
+    const parsedLineStrength = parseAmount(line.strength, NaN);
+    const lineStrengthAmount = line.strengthAmount || (Number.isFinite(parsedLineStrength) ? String(parsedLineStrength) : '');
+    const receivedBarcode = normalizeMedicationCode(barcode) || normalizeMedicationCode(line.barcodeCode) || asArray(line.barcodeCodes).map(normalizeMedicationCode).filter(Boolean)[0] || createMedicationCode();
+    const selectedFormulation = line.formulation || 'Other';
+    const selectedStorage = line.storage || 'Room Temp';
     const assignmentChoices = db.family.map(member => `
         <label class="receive-intake-member">
             <input name="receiveAssignedMemberIds" type="checkbox" value="${escapeHtml(member.id)}">
@@ -9637,7 +9814,7 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
                     </div>
                     <div class="field-row" style="margin-top:6px;">
                         <label>Formulation:</label>
-                        <select id="receive-new-formulation" name="formulation" onchange="updateReceiveIntakeDefaults()">${formulationOptionsHtml(line.formulation || 'Other')}</select>
+                        <select id="receive-new-formulation" name="formulation" onchange="updateReceiveIntakeDefaults()">${formulationOptionsHtml(selectedFormulation)}</select>
                         <label>Control:</label>
                         <select name="controlLevel">
                             <option value="N/A">N/A</option><option value="C-II">C-II</option><option value="C-III">C-III</option><option value="C-IV">C-IV</option><option value="C-V">C-V</option>
@@ -9647,9 +9824,9 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
                 <fieldset>
                     <legend>Strength & Stock</legend>
                     <div class="field-row">
-                        <label>Strength:</label><input name="strength" type="number" min="0" step="any" value="${escapeHtml(line.strength || '')}" style="width:80px;">
+                        <label>Strength:</label><input name="strength" type="number" min="0" step="any" value="${escapeHtml(lineStrengthAmount)}" style="width:80px;">
                         <select name="units" style="width:90px;">${strengthUnitOptionsHtml(selectedUnit)}</select>
-                        <label>per</label><input name="perAmount" type="number" min="0.001" step="any" value="1" style="width:55px;">
+                        <label>per</label><input name="perAmount" type="number" min="0.001" step="any" value="${escapeHtml(line.perAmount || '1')}" style="width:55px;">
                         <select name="perUnit" style="width:90px;">${perUnitOptionsHtml(selectedPerUnit)}</select>
                     </div>
                     <div class="field-row" style="margin-top:6px;">
@@ -9664,16 +9841,16 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
                         </select>
                     </div>
                     <div class="field-row" style="margin-top:6px;">
-                        <label>Stock unit:</label><input id="receive-new-inventory-unit" name="inventoryUnit" type="text" value="" style="width:90px;">
-                        <label>Give/apply as:</label><input id="receive-new-administration-unit" name="administrationUnit" type="text" value="" style="width:100px;">
+                        <label>Stock unit:</label><input id="receive-new-inventory-unit" name="inventoryUnit" type="text" value="${escapeHtml(line.inventoryUnit || '')}" style="width:90px;">
+                        <label>Give/apply as:</label><input id="receive-new-administration-unit" name="administrationUnit" type="text" value="${escapeHtml(line.administrationUnit || '')}" style="width:100px;">
                     </div>
                 </fieldset>
                 <fieldset>
                     <legend>Safety & Assignment</legend>
                     <div class="field-row">
-                        <label>Expiry:</label><input name="expiry" type="date">
+                        <label>Expiry:</label><input name="expiry" type="date" value="${escapeHtml(line.expiry || '')}">
                         <label>Storage:</label>
-                        <select name="storage"><option value="Room Temp">Room Temp</option><option value="Refrigerated">Refrigerated</option><option value="Frozen">Frozen</option></select>
+                        <select name="storage"><option value="Room Temp" ${selectedStorage === 'Room Temp' ? 'selected' : ''}>Room Temp</option><option value="Refrigerated" ${selectedStorage === 'Refrigerated' ? 'selected' : ''}>Refrigerated</option><option value="Frozen" ${selectedStorage === 'Frozen' ? 'selected' : ''}>Frozen</option></select>
                     </div>
                     <div class="field-row" style="margin-top:6px;">
                         <label>Assign to:</label>
@@ -10430,13 +10607,127 @@ function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, ins
     </div>`;
 }
 
+function linkedMedicationLabelLine(schedule, med, date, requestedTimes = [], prefix = '') {
+    const dueInstances = date ? getScheduleInstancesForDate(schedule, date) : [];
+    const requested = new Set(requestedTimes);
+    const matchingInstances = requested.size
+        ? dueInstances.filter(instance => requested.has(instance.time))
+        : dueInstances;
+    const times = matchingInstances.length
+        ? matchingInstances.map(instance => instance.time).sort((a, b) => timeToMinutes(a) - timeToMinutes(b)).join(', ')
+        : (date ? 'not scheduled this date' : formatFrequency(schedule));
+    return `${prefix}${med.name} ${formatLabelMedStrength(med)} Dose ${formatPrescribedDose(med, schedule.doseQty)} Qty ${formatQtyForSchedule(schedule, med)} ${times}`;
+}
+
+function linkedMedicationInstructionLines(schedules) {
+    return schedules
+        .map(item => {
+            if (!item.instructions) return '';
+            const itemMed = db.inventory.find(medItem => medItem.id === item.medId);
+            return `${itemMed?.name || 'Med'}: ${item.instructions}`;
+        })
+        .filter(Boolean)
+        .slice(0, 3);
+}
+
+function linkedMedicationGroupNote(schedule, linkedSchedules) {
+    const modes = linkedSchedules.map(linked => scheduleLinkModeBetween(schedule, linked)).filter(Boolean);
+    if (modes.includes('together')) return 'Take together';
+    if (modes.includes('choose-one')) return 'Choose one linked medication';
+    return 'Linked medications';
+}
+
+function linkedMedicationGroupLabelHtml(schedule, med, member, date, doseTimes, linkedSchedules, prepackShift = 'all') {
+    const primaryLine = `${med.name} ${formatLabelMedStrength(med)}`;
+    const primaryDetails = `Dose ${formatPrescribedDose(med, schedule.doseQty)} | Qty ${formatQtyForSchedule(schedule, med)}`;
+    const linkedLines = linkedSchedules.map(linked => {
+        const linkedMed = db.inventory.find(item => item.id === linked.medId);
+        if (!linkedMed) return '';
+        const mode = scheduleLinkModeBetween(schedule, linked);
+        const prefix = mode === 'choose-one' ? 'Option: ' : '';
+        return linkedMedicationLabelLine(linked, linkedMed, date, doseTimes, prefix);
+    }).filter(Boolean);
+    const instructionLines = linkedMedicationInstructionLines([schedule, ...linkedSchedules]);
+    const header = date ? `${date} | ${doseTimes.length ? doseTimes.join(', ') : 'As Needed'}` : 'Linked medications';
+    const groupNote = linkedMedicationGroupNote(schedule, linkedSchedules);
+    const labelClass = getLabelClass([
+        header,
+        primaryLine,
+        primaryDetails,
+        memberDisplayName(member),
+        groupNote,
+        ...linkedLines,
+        ...instructionLines
+    ], 4 + linkedLines.length + instructionLines.length);
+    return `<div class="${labelClass}">
+        <div class="label-date label-date-with-icon">${escapeHtml(header)}${labelShiftIconHtml(prepackShift)}</div>
+        <div class="label-title">${escapeHtml(primaryLine)}</div>
+        <div class="label-small">${escapeHtml(primaryDetails)}</div>
+        <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>
+        <div class="label-small"><b>${escapeHtml(groupNote)}</b></div>
+        ${linkedLines.map(line => `<div class="label-small">${escapeHtml(line)}</div>`).join('')}
+        ${instructionLines.map(line => `<div class="label-small"><b>Instructions:</b> ${escapeHtml(line)}</div>`).join('')}
+    </div>`;
+}
+
+function linkedMedicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances, linkedSchedules, prepackShift = 'all') {
+    const selectedTimes = Array.from(new Set(instances.map(instance => instance.time))).sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+    const primaryLine = `${med.name} ${formatLabelMedStrength(med)}`;
+    const primaryDetails = `Dose ${formatPrescribedDose(med, schedule.doseQty)} | ${formatFrequency(schedule)}${selectedTimes.length ? ` ${selectedTimes.join(', ')}` : ''}`;
+    const linkedLines = linkedSchedules.map(linked => {
+        const linkedMed = db.inventory.find(item => item.id === linked.medId);
+        if (!linkedMed) return '';
+        const mode = scheduleLinkModeBetween(schedule, linked);
+        const prefix = mode === 'choose-one' ? 'Option: ' : '';
+        return `${prefix}${linkedMed.name} ${formatLabelMedStrength(linkedMed)} Dose ${formatPrescribedDose(linkedMed, linked.doseQty)} ${formatFrequency(linked)}`;
+    }).filter(Boolean);
+    const instructionLines = linkedMedicationInstructionLines([schedule, ...linkedSchedules]);
+    const groupNote = linkedMedicationGroupNote(schedule, linkedSchedules);
+    const labelClass = getLabelClass([
+        `${startDate} - ${endDate}`,
+        primaryLine,
+        primaryDetails,
+        memberDisplayName(member),
+        groupNote,
+        ...linkedLines,
+        ...instructionLines
+    ], 4 + linkedLines.length + instructionLines.length);
+    return `<div class="${labelClass}">
+        <div class="label-date label-date-with-icon">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}${labelShiftIconHtml(prepackShift)}</div>
+        <div class="label-title">${escapeHtml(primaryLine)}</div>
+        <div class="label-small">${escapeHtml(primaryDetails)}</div>
+        <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>
+        <div class="label-small"><b>${escapeHtml(groupNote)}</b></div>
+        ${linkedLines.map(line => `<div class="label-small">${escapeHtml(line)}</div>`).join('')}
+        ${instructionLines.map(line => `<div class="label-small"><b>Instructions:</b> ${escapeHtml(line)}</div>`).join('')}
+    </div>`;
+}
+
 window.printSingleLabel = async function(scheduleId) {
     const s = db.schedules.find(x => x.id === scheduleId);
     if (!s) return;
     const med = db.inventory.find(m => m.id === s.medId);
     const mem = db.family.find(f => f.id === s.memberId);
     if (!med || !mem) return;
+    const linkedForLabel = linkedSchedulesFor(s, db.schedules.filter(item => item.memberId === s.memberId && !isScheduleArchived(item)));
     if (s.freq === 'PRN') {
+        if (linkedForLabel.length > 0) {
+            const result = await showActionModal(`Print Label: ${med.name}`, `
+                <div class="field-row-stacked">
+                    <label>Linked medications:</label>
+                    <select name="includeLinkedMedications" style="width:280px;">
+                        <option value="no">Print only this medication</option>
+                        <option value="yes">Print linked medications on the same label</option>
+                    </select>
+                </div>
+                <div class="form-help">Linked medications will be listed under the selected medication.</div>
+            `, 'Preview Label');
+            if (!result) return;
+            previewLabelHtml(result.includeLinkedMedications === 'yes'
+                ? linkedMedicationGroupLabelHtml(s, med, mem, '', [], linkedForLabel)
+                : medicationLabelHtml(s, med, mem, '', []));
+            return;
+        }
         previewLabelHtml(medicationLabelHtml(s, med, mem, '', []));
         return;
     }
@@ -10504,6 +10795,14 @@ window.printSingleLabel = async function(scheduleId) {
             <label>Prepack icon/group:</label>
             ${prepackShiftChoiceHtml(prepackShiftForTime(scheduledTimes[0]) || 'all')}
         </div>
+        ${linkedForLabel.length ? `<div class="field-row-stacked" style="margin-top:8px;">
+            <label>Linked medications:</label>
+            <select name="includeLinkedMedications" style="width:280px;">
+                <option value="no">Print only this medication</option>
+                <option value="yes">Put linked medications on the same label</option>
+            </select>
+        </div>
+        <div class="form-help">${escapeHtml(linkedForLabel.length)} linked medication${linkedForLabel.length === 1 ? '' : 's'} will be listed under this medication.</div>` : ''}
         ${!orderHasEndDate ? '<div class="form-help" style="margin-top:8px;">This order is ongoing, so use a specific date or custom date range.</div>' : ''}
     `, 'Preview Labels');
     if (!result) return;
@@ -10537,8 +10836,11 @@ window.printSingleLabel = async function(scheduleId) {
     }
 
     let labels = [];
+    const includeLinkedMedications = linkedForLabel.length > 0 && result.includeLinkedMedications === 'yes';
     if (result.labelLayout === 'range') {
-        labels = [medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, prepackShift)];
+        labels = [includeLinkedMedications
+            ? linkedMedicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, linkedForLabel, prepackShift)
+            : medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, prepackShift)];
     } else if (result.labelDoseMode === 'all') {
         const byDate = instances.reduce((acc, instance) => {
             if (!acc[instance.date]) acc[instance.date] = [];
@@ -10546,16 +10848,32 @@ window.printSingleLabel = async function(scheduleId) {
             return acc;
         }, {});
         labels = Object.entries(byDate).map(([date, times]) =>
-            medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), prepackShift)
+            includeLinkedMedications
+                ? linkedMedicationGroupLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), linkedForLabel, prepackShift)
+                : medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), prepackShift)
         );
     } else {
-        labels = instances.map(instance => medicationLabelHtml(s, med, mem, instance.date, [instance.time], prepackShift));
+        labels = instances.map(instance => includeLinkedMedications
+            ? linkedMedicationGroupLabelHtml(s, med, mem, instance.date, [instance.time], linkedForLabel, prepackShift)
+            : medicationLabelHtml(s, med, mem, instance.date, [instance.time], prepackShift));
     }
 
     if (labels.length > 100 && !await appConfirm(`This will create ${labels.length} labels. Continue?`, 'Large Label Print Job')) {
         return;
     }
-    const prepackRows = instances.map(instance => ({ schedule: s, med, instance }));
+    const prepackRows = instances.flatMap(instance => {
+        const rows = [{ schedule: s, med, instance }];
+        if (includeLinkedMedications) {
+            linkedForLabel.forEach(linked => {
+                const linkedMed = db.inventory.find(item => item.id === linked.medId);
+                if (!linkedMed) return;
+                const linkedInstance = getScheduleInstancesForDate(linked, instance.date).find(candidate => candidate.time === instance.time);
+                if (!linkedInstance) return;
+                rows.push({ schedule: linked, med: linkedMed, instance: linkedInstance });
+            });
+        }
+        return rows;
+    });
     previewLabelHtml(
         labels.join(''),
         buildPrepackDefinition(

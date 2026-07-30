@@ -351,6 +351,35 @@ button {
     align-items: center;
 }
 
+.data-sync-panel {
+    margin-top: 8px;
+    background: linear-gradient(90deg, #f2f7ff, #e5ffe5);
+}
+
+.data-sync-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.data-location-path {
+    margin-top: 4px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    color: #003f00;
+    padding: 5px 7px;
+    min-height: 18px;
+    font-family: "Courier New", monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.data-sync-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
 .icon-dashboard { background-image: url("assets/ui-icons/dashboard.ico"); }
 .icon-calendar { background-image: url("assets/ui-icons/calendar.ico"); }
 .icon-box { background-image: url("assets/ui-icons/prepackage.ico"); }
@@ -570,6 +599,45 @@ button {
     min-width: 0;
     width: 100%;
     box-sizing: border-box;
+}
+
+.order-custom-card {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    border: 2px outset #ffffff;
+    background: #fff8c8;
+    padding: 7px;
+    margin: 6px 0;
+}
+
+.order-custom-card label {
+    display: grid;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.order-custom-card input,
+.order-custom-card select {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    font-weight: normal;
+    color: #000000;
+}
+
+.order-custom-head,
+.order-custom-wide {
+    grid-column: 1 / -1;
+}
+
+.order-custom-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dotted #808080;
+    padding-bottom: 4px;
+    color: #000080;
 }
 
 .inventory-builder-layout {

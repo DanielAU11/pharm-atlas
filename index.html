@@ -41,6 +41,19 @@
                 
                 <!-- 1. DASHBOARD -->
                 <div id="panel-dashboard">
+                    <fieldset class="data-sync-panel">
+                        <legend>Desktop Sync Folder</legend>
+                        <div class="data-sync-grid">
+                            <div>
+                                <strong id="data-location-status">Local data folder</strong>
+                                <div id="data-location-path" class="data-location-path">Checking data folder...</div>
+                            </div>
+                            <div class="field-row data-sync-actions">
+                                <button type="button" onclick="chooseDesktopSyncFolder()">Use Synced Folder</button>
+                                <button type="button" onclick="useLocalDesktopDataFolder()">Use Local Folder</button>
+                            </div>
+                        </div>
+                    </fieldset>
                     <fieldset>
                         <legend>Medication Schedule Calendar</legend>
                         <div class="calendar-controls">
@@ -134,7 +147,7 @@
                                 <option value="Monthly">Once Monthly</option>
                             </select>
                             <div id="qod-start-container" style="display:none;">
-                                <label>Start Day:</label><input id="qod-start-date" type="date">
+                                <label>Every-other-day start:</label><input id="qod-start-date" type="date">
                             </div>
                             <div id="sched-monthly-container" style="display:none;">
                                 <label>First monthly dose:</label><input id="sched-monthly-anchor" type="date">
@@ -168,8 +181,8 @@
                             <span style="font-size:11px;">Each administration counts as 1 dose of the Give Qty.</span>
                         </div>
                         <div class="field-row" style="margin-top:8px;">
-                            <label>Start:</label><input id="sched-start" type="date">
-                            <label>End:</label><input id="sched-end" type="date">
+                            <span id="sched-start-date-wrap"><label>Start:</label><input id="sched-start" type="date"></span>
+                            <span><label>End:</label><input id="sched-end" type="date"></span>
                         </div>
                         <div class="field-row-stacked" style="margin-top:8px;">
                             <label>Administration Time(s):</label>
@@ -1017,7 +1030,7 @@
         <div class="title-bar"><div class="title-bar-text" id="mod-title">Modify Order</div></div>
         <div class="window-body">
             <input type="hidden" id="mod-sched-id">
-            <div class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date"></div>
+            <div id="mod-start-date-wrap" class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date"></div>
             <div class="field-row-stacked"><label>End Date</label><input id="mod-end" type="date"></div>
             <div class="field-row-stacked"><label>Dose Quantity</label><input id="mod-dose-qty" type="number" step="0.1"></div>
             <div class="field-row-stacked"><label>Prescriber</label><select id="mod-prescriber"></select></div>

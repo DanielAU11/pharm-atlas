@@ -33,11 +33,113 @@ if (!hasSingleInstanceLock) {
 
 app.setAppUserModelId(app.isPackaged ? 'com.squirrel.pharm-atlas.PharmAtlas' : 'PharmAtlas');
 
-const dataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
-const dbPath = path.join(dataDir, 'db.json');
-const emailConfigPath = path.join(dataDir, 'email-config.json');
+const defaultDataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
+const dataLocationConfigPath = path.join(runtimeDataDir, 'data-location.json');
+let dataDir = loadDataDirSetting();
+let dbPath = path.join(dataDir, 'db.json');
+const emailConfigPath = path.join(defaultDataDir, 'email-config.json');
 
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+function ensureDir(dirPath) {
+    if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function loadDataDirSetting() {
+    try {
+        if (fs.existsSync(dataLocationConfigPath)) {
+            const saved = JSON.parse(fs.readFileSync(dataLocationConfigPath, 'utf8').replace(/^\uFEFF/, ''));
+            if (saved?.dataDir && path.isAbsolute(saved.dataDir)) return saved.dataDir;
+        }
+    } catch (error) {
+        console.error('Unable to read PharmAtlas data location setting:', error.message);
+    }
+    return defaultDataDir;
+}
+
+function saveDataDirSetting(nextDataDir) {
+    ensureDir(runtimeDataDir);
+    fs.writeFileSync(dataLocationConfigPath, JSON.stringify({
+        dataDir: nextDataDir,
+        updatedAt: new Date().toISOString()
+    }, null, 2));
+}
+
+function clearDataDirSetting() {
+    try {
+        if (fs.existsSync(dataLocationConfigPath)) fs.unlinkSync(dataLocationConfigPath);
+    } catch (error) {
+        console.error('Unable to clear data location setting:', error.message);
+    }
+}
+
+function setActiveDataDir(nextDataDir) {
+    dataDir = nextDataDir;
+    dbPath = path.join(dataDir, 'db.json');
+    ensureDir(dataDir);
+}
+
+function isEmptyDbData(data) {
+    if (!data || typeof data !== 'object') return true;
+    const keys = ['family', 'inventory', 'schedules', 'history', 'vitals', 'orderSets', 'prescribers', 'prepackQueues', 'formularyItems', 'inventoryOrders', 'medKits'];
+    return keys.every(key => !Array.isArray(data[key]) || data[key].length === 0);
+}
+
+function defaultEmptyDb() {
+    return {
+        family: [],
+        inventory: [],
+        schedules: [],
+        history: [],
+        recipes: [],
+        vitals: [],
+        orderSets: [],
+        prescribers: [],
+        reminderLog: [],
+        prepackQueues: [],
+        formularyItems: [],
+        inventoryOrders: [],
+        medKits: [],
+        settings: {}
+    };
+}
+
+function readDbFromPath(filePath) {
+    if (!fs.existsSync(filePath)) return defaultEmptyDb();
+    const data = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    return JSON.parse(data);
+}
+
+function writeDbToPath(filePath, data) {
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, JSON.stringify(data || defaultEmptyDb(), null, 2));
+}
+
+function copyImagesIntoDataDir(data, targetDir) {
+    if (!Array.isArray(data?.inventory)) return data;
+    data.inventory.forEach((med, index) => {
+        if (!med?.imagePath || /^https?:\/\//i.test(med.imagePath) || !fs.existsSync(med.imagePath)) return;
+        const original = med.imagePath;
+        const extension = path.extname(original) || '.png';
+        const targetName = safeAssetFileName(`${path.basename(original, extension)}_${med.id || index}${extension}`);
+        const targetPath = path.join(targetDir, targetName);
+        try {
+            if (path.resolve(original) !== path.resolve(targetPath)) fs.copyFileSync(original, targetPath);
+            med.imagePath = targetPath;
+        } catch (error) {
+            console.error('Unable to copy medication image into synced data folder:', error.message);
+        }
+    });
+    return data;
+}
+
+function normalizeSyncTargetFolder(selectedFolder) {
+    const baseName = path.basename(selectedFolder).toLowerCase();
+    return baseName === 'pharmatlasdata'
+        ? selectedFolder
+        : path.join(selectedFolder, 'PharmAtlasData');
+}
+
+ensureDir(defaultDataDir);
+ensureDir(dataDir);
 
 function loadEmailConfig() {
     let savedConfig = {};
@@ -165,28 +267,98 @@ ipcMain.handle('send-email', async (event, { to, subject, body }) => {
 });
 
 ipcMain.handle('save-db', (event, data) => {
-    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+    writeDbToPath(dbPath, data);
     return true;
 });
 
 ipcMain.handle('load-db', () => {
-    if (!fs.existsSync(dbPath)) return {
-        family: [],
-        inventory: [],
-        schedules: [],
-        history: [],
-        recipes: [],
-        vitals: [],
-        orderSets: [],
-        prescribers: [],
-        reminderLog: [],
-        prepackQueues: [],
-        formularyItems: [],
-        inventoryOrders: [],
-        medKits: []
+    return readDbFromPath(dbPath);
+});
+
+ipcMain.handle('get-data-location', () => ({
+    dataDir,
+    dbPath,
+    defaultDataDir,
+    usingDefault: path.resolve(dataDir) === path.resolve(defaultDataDir)
+}));
+
+ipcMain.handle('choose-sync-folder', async () => {
+    const result = await dialog.showOpenDialog(win, {
+        title: 'Choose OneDrive, Google Drive Desktop, or another synced folder',
+        properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || !result.filePaths?.[0]) return null;
+
+    const nextDataDir = normalizeSyncTargetFolder(result.filePaths[0]);
+    ensureDir(nextDataDir);
+    const nextDbPath = path.join(nextDataDir, 'db.json');
+    const currentDb = readDbFromPath(dbPath);
+    const folderDbExists = fs.existsSync(nextDbPath);
+    let mode = 'copy-current';
+
+    if (folderDbExists && path.resolve(nextDbPath) !== path.resolve(dbPath) && !isEmptyDbData(readDbFromPath(nextDbPath))) {
+        const choice = await dialog.showMessageBox(win, {
+            type: 'question',
+            title: 'PharmAtlas Data Found',
+            message: 'This folder already has PharmAtlas data. Which file should this desktop use?',
+            detail: `Folder:\n${nextDataDir}`,
+            buttons: ['Copy current data into this folder', 'Use data already in this folder', 'Cancel'],
+            defaultId: 0,
+            cancelId: 2
+        });
+        if (choice.response === 2) return null;
+        mode = choice.response === 1 ? 'use-folder' : 'copy-current';
+    }
+
+    if (mode === 'copy-current') {
+        const migratedDb = copyImagesIntoDataDir(JSON.parse(JSON.stringify(currentDb)), nextDataDir);
+        writeDbToPath(nextDbPath, migratedDb);
+    }
+
+    saveDataDirSetting(nextDataDir);
+    setActiveDataDir(nextDataDir);
+    return {
+        dataDir,
+        dbPath,
+        defaultDataDir,
+        usingDefault: false,
+        data: readDbFromPath(dbPath)
     };
-    const data = fs.readFileSync(dbPath, 'utf8');
-    return JSON.parse(data);
+});
+
+ipcMain.handle('use-default-data-folder', async () => {
+    const currentDb = readDbFromPath(dbPath);
+    const defaultDbPath = path.join(defaultDataDir, 'db.json');
+    let mode = 'copy-current';
+
+    if (path.resolve(dataDir) !== path.resolve(defaultDataDir) && fs.existsSync(defaultDbPath) && !isEmptyDbData(readDbFromPath(defaultDbPath))) {
+        const choice = await dialog.showMessageBox(win, {
+            type: 'question',
+            title: 'Use Local Data Folder',
+            message: 'The default desktop PharmAtlasData folder already has data.',
+            detail: `Default folder:\n${defaultDataDir}`,
+            buttons: ['Copy current data there', 'Use data already there', 'Cancel'],
+            defaultId: 0,
+            cancelId: 2
+        });
+        if (choice.response === 2) return null;
+        mode = choice.response === 1 ? 'use-folder' : 'copy-current';
+    }
+
+    if (mode === 'copy-current') {
+        const migratedDb = copyImagesIntoDataDir(JSON.parse(JSON.stringify(currentDb)), defaultDataDir);
+        writeDbToPath(defaultDbPath, migratedDb);
+    }
+
+    clearDataDirSetting();
+    setActiveDataDir(defaultDataDir);
+    return {
+        dataDir,
+        dbPath,
+        defaultDataDir,
+        usingDefault: true,
+        data: readDbFromPath(dbPath)
+    };
 });
 
 ipcMain.handle('backup-data', async (event, data) => {
