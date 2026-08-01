@@ -432,36 +432,81 @@ function auditDisplayTime(entry) {
     return Number.isNaN(date.getTime()) ? String(entry.timestamp || '') : date.toLocaleString();
 }
 
-function medicationDailyUseEstimate(medId, days = 28) {
-    const today = localDateKey();
-    const end = addDaysKey(today, days - 1);
-    const total = db.schedules
-        .filter(schedule => schedule.medId === medId && !isScheduleArchived(schedule) && schedule.freq !== 'PRN')
-        .reduce((sum, schedule) => {
-            const med = db.inventory.find(item => item.id === schedule.medId);
-            if (!med || usesContainerTracking(med)) return sum;
-            return sum + getScheduleInstancesInRange(schedule, today, end).length * parseAmount(schedule.doseQty, 0);
-        }, 0);
-    return total / days;
+function activeScheduledUseForMed(medId) {
+    return db.schedules.filter(schedule =>
+        schedule.medId === medId &&
+        !isScheduleArchived(schedule) &&
+        schedule.freq !== 'PRN'
+    );
+}
+
+function scheduledDoseQuantityForDay(schedule, dateStr) {
+    const doseQty = parseAmount(schedule.doseQty, 0);
+    if (!Number.isFinite(doseQty) || doseQty <= 0) return 0;
+    return getScheduleInstancesForDate(schedule, dateStr).length * doseQty;
 }
 
 function refillForecastForMed(med) {
     if (!med || usesContainerTracking(med)) return null;
-    const dailyUse = medicationDailyUseEstimate(med.id);
-    if (!Number.isFinite(dailyUse) || dailyUse <= 0) return null;
-    const stock = parseAmount(med.stock, 0);
-    const daysRemaining = Math.max(0, Math.floor(stock / dailyUse));
+    const schedules = activeScheduledUseForMed(med.id);
+    if (!schedules.length) return null;
+
+    let remaining = parseAmount(med.stock, 0);
+    if (!Number.isFinite(remaining) || remaining < 0) remaining = 0;
+
+    const today = localDateKey();
+    const horizonDays = 1825;
+    let lastUseDate = '';
+    let totalUse = 0;
+    let useDays = 0;
+    const allSchedulesHaveEnd = schedules.every(schedule => !!schedule.endDate);
+    const finalScheduledDate = allSchedulesHaveEnd
+        ? schedules.reduce((latest, schedule) => !latest || schedule.endDate > latest ? schedule.endDate : latest, '')
+        : '';
+
+    for (let offset = 0; offset <= horizonDays; offset += 1) {
+        const dateStr = addDaysKey(today, offset);
+        const dayUse = schedules.reduce((sum, schedule) => sum + scheduledDoseQuantityForDay(schedule, dateStr), 0);
+        if (dayUse <= 0) continue;
+        lastUseDate = dateStr;
+        totalUse += dayUse;
+        useDays += 1;
+        if (remaining <= dayUse) {
+            return {
+                type: 'depletes',
+                daysRemaining: offset,
+                runOutDate: dateStr,
+                averageUseOnUseDays: totalUse / useDays
+            };
+        }
+        remaining -= dayUse;
+    }
+
+    if (!lastUseDate) return null;
+    if (allSchedulesHaveEnd && finalScheduledDate && finalScheduledDate <= addDaysKey(today, horizonDays)) {
+        return {
+            type: 'enough-through-end',
+            coveredThrough: finalScheduledDate,
+            remainingAfterSchedule: remaining
+        };
+    }
     return {
-        dailyUse,
-        daysRemaining,
-        runOutDate: addDaysKey(localDateKey(), daysRemaining)
+        type: 'beyond-horizon',
+        coveredThrough: addDaysKey(today, horizonDays),
+        remainingAfterHorizon: remaining
     };
 }
 
 function refillForecastText(med) {
     const forecast = refillForecastForMed(med);
     if (!forecast) return '';
-    return `~${forecast.daysRemaining} day${forecast.daysRemaining === 1 ? '' : 's'} left; runs out ${forecast.runOutDate}`;
+    if (forecast.type === 'enough-through-end') {
+        return `scheduled use: enough through ${forecast.coveredThrough}`;
+    }
+    if (forecast.type === 'beyond-horizon') {
+        return `scheduled use: >5 years left`;
+    }
+    return `scheduled use: ~${forecast.daysRemaining} day${forecast.daysRemaining === 1 ? '' : 's'} left; runs out ${forecast.runOutDate}`;
 }
 
 function timeToMinutes(time) {
@@ -1431,7 +1476,8 @@ window.updateCombinationPreview = function(prefix = 'med') {
     }
     const comboMed = { isCombination: true, components };
     preview.className = 'combo-strength-preview ok';
-    preview.textContent = `Package strength: ${formatCombinationStrength(comboMed, true)}`;
+    const previewLabel = components.length > 1 ? `Strength preview (${components.length} ingredients)` : 'Strength preview';
+    preview.textContent = `${previewLabel}: ${formatCombinationStrength(comboMed, components.length > 1)}`;
 };
 
 function formatMedStrength(med, includeNames = false, includeSolidDenominator = true) {
@@ -10287,10 +10333,6 @@ function compoundPrepPanelHtml(recipe) {
         </div>
         <div class="compound-preview-column">
             <div class="compound-label-preview-card">${compoundBottleLabelHtml(recipe, defaults)}</div>
-            <fieldset>
-                <legend>Recent Batches</legend>
-                ${compoundPrepHistoryHtml(recipe)}
-            </fieldset>
         </div>
     </div>`;
 }
@@ -10489,6 +10531,12 @@ function renderRecipes() {
         : '<div class="empty-state">No recipes saved yet.</div>';
     const recipe = db.recipes.find(item => item.id === activeCompoundRecipeId);
     panel.innerHTML = recipe ? compoundPrepPanelHtml(recipe) : '<div class="empty-state">Select or save a recipe to prepare a compounded product.</div>';
+    const builderHistory = document.getElementById('compound-builder-history');
+    if (builderHistory) {
+        builderHistory.innerHTML = recipe
+            ? compoundPrepHistoryHtml(recipe)
+            : '<div class="empty-state">Select a saved recipe to see completed batches.</div>';
+    }
     enhanceButtonIcons(document.getElementById('panel-recipes') || document);
 };
 
@@ -11242,9 +11290,12 @@ window.addOrderCustomRow = function(values = {}) {
         </div>
         <label>Name<input name="orderCustomName" type="text" placeholder="Medication or supplement name" value="${escapeHtml(values.name || '')}" oninput="renderOrderBuilderPreview()"></label>
         <label>Formulation<select name="orderCustomFormulation" onchange="updateOrderCustomCombination('${rowId}')">${formulationOptionsHtml(selectedFormulation)}</select></label>
-        <div class="order-custom-combo-select">
-            <input id="${rowId}-is-combination" name="orderCustomIsCombination" type="checkbox" ${isCombination ? 'checked' : ''} onchange="updateOrderCustomCombination('${rowId}')">
-            <label for="${rowId}-is-combination">Combination Product?</label>
+        <div class="order-custom-combo-select order-custom-wide">
+            <input id="${rowId}-is-combination" class="order-custom-combo-hidden" name="orderCustomIsCombination" type="checkbox" ${isCombination ? 'checked' : ''} onchange="updateOrderCustomCombination('${rowId}')">
+            <button type="button" class="order-custom-combo-button ${isCombination ? 'checked' : ''}" onclick="toggleOrderCustomCombination('${rowId}')">
+                <span class="order-custom-checkmark">${isCombination ? '✓' : ''}</span>
+                <span>Combination Product?</span>
+            </button>
         </div>
         <span class="order-custom-simple-strength">
             <label>Strength amount<input name="orderCustomStrength" type="text" placeholder="e.g. 0.63, 150" value="${escapeHtml(values.strengthAmount || values.strength || '')}" oninput="renderOrderBuilderPreview()"></label>
@@ -11593,8 +11644,12 @@ function collectOrderCustomComponents(row) {
     const useShared = row.querySelector('[name="orderCustomUseSharedPer"]')?.checked !== false;
     const sharedAmount = parseAmount(row.querySelector('[name="orderCustomSharedPerAmount"]')?.value, NaN);
     const sharedUnit = row.querySelector('[name="orderCustomSharedPerUnit"]')?.value || '';
+    const componentList = row.querySelector('.order-custom-component-list');
     let invalidDenominator = false;
-    const components = Array.from(row.querySelectorAll('.order-custom-component')).map(componentRow => {
+    const componentRows = componentList
+        ? Array.from(componentList.children).filter(child => child.classList.contains('order-custom-component'))
+        : Array.from(row.querySelectorAll('.order-custom-component'));
+    const components = componentRows.map(componentRow => {
         const name = componentRow.querySelector('[name="orderCustomComponentName"]')?.value.trim() || '';
         const strengthAmount = parseAmount(componentRow.querySelector('[name="orderCustomComponentStrength"]')?.value, NaN);
         const unit = componentRow.querySelector('[name="orderCustomComponentUnit"]')?.value || 'mg';
@@ -11620,6 +11675,13 @@ window.updateOrderCustomCombination = function(rowId) {
     const row = document.getElementById(rowId);
     if (!row) return;
     const isCombo = row.querySelector('[name="orderCustomIsCombination"]')?.checked;
+    const comboButton = row.querySelector('.order-custom-combo-button');
+    if (comboButton) {
+        comboButton.classList.toggle('checked', !!isCombo);
+        comboButton.setAttribute('aria-pressed', isCombo ? 'true' : 'false');
+        const mark = comboButton.querySelector('.order-custom-checkmark');
+        if (mark) mark.textContent = isCombo ? '✓' : '';
+    }
     const useShared = row.querySelector('[name="orderCustomUseSharedPer"]')?.checked !== false;
     const simpleFields = row.querySelector('.order-custom-simple-strength');
     const comboFields = row.querySelector('.order-custom-combo-fields');
@@ -11644,10 +11706,19 @@ window.updateOrderCustomCombination = function(rowId) {
             preview.textContent = 'Add ingredients to preview the combined strength.';
         } else {
             preview.className = 'combo-strength-preview ok';
-            preview.textContent = `Package strength: ${formatCombinationStrength({ isCombination: true, components }, true)}`;
+            const previewLabel = components.length > 1 ? `Strength preview (${components.length} ingredients)` : 'Strength preview';
+            preview.textContent = `${previewLabel}: ${formatCombinationStrength({ isCombination: true, components }, components.length > 1)}`;
         }
     }
     window.renderOrderBuilderPreview?.();
+};
+
+window.toggleOrderCustomCombination = function(rowId) {
+    const row = document.getElementById(rowId);
+    const checkbox = row?.querySelector('[name="orderCustomIsCombination"]');
+    if (!checkbox) return;
+    checkbox.checked = !checkbox.checked;
+    updateOrderCustomCombination(rowId);
 };
 
 window.addOrderCustomComponentRow = function(rowId, component = {}) {

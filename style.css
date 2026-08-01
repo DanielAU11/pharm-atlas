@@ -541,6 +541,17 @@ button {
     background: #d7efd7;
 }
 
+.compound-builder-history-fieldset {
+    margin-top: 8px;
+    background: #eef7ff;
+}
+
+.compound-builder-history {
+    min-height: 54px;
+    max-height: 150px;
+    overflow: auto;
+}
+
 .recipe-calculation-panel {
     margin-top: 8px;
     padding: 7px;
@@ -762,9 +773,14 @@ button {
 
 .compound-prep-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 255px;
+    grid-template-columns: minmax(0, 1fr) minmax(235px, 300px);
     gap: 8px;
     align-items: start;
+}
+
+.compound-prep-main,
+.compound-preview-column {
+    min-width: 0;
 }
 
 .compound-prep-banner {
@@ -836,6 +852,7 @@ button {
 .compound-preview-column {
     display: grid;
     gap: 8px;
+    align-content: start;
 }
 
 .compound-label-preview-card {
@@ -931,7 +948,7 @@ button {
     font-size: 10px;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1250px) {
     .compound-layout,
     .compound-prep-grid {
         grid-template-columns: 1fr;
@@ -1257,24 +1274,48 @@ button {
     display: flex;
     align-items: center;
     gap: 5px;
-    align-self: end;
-    min-height: 22px;
+    align-self: start;
+    min-height: 24px;
+    padding: 2px 0 4px;
     color: #000000;
     white-space: nowrap;
 }
 
-.order-custom-combo-select input[type="checkbox"] {
-    width: 13px !important;
-    min-width: 13px;
-    height: 13px;
-    margin: 0;
+.order-custom-combo-hidden {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
 }
 
-.order-custom-combo-select label {
-    display: inline !important;
-    color: #000000 !important;
-    font-weight: normal !important;
-    font-size: 11px !important;
+.order-custom-combo-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 22px;
+    padding: 2px 8px 2px 5px;
+    color: #000000;
+    background: #c0c0c0;
+}
+
+.order-custom-combo-button.checked {
+    background: #e8ffe8;
+    color: #006000;
+    font-weight: bold;
+}
+
+.order-custom-checkmark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    color: #000000;
+    font-size: 11px;
+    line-height: 1;
+    box-sizing: border-box;
 }
 
 .order-custom-combo-fields {
