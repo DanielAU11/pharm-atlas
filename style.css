@@ -112,32 +112,35 @@ body {
     width: 16px;
     height: 16px;
     flex: 0 0 16px;
-    border: 1px solid #000000;
-    background: #ffffff;
-    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #808080;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
 .taskbar-patient-icon::before {
     content: "";
     position: absolute;
     left: 5px;
-    top: 2px;
-    width: 6px;
-    height: 6px;
+    top: 1px;
+    width: 7px;
+    height: 7px;
     background: var(--patient-color, #1f66b5);
     border: 1px solid #000000;
     border-radius: 50%;
+    box-shadow: inset 1px 1px #ffffff;
 }
 
 .taskbar-patient-icon::after {
     content: "";
     position: absolute;
-    left: 3px;
-    bottom: 2px;
-    width: 10px;
-    height: 6px;
+    left: 2px;
+    bottom: 1px;
+    width: 13px;
+    height: 7px;
     background: var(--patient-color, #1f66b5);
     border: 1px solid #000000;
+    border-radius: 8px 8px 2px 2px;
+    box-shadow: inset 1px 1px #ffffff;
 }
 
 .taskbar-patient-icon.female::after {
@@ -380,12 +383,618 @@ button {
     flex-wrap: wrap;
 }
 
+.today-summary-strip,
+.maintenance-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 4px 0 6px;
+    font-size: 11px;
+}
+
+.today-summary-strip span,
+.maintenance-summary span {
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 4px 7px;
+}
+
+.today-dose-list {
+    max-height: 230px;
+    overflow: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.today-dose-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px;
+    border-bottom: 1px dotted #a0a0a0;
+    font-size: 11px;
+}
+
+.today-status-overdue { background: #ffd4d4; }
+.today-status-soon { background: #ffe6bf; }
+.today-status-later { background: #f4f4f4; }
+.today-status-given { background: #d7ffd7; }
+.today-status-prn { background: #e4ecff; }
+
+.today-status-pill {
+    display: inline-block;
+    min-width: 56px;
+    text-align: center;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+    padding: 2px 5px;
+    margin-right: 4px;
+    font-weight: bold;
+}
+
+.forecast-text {
+    color: #006000;
+    font-weight: normal;
+}
+
+.med-review-grid,
+.med-review-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.med-review-card {
+    border: 2px inset #ffffff;
+    background: #f8fbff;
+    padding: 6px;
+    font-size: 11px;
+}
+
+.win98-report-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff;
+    font-size: 11px;
+}
+
+.win98-report-table th,
+.win98-report-table td {
+    border: 1px solid #808080;
+    padding: 4px;
+    vertical-align: top;
+}
+
+.win98-report-table th {
+    background: #d8d8d8;
+}
+
+.medication-summary-table {
+    font-size: 10px;
+}
+
+.medication-summary-table th,
+.medication-summary-table td {
+    padding: 3px 4px;
+}
+
+.win98-star {
+    display: inline-block;
+    min-width: 14px;
+    margin-right: 4px;
+    border: 1px outset #ffffff;
+    background: #fff6a5;
+    color: #805800;
+    text-align: center;
+    font-weight: bold;
+    line-height: 13px;
+}
+
+.favorite-regimen-button.favorited {
+    background: #fff6a5;
+    color: #000080;
+    font-weight: bold;
+}
+
+.compound-layout {
+    display: grid;
+    grid-template-columns: minmax(520px, 1.05fr) minmax(430px, 0.95fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.compound-builder {
+    background: linear-gradient(90deg, #c0c0c0 0%, #d8e8d8 100%);
+}
+
+.recipe-form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 7px 10px;
+    align-items: end;
+}
+
+.recipe-form-grid.compact {
+    grid-template-columns: repeat(3, minmax(110px, 1fr));
+}
+
+.recipe-form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.recipe-form-grid input,
+.recipe-form-grid select,
+.compound-builder textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.compound-ingredients-fieldset {
+    margin-top: 8px;
+    background: #d7efd7;
+}
+
+.recipe-calculation-panel {
+    margin-top: 8px;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #fff9c8;
+    color: #4c3a00;
+    font-size: 11px;
+}
+
+.recipe-calculation-panel label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: bold;
+    color: #000080;
+}
+
+.recipe-calculation-preview {
+    margin-top: 5px;
+    padding: 5px;
+    border: 1px dotted #808080;
+    background: #ffffff;
+}
+
+.recipe-calculation-preview.ok {
+    color: #006000;
+    background: #e6ffe6;
+    border-color: #008000;
+    font-weight: bold;
+}
+
+.recipe-ingredient-row {
+    display: grid;
+    grid-template-columns: minmax(190px, 1.6fr) 72px 92px 132px 118px 94px;
+    gap: 5px;
+    align-items: end;
+    padding: 6px;
+    margin-bottom: 5px;
+    border: 2px inset #ffffff;
+    background: #f8fff8;
+}
+
+.recipe-ingredient-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.recipe-ingredient-row input,
+.recipe-ingredient-row select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.recipe-row-remove,
+.combo-row-remove {
+    min-width: 78px;
+    min-height: 24px;
+    justify-content: center;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.recipe-subtract-check {
+    flex-direction: row !important;
+    align-items: center;
+    gap: 4px !important;
+    font-weight: normal !important;
+}
+
+.recipe-ingredient-match {
+    grid-column: 1 / -1;
+    color: #006000;
+    font-size: 10px;
+}
+
+.combo-basis-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 7px 0;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: linear-gradient(90deg, #fffbd6, #e7f4ff);
+    color: #000080;
+    font-size: 11px;
+}
+
+.combo-basis-panel label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: bold;
+}
+
+.combo-basis-panel input[type="number"] {
+    width: 64px;
+}
+
+.combo-basis-panel select {
+    width: 100px;
+}
+
+#ingredient-list,
+#modal-ingredient-list {
+    display: grid;
+    gap: 5px;
+}
+
+.combo-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.6fr) 80px 90px minmax(170px, 1fr) 86px;
+    gap: 5px;
+    align-items: end;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #f8fff8;
+}
+
+.combo-row label,
+.combo-row .component-per-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.combo-row input,
+.combo-row select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.component-per-controls {
+    display: grid;
+    grid-template-columns: 76px minmax(80px, 1fr);
+    gap: 4px;
+}
+
+.use-shared-basis .component-per-controls {
+    display: none;
+}
+
+.use-shared-basis .combo-row {
+    grid-template-columns: minmax(180px, 1.6fr) 80px 90px 86px;
+}
+
+.combo-strength-preview {
+    margin: 6px 0;
+    padding: 5px;
+    border: 1px dotted #808080;
+    background: #ffffff;
+    color: #404040;
+    font-size: 11px;
+}
+
+.combo-strength-preview.ok {
+    border-color: #008000;
+    background: #e8ffe8;
+    color: #006000;
+    font-weight: bold;
+}
+
+.combo-strength-preview.error {
+    border-color: #a00000;
+    background: #ffe2e2;
+    color: #a00000;
+    font-weight: bold;
+}
+
+.compound-builder-actions,
+.compound-prep-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.compound-side {
+    display: grid;
+    gap: 8px;
+}
+
+.compound-recipe-list {
+    height: 190px;
+    overflow: auto;
+    background: #ffffff;
+}
+
+.compound-recipe-row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 5px;
+    text-align: left;
+    padding: 5px;
+    min-height: 44px;
+    border-left: 5px solid #1d7f38;
+}
+
+.compound-recipe-row.selected {
+    background: #000080;
+    color: #ffffff;
+}
+
+.compound-recipe-row small {
+    font-size: 10px;
+}
+
+.compound-prep-panel {
+    min-height: 430px;
+    background: #d4d0c8;
+}
+
+.compound-prep-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 255px;
+    gap: 8px;
+    align-items: start;
+}
+
+.compound-prep-banner {
+    display: grid;
+    gap: 2px;
+    padding: 7px;
+    margin-bottom: 7px;
+    border: 2px inset #ffffff;
+    background: linear-gradient(90deg, #dfffe0, #e6f1ff);
+    color: #003f00;
+}
+
+.compound-prep-ingredients {
+    display: grid;
+    gap: 5px;
+    margin-top: 7px;
+}
+
+.compound-prep-ingredient {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) 120px 140px;
+    gap: 5px;
+    align-items: center;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 5px;
+    font-size: 11px;
+}
+
+.compound-prep-ingredient small {
+    grid-column: 1 / -1;
+    color: #004080;
+}
+
+.compound-prep-ready {
+    background: #ccffcc;
+    color: #005000;
+}
+
+.compound-prep-short {
+    background: #ffe0e0;
+    color: #800000;
+}
+
+.compound-scan-message {
+    min-height: 16px;
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.compound-scan-message.ok {
+    color: #007000;
+}
+
+.compound-scan-message.error {
+    color: #a00000;
+}
+
+.compound-procedure {
+    border: 2px inset #ffffff;
+    background: #ffffe8;
+    padding: 6px;
+    min-height: 52px;
+    white-space: pre-wrap;
+    font-size: 11px;
+}
+
+.compound-preview-column {
+    display: grid;
+    gap: 8px;
+}
+
+.compound-label-preview-card {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 168px;
+    padding: 10px;
+    border: 2px inset #ffffff;
+    background: #c0c0c0;
+}
+
+.compound-label-preview-card .label-page {
+    width: 2.25in;
+    height: 1.25in;
+    transform: none;
+    transform-origin: center;
+    background: #ffffff;
+    color: #000000;
+    padding: 0.05in;
+    overflow: hidden;
+    border: 1px solid #000000;
+    box-sizing: border-box;
+}
+
+.compound-label-preview-card .label-page,
+.compound-label-preview-card .label-page * {
+    font-family: "Pixelated MS Sans Serif", "MS Sans Serif", Tahoma, sans-serif !important;
+    letter-spacing: 0 !important;
+}
+
+.compound-bottle-label .label-title {
+    color: #000000;
+}
+
+.compound-bottle-label {
+    position: relative;
+    padding-top: 0.04in !important;
+    padding-right: 0.48in !important;
+}
+
+.compound-label-strength {
+    font-size: 8.6pt;
+    line-height: 1;
+    font-weight: bold;
+    margin-top: 1px;
+}
+
+.compound-label-copy {
+    min-width: 0;
+}
+
+.compound-label-qr {
+    position: absolute;
+    right: 0.045in;
+    bottom: 0.045in;
+    width: 0.38in;
+    height: 0.38in;
+    image-rendering: pixelated;
+}
+
+.compound-label-directions {
+    overflow-wrap: anywhere;
+}
+
+#label-preview-content .compound-bottle-label .label-title,
+.compound-label-preview-card .compound-bottle-label .label-title,
+#print-area .compound-bottle-label .label-title {
+    font-size: 11pt;
+    font-weight: bold;
+    line-height: 1;
+}
+
+#label-preview-content .label-compact.compound-bottle-label .label-title,
+.compound-label-preview-card .label-compact.compound-bottle-label .label-title,
+#print-area .label-compact.compound-bottle-label .label-title {
+    font-size: 10.4pt;
+}
+
+#label-preview-content .label-dense.compound-bottle-label .label-title,
+.compound-label-preview-card .label-dense.compound-bottle-label .label-title,
+#print-area .label-dense.compound-bottle-label .label-title {
+    font-size: 9.8pt;
+}
+
+.compound-history-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3px 6px;
+    padding: 4px;
+    border-bottom: 1px dotted #808080;
+    background: #ffffff;
+    font-size: 10px;
+}
+
+@media (max-width: 1100px) {
+    .compound-layout,
+    .compound-prep-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .recipe-form-grid {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+
+    .recipe-ingredient-row,
+    .compound-prep-ingredient {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .combo-row,
+    .use-shared-basis .combo-row {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+}
+
+.safety-warning-modal {
+    border: 2px inset #ffffff;
+    background: #fff1f1;
+    padding: 8px;
+    font-size: 11px;
+}
+
+.safety-warning-title {
+    color: #b00000;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.setup-guide {
+    display: grid;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.setup-step {
+    border: 2px outset #ffffff;
+    background: #eef6ff;
+    padding: 7px;
+}
+
+.setup-step strong {
+    display: block;
+    color: #000080;
+}
+
+.important-note {
+    border: 2px inset #ffffff;
+    background: #fff4bf;
+    padding: 8px;
+}
+
 .icon-dashboard { background-image: url("assets/ui-icons/dashboard.ico"); }
 .icon-calendar { background-image: url("assets/ui-icons/calendar.ico"); }
 .icon-box { background-image: url("assets/ui-icons/prepackage.ico"); }
 .icon-regimen { background-image: url("assets/ui-icons/regimens.ico"); }
 .icon-monitor { background-image: url("assets/ui-icons/monitoring.ico"); }
 .icon-inventory { background-image: url("assets/ui-icons/inventory.ico"); }
+.icon-recipe { background-image: url("assets/ui-icons/formulary.ico"); }
 .icon-info { background-image: url("assets/ui-icons/drug-info.ico"); }
 .icon-family { background-image: url("assets/ui-icons/members.ico"); }
 .icon-clear { background-image: url("assets/ui-icons/clear.ico"); }
@@ -638,6 +1247,59 @@ button {
     border-bottom: 1px dotted #808080;
     padding-bottom: 4px;
     color: #000080;
+}
+
+.order-custom-simple-strength {
+    display: contents;
+}
+
+.order-custom-combo-select {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    align-self: end;
+    min-height: 22px;
+    color: #000000;
+    white-space: nowrap;
+}
+
+.order-custom-combo-select input[type="checkbox"] {
+    width: 13px !important;
+    min-width: 13px;
+    height: 13px;
+    margin: 0;
+}
+
+.order-custom-combo-select label {
+    display: inline !important;
+    color: #000000 !important;
+    font-weight: normal !important;
+    font-size: 11px !important;
+}
+
+.order-custom-combo-fields {
+    display: grid;
+    gap: 5px;
+    border: 2px inset #ffffff;
+    background: #f8fff8;
+    padding: 6px;
+}
+
+.order-custom-combo-title {
+    color: #006000;
+    font-weight: bold;
+    border-bottom: 1px dotted #80a080;
+    padding-bottom: 3px;
+}
+
+.order-custom-component-list {
+    display: grid;
+    gap: 5px;
+}
+
+.order-custom-component-list .combo-row,
+#receive-ingredient-list .combo-row {
+    grid-template-columns: minmax(170px, 1.4fr) 78px 86px minmax(165px, 1fr) 82px;
 }
 
 .inventory-builder-layout {
@@ -2150,6 +2812,20 @@ button {
 .prepack-scan-error {
     margin-top: 2px;
     font-weight: bold;
+}
+
+.unit-dose-preview {
+    margin-top: 8px;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #eef7ff;
+    color: #000000;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.unit-dose-preview strong {
+    color: #000080;
 }
 
 .prepack-date-choices {

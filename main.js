@@ -38,6 +38,7 @@ const dataLocationConfigPath = path.join(runtimeDataDir, 'data-location.json');
 let dataDir = loadDataDirSetting();
 let dbPath = path.join(dataDir, 'db.json');
 const emailConfigPath = path.join(defaultDataDir, 'email-config.json');
+let lastKnownDbMtimeMs = 0;
 
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
@@ -79,7 +80,7 @@ function setActiveDataDir(nextDataDir) {
 
 function isEmptyDbData(data) {
     if (!data || typeof data !== 'object') return true;
-    const keys = ['family', 'inventory', 'schedules', 'history', 'vitals', 'orderSets', 'prescribers', 'prepackQueues', 'formularyItems', 'inventoryOrders', 'medKits'];
+    const keys = ['family', 'inventory', 'schedules', 'history', 'recipes', 'compoundPreps', 'vitals', 'orderSets', 'prescribers', 'prepackQueues', 'formularyItems', 'inventoryOrders', 'medKits'];
     return keys.every(key => !Array.isArray(data[key]) || data[key].length === 0);
 }
 
@@ -90,6 +91,7 @@ function defaultEmptyDb() {
         schedules: [],
         history: [],
         recipes: [],
+        compoundPreps: [],
         vitals: [],
         orderSets: [],
         prescribers: [],
@@ -98,6 +100,7 @@ function defaultEmptyDb() {
         formularyItems: [],
         inventoryOrders: [],
         medKits: [],
+        auditTrail: [],
         settings: {}
     };
 }
@@ -105,12 +108,38 @@ function defaultEmptyDb() {
 function readDbFromPath(filePath) {
     if (!fs.existsSync(filePath)) return defaultEmptyDb();
     const data = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    try {
+        if (path.resolve(filePath) === path.resolve(dbPath)) lastKnownDbMtimeMs = fs.statSync(filePath).mtimeMs;
+    } catch (error) {
+        console.error('Unable to read database timestamp:', error.message);
+    }
     return JSON.parse(data);
 }
 
 function writeDbToPath(filePath, data) {
     ensureDir(path.dirname(filePath));
     fs.writeFileSync(filePath, JSON.stringify(data || defaultEmptyDb(), null, 2));
+    try {
+        if (path.resolve(filePath) === path.resolve(dbPath)) lastKnownDbMtimeMs = fs.statSync(filePath).mtimeMs;
+    } catch (error) {
+        console.error('Unable to update database timestamp:', error.message);
+    }
+}
+
+function preserveDbConflictBackupIfNeeded() {
+    if (!fs.existsSync(dbPath)) return null;
+    try {
+        const currentMtime = fs.statSync(dbPath).mtimeMs;
+        if (lastKnownDbMtimeMs && currentMtime > lastKnownDbMtimeMs + 1000) {
+            const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            const backupPath = path.join(dataDir, `db_conflict_backup_${stamp}.json`);
+            fs.copyFileSync(dbPath, backupPath);
+            return backupPath;
+        }
+    } catch (error) {
+        console.error('Unable to preserve conflict backup:', error.message);
+    }
+    return null;
 }
 
 function copyImagesIntoDataDir(data, targetDir) {
@@ -267,8 +296,9 @@ ipcMain.handle('send-email', async (event, { to, subject, body }) => {
 });
 
 ipcMain.handle('save-db', (event, data) => {
+    const conflictBackup = preserveDbConflictBackupIfNeeded();
     writeDbToPath(dbPath, data);
-    return true;
+    return { success: true, conflictBackup };
 });
 
 ipcMain.handle('load-db', () => {

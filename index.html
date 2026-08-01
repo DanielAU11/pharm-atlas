@@ -29,6 +29,7 @@
                 <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')"><span class="win98-icon icon-regimen"></span>Regimens</a></li>
                 <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')"><span class="win98-icon icon-monitor"></span>Monitoring</a></li>
                 <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')"><span class="win98-icon icon-inventory"></span>Inventory</a></li>
+                <li role="tab" id="tab-recipes"><a href="#" onclick="switchTab('recipes')"><span class="win98-icon icon-recipe"></span>Recipes</a></li>
                 <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')"><span class="win98-icon icon-family"></span>Members</a></li>
                 <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug/Vaccine Information</a></li>
                 <li role="tab" id="tab-help"><a href="#" onclick="switchTab('help')"><span class="win98-icon icon-info"></span>Help</a></li>
@@ -68,8 +69,8 @@
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
-                        <legend>Missed Dose Dashboard</legend>
-                        <div id="missed-dose-dashboard"></div>
+                        <legend>Today View</legend>
+                        <div id="today-view-dashboard"></div>
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
@@ -89,6 +90,17 @@
                             <button type="button" onclick="backupAppData()">Backup Data</button>
                             <button type="button" onclick="restoreAppData()">Restore Data</button>
                         </div>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
+                        <legend>Maintenance &amp; Safety</legend>
+                        <div class="field-row">
+                            <button type="button" onclick="runDataHealthCheck()">Data Health Check</button>
+                            <button type="button" onclick="repairDataHealthIssues()">Repair Safe Issues</button>
+                            <button type="button" onclick="viewAuditTrail()">Audit Trail</button>
+                            <button type="button" onclick="openFirstRunSetupGuide()">Setup Guide</button>
+                        </div>
+                        <div id="data-health-summary" class="maintenance-summary"></div>
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
@@ -231,6 +243,7 @@
                         <select id="prepack-member-filter" onchange="renderPrepackageQueues()">
                             <option value="">All members</option>
                         </select>
+                        <button type="button" onclick="createInventoryUnitDosePrepack()"><span class="win98-icon icon-box"></span>Inventory Unit-Dose Prepack</button>
                     </div>
                     <div class="prepack-layout">
                         <fieldset>
@@ -370,9 +383,28 @@
                         <div id="combination-fields" style="display:none; margin-top:10px; border:1px dashed gray; padding:10px; background:#f0f0f0;">
                             <strong>Active Ingredients:</strong>
                             <span class="form-help">For liquids, enter each ingredient amount and the shared volume, such as 100 mg per 5 mL.</span>
+                            <div class="combo-basis-panel">
+                                <label><input id="combo-use-shared-per" type="checkbox" checked onchange="updateInventoryEntryMode(); updateCombinationPreview('med');"> Use one package/concentration basis for all ingredients</label>
+                                <span>per</span>
+                                <input id="combo-shared-per-amount" type="number" min="0.001" step="any" value="1" oninput="updateCombinationPreview('med')">
+                                <select id="combo-shared-per-unit" onchange="updateCombinationPreview('med')">
+                                    <option value="">unit</option>
+                                    <option value="mL">mL</option>
+                                    <option value="g">g</option>
+                                    <option value="mg">mg</option>
+                                    <option value="tablet">tablet</option>
+                                    <option value="capsule">capsule</option>
+                                    <option value="packet">packet</option>
+                                    <option value="spray">spray</option>
+                                    <option value="drop">drop</option>
+                                    <option value="patch">patch</option>
+                                    <option value="suppository">suppository</option>
+                                </select>
+                            </div>
                             <div id="ingredient-list">
                                 <!-- Dynamic ingredient rows go here -->
                             </div>
+                            <div id="combination-preview" class="combo-strength-preview">Add ingredients to preview the combined strength.</div>
                             <button type="button" onclick="addIngredientRow()">+ Add Ingredient</button>
                         </div>
 
@@ -407,6 +439,8 @@
                                 <select id="med-per-unit">
                                     <option value="">unit</option>
                                     <option value="mL">mL</option>
+                                    <option value="g">g</option>
+                                    <option value="mg">mg</option>
                                     <option value="tablet">tablet</option>
                                     <option value="capsule">capsule</option>
                                     <option value="packet">packet</option>
@@ -443,6 +477,7 @@
                                 <option value="Tablets">Tablets</option>
                                 <option value="Capsules">Capsules</option>
                                 <option value="mL">Liquid (mL)</option>
+                                <option value="Powder">Powder / Bulk Powder</option>
                                 <option value="Granules">Granules</option>
                                 <option value="Packet">Packet</option>
                                 <option value="Inhalations">Inhalations</option>
@@ -511,7 +546,93 @@
                     </fieldset>
                 </div> <!-- Correctly closes panel-inventory -->
 
-                <!-- 5. DRUG / VACCINE INFORMATION -->
+                <!-- 5. RECIPES / COMPOUNDING -->
+                <div id="panel-recipes" style="display: none;">
+                    <div class="compound-layout">
+                        <fieldset class="compound-builder">
+                            <legend><span class="win98-icon icon-recipe"></span>Compounding Recipe Creator</legend>
+                            <input type="hidden" id="recipe-edit-id">
+                            <datalist id="recipe-inventory-options"></datalist>
+                            <div class="recipe-form-grid">
+                                <label>Recipe name<input id="recipe-name" type="text" placeholder="e.g. Bactrim dilution"></label>
+                                <label>Final product name<input id="recipe-final-name" type="text" placeholder="What appears in inventory"></label>
+                                <label>Strength<input id="recipe-final-strength" type="text" placeholder="auto-calculated or manual"></label>
+                                <label>Units<input id="recipe-final-units" type="text" placeholder="mg/mL"></label>
+                                <label>Formulation
+                                    <select id="recipe-formulation" onchange="updateRecipeDosageDefaults()">
+                                        <option value="mL">Liquid (mL)</option>
+                                        <option value="Powder">Powder / Bulk Powder</option>
+                                        <option value="Cream">Cream</option>
+                                        <option value="Ointment">Ointment</option>
+                                        <option value="Gel">Gel</option>
+                                        <option value="Topical Solution">Topical Solution</option>
+                                        <option value="Sprays">Sprays</option>
+                                        <option value="Drops">Drops</option>
+                                        <option value="Capsules">Capsules</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </label>
+                                <label>Batch yield<input id="recipe-yield-qty" type="number" step="any" placeholder="50" oninput="updateRecipeCalculation()"></label>
+                                <label>Yield unit<input id="recipe-yield-unit" type="text" placeholder="mL" oninput="updateRecipeCalculation()"></label>
+                                <label>BUD days<input id="recipe-bud-days" type="number" min="0" step="1" placeholder="14"></label>
+                                <label>Storage
+                                    <select id="recipe-storage">
+                                        <option value="Room Temp">Room Temp</option>
+                                        <option value="Refrigerated">Refrigerated</option>
+                                        <option value="Frozen">Frozen</option>
+                                    </select>
+                                </label>
+                                <label>Package size<input id="recipe-package-size" type="text" placeholder="50 mL bottle"></label>
+                                <label>Control
+                                    <select id="recipe-control-level">
+                                        <option value="N/A">N/A</option>
+                                        <option value="C-V">C-V</option>
+                                        <option value="C-IV">C-IV</option>
+                                        <option value="C-III">C-III</option>
+                                        <option value="C-II">C-II</option>
+                                    </select>
+                                </label>
+                                <label>Low stock alert<input id="recipe-min-threshold" type="number" step="any" placeholder="1"></label>
+                            </div>
+                            <div class="recipe-calculation-panel">
+                                <label><input id="recipe-auto-calc" type="checkbox" checked onchange="updateRecipeCalculation()"> Auto-calculate strength/concentration from active ingredients</label>
+                                <div id="recipe-calculation-preview">Enter an active ingredient quantity and batch yield to calculate final strength.</div>
+                            </div>
+                            <div class="field-row-stacked" style="margin-top:8px;">
+                                <label>Default label instructions</label>
+                                <textarea id="recipe-instructions" rows="2" placeholder="Shake well, refrigerate, beyond-use instructions, etc."></textarea>
+                            </div>
+                            <div class="field-row-stacked" style="margin-top:8px;">
+                                <label>Compounding notes / procedure</label>
+                                <textarea id="recipe-notes" rows="3" placeholder="Steps, equipment, calculations, auxiliary labeling, checks."></textarea>
+                            </div>
+                            <fieldset class="compound-ingredients-fieldset">
+                                <legend>Ingredients</legend>
+                                <div id="recipe-ingredient-list"></div>
+                                <button type="button" onclick="addRecipeIngredientRow()">Add Ingredient</button>
+                            </fieldset>
+                            <div class="compound-builder-actions">
+                                <button type="button" onclick="saveCompoundRecipe()">Save Recipe</button>
+                                <button type="button" onclick="clearCompoundRecipeBuilder()">Clear</button>
+                            </div>
+                        </fieldset>
+
+                        <div class="compound-side">
+                            <fieldset>
+                                <legend>Saved Recipes</legend>
+                                <div id="compound-recipe-list" class="sunken-panel compound-recipe-list"></div>
+                            </fieldset>
+                            <fieldset>
+                                <legend>Prep Panel</legend>
+                                <div id="compound-prep-panel" class="compound-prep-panel">
+                                    <div class="empty-state">Select a saved recipe to prepare a compounded product.</div>
+                                </div>
+                            </fieldset>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. DRUG / VACCINE INFORMATION -->
                 <div id="panel-drug-info" style="display: none;">
                     <fieldset>
                         <legend>Drug References</legend>
@@ -602,7 +723,7 @@
                         <fieldset class="help-card">
                             <legend>2. Scheduling Medications</legend>
                             <ul>
-                                <li>Use <strong>Schedule Medications</strong> to stage medication orders before adding them to a profile.</li>
+                                <li>Use <strong>Schedule Medications</strong> to stage medications before adding them to a profile.</li>
                                 <li>Pending scheduled medications can be reviewed, modified, removed, and then finalized.</li>
                                 <li>Supported frequencies include one-time, daily, BID, TID, QID, nightly, PRN, every other day, weekly, every X weeks, X times per week, monthly, and every X hours.</li>
                                 <li>Every X hours schedules preview upcoming times and can adjust future times after late/early documentation.</li>
@@ -633,7 +754,16 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>5. Med Kits</legend>
+                            <legend>5. Recipes &amp; Compounding</legend>
+                            <ul>
+                                <li>Use <strong>Recipes</strong> to create reusable compounding formulas with ingredients, yield, storage, beyond-use dating, instructions, and prep notes.</li>
+                                <li>The prep panel shows ingredient requirements, barcode/QR scan checks, bottle label preview, lot details, and completed batch history.</li>
+                                <li>Completing a prep subtracts marked ingredients from inventory and adds the finished compounded preparation to Inventory.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>6. Med Kits</legend>
                             <ul>
                                 <li>Use <strong>Inventory &gt; Med Kits</strong> to create named kits such as Travel Kit, Emergency Kit, School Kit, Work Kit, or First Aid Kit.</li>
                                 <li>Search inventory items, enter a quantity, and add them into the selected kit.</li>
@@ -644,7 +774,7 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>6. Formulary & Orders</legend>
+                            <legend>7. Formulary & Orders</legend>
                             <ul>
                                 <li>The formulary is a master reorder list. It can include inventory items and non-inventory items.</li>
                                 <li>Create Orders can add low/expired items, formulary items, current inventory, or new non-inventory items.</li>
@@ -655,7 +785,7 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>7. Prepackaging & Labels</legend>
+                            <legend>8. Prepackaging & Labels</legend>
                             <ul>
                                 <li>Prepack queues can be created for date ranges and later printed when it is time to prepare doses.</li>
                                 <li>Use scanning when available, or use manual completion when a scanner is not available.</li>
@@ -666,12 +796,32 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>8. Monitoring & Reports</legend>
+                            <legend>9. Monitoring & Reports</legend>
                             <ul>
                                 <li>Monitoring supports BP/HR, blood glucose, weight, temperature, INR, drug levels, and custom lab goals.</li>
                                 <li>Member profiles display monitoring graphs, adherence, calendars, active orders, PRN orders, completed schedules, and administration logs.</li>
+                                <li>Medication/Supplement summaries show active scheduled and PRN items, inventory forecasts, and last documented doses.</li>
                                 <li>PDFs are available for inventory, schedules, monitoring, formulary, and inventory orders.</li>
                                 <li>Schedule PDFs can be used as paper check-off sheets for trips, caregivers, or periods away from the app.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>10. Today, Audit & Health</legend>
+                            <ul>
+                                <li>Today View shows overdue, due-soon, later, completed, and PRN items for quick daily work.</li>
+                                <li>Data Health Check looks for broken schedule links, orphaned records, duplicate barcodes, missing times, and impossible stock counts.</li>
+                                <li>Audit Trail records safety-relevant changes such as scheduling, discontinuing, administration, restocking, profile edits, and overrides.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>11. Local Sync & Privacy</legend>
+                            <ul>
+                                <li>Desktop Sync Folder can place PharmAtlas data inside OneDrive, Google Drive Desktop, Dropbox, or another user-controlled synced folder.</li>
+                                <li>Avoid editing from two computers at the same time. Let the sync app finish before opening PharmAtlas elsewhere.</li>
+                                <li>PharmAtlas data, PDFs, labels, backups, synced folders, and emails may contain private health information.</li>
+                                <li>Protect your computer account, cloud account, email app password, backups, and exported files.</li>
                             </ul>
                         </fieldset>
 
@@ -684,6 +834,7 @@
                                 <label><input type="checkbox"> Test labels with your printer before relying on a large print job.</label>
                                 <label><input type="checkbox"> Test inventory subtraction for each formulation type you use.</label>
                                 <label><input type="checkbox"> Confirm Med Kit stock movements match your real-world kit counts.</label>
+                                <label><input type="checkbox"> Run Data Health Check after major changes or restores.</label>
                                 <label><input type="checkbox"> Create a backup after important updates.</label>
                             </div>
                         </fieldset>
@@ -796,6 +947,7 @@
                         <option value="Tablets">Tablets</option>
                         <option value="Capsules">Capsules</option>
                         <option value="mL">Liquid (mL)</option>
+                        <option value="Powder">Powder / Bulk Powder</option>
                         <option value="Granules">Granules</option>
                         <option value="Packet">Packet</option>
                         <option value="Inhalations">Inhalations</option>
@@ -824,7 +976,26 @@
                     <option value="mEq"><option value="IU"><option value="units"><option value="CFU">
                 </datalist>
                 <div id="modal-combination-fields" style="display:none; margin-top:6px;">
+                    <div class="combo-basis-panel">
+                        <label><input id="modal-combo-use-shared-per" type="checkbox" checked onchange="updateMedProfileMode(); updateCombinationPreview('modal');"> Use one package/concentration basis for all ingredients</label>
+                        <span>per</span>
+                        <input id="modal-combo-shared-per-amount" type="number" min="0.001" step="any" value="1" oninput="updateCombinationPreview('modal')">
+                        <select id="modal-combo-shared-per-unit" onchange="updateCombinationPreview('modal')">
+                            <option value="">unit</option>
+                            <option value="mL">mL</option>
+                            <option value="g">g</option>
+                            <option value="mg">mg</option>
+                            <option value="tablet">tablet</option>
+                            <option value="capsule">capsule</option>
+                            <option value="packet">packet</option>
+                            <option value="spray">spray</option>
+                            <option value="drop">drop</option>
+                            <option value="patch">patch</option>
+                            <option value="suppository">suppository</option>
+                        </select>
+                    </div>
                     <div id="modal-ingredient-list"></div>
+                    <div id="modal-combination-preview" class="combo-strength-preview">Add ingredients to preview the combined strength.</div>
                     <button type="button" onclick="addModalIngredientRow()">+ Add Ingredient</button>
                 </div>
                 <div class="field-row" style="margin-top:6px;">
@@ -981,6 +1152,16 @@
                     <button type="button" onclick="resetMemberCalendar()">Today</button>
                 </div>
                 <div id="member-calendar-grid" class="member-calendar-grid"></div>
+            </fieldset>
+
+            <fieldset style="margin-top:10px;">
+                <legend>Medications/Supplements Summary</legend>
+                <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
+                    <button type="button" onclick="generateMemberMedicationSummaryPdfReport()">PDF</button>
+                    <button type="button" onclick="emailMemberMedicationSummaryReport()">Send to Provider</button>
+                    <button type="button" onclick="printMemberMedicationSummaryReport()">Print</button>
+                </div>
+                <div id="member-med-review"></div>
             </fieldset>
 
             <fieldset style="margin-top:10px;">
