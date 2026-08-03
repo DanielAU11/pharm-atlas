@@ -3912,6 +3912,7 @@ window.openOrderModifier = function(scheduleId) {
     document.getElementById('mod-link-mode').value = sched.linkMode || currentLinkedMode || '';
     renderFrequencyControls('mod', sched.freq === 'QXH' ? [sched.startTime || getScheduleTimes(sched)[0]] : getScheduleTimes(sched));
     setWeekdaySelections('mod-weekday-container', sched.weekdays || []);
+    document.getElementById('mod-indication').value = sched.indication || "";
     document.getElementById('mod-instr').value = sched.instructions || "";
 
     document.getElementById('order-modifier-modal').style.display = 'flex';
@@ -3970,6 +3971,7 @@ window.saveOrderModification = async function() {
             sched.rollingAnchorTime = '';
         }
         if (sched.freq === 'QXH') recalculateIntervalAnchorFromHistory(sched);
+        sched.indication = document.getElementById('mod-indication')?.value.trim() || '';
         sched.instructions = document.getElementById('mod-instr').value;
         const linkTargetIds = selectedOptionValues(document.getElementById('mod-link-target'));
         const linkMode = document.getElementById('mod-link-mode')?.value || '';
@@ -5021,6 +5023,7 @@ window.addOrderSetMedicationRow = function(item = null) {
         <div class="weekday-picker os-weekdays" style="display:none; margin-top:5px;"><span>Days:</span>${weekdayCheckboxesHtml('os-weekday-input', item?.weekdays || [])}</div>
         <div class="field-row os-prn-limit" style="display:none; margin-top:5px;"><label>PRN Max:</label><input class="os-prn-max-doses" type="number" min="1" step="1" style="width:45px;" value="${item?.prnMaxDoses || ''}"><span>doses per</span><input class="os-prn-window-hours" type="number" min="1" max="168" step="1" value="${item?.prnWindowHours || 24}" style="width:45px;"><span>hrs</span></div>
         <div class="field-row-stacked" style="margin-top:5px;"><label>Administration Time(s)</label><div class="os-time-fields"></div></div>
+        <div class="field-row-stacked" style="margin-top:5px;"><label>Used for / Indication</label><input class="os-indication" type="text" value="${escapeHtml(item?.indication || '')}" placeholder="Reason this medication/supplement is used"></div>
         <div class="field-row-stacked" style="margin-top:5px;"><label>Instructions</label><textarea class="os-instructions" rows="2" style="width:100%; resize:none;">${escapeHtml(item?.instructions || '')}</textarea></div>
     `;
     row.querySelector('.os-freq').addEventListener('change', () => renderOrderSetRowControls(row));
@@ -5203,6 +5206,7 @@ function collectOrderSetItem(row) {
             linkGroup: '',
             linkMode: row.querySelector('.os-link-mode')?.value || '',
             linkRules: linkTargetRowIds.map(targetRowId => ({ targetRowId, mode: linkMode })),
+            indication: row.querySelector('.os-indication')?.value.trim() || '',
             instructions: row.querySelector('.os-instructions').value
         };
     }
@@ -5254,6 +5258,7 @@ function collectOrderSetItem(row) {
         linkGroup: '',
         linkMode: row.querySelector('.os-link-mode')?.value || '',
         linkRules: linkTargetRowIds.map(targetRowId => ({ targetRowId, mode: linkMode })),
+        indication: row.querySelector('.os-indication')?.value.trim() || '',
         instructions: row.querySelector('.os-instructions').value
     };
 }
@@ -5271,6 +5276,7 @@ function orderSetItemToSchedule(orderSet, item, index, existingSchedule = null) 
         freq: item.freq,
         startDate: itemStartDate,
         endDate: itemEndDate,
+        indication: item.indication || '',
         instructions: item.instructions,
         qodStart: item.freq === 'QOD' ? (item.qodStart || orderSet.startDate) : '',
         times: item.times,
@@ -8398,6 +8404,7 @@ function memberMedicationReviewHtml(member, forPdf = false) {
         return `<tr>
             <td>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</td>
             <td>${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}<br><small>${escapeHtml(formatQtyForSchedule(schedule, med))}</small></td>
+            <td>${escapeHtml(schedule.indication || 'Not specified')}</td>
             <td>${escapeHtml(scheduleText)}${schedule.instructions ? `<br><small>${escapeHtml(schedule.instructions)}</small>` : ''}</td>
             <td>${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}${forecast ? `<br><small>${escapeHtml(forecast)}</small>` : ''}</td>
             <td>${escapeHtml(lastGiven?.timestamp || 'Not documented')}</td>
@@ -8405,8 +8412,8 @@ function memberMedicationReviewHtml(member, forPdf = false) {
     }).join('');
     return `
         <table class="win98-report-table medication-summary-table">
-            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Frequency / Times</th><th>Inventory Forecast</th><th>Last Given</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="5">No active medications or supplements.</td></tr>'}</tbody>
+            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Frequency / Times</th><th>Inventory Forecast</th><th>Last Given</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6">No active medications or supplements.</td></tr>'}</tbody>
         </table>`;
 }
 
@@ -8880,6 +8887,7 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
         : document.getElementById('sched-start').value;
     const rawEndDate = document.getElementById('sched-end').value || "Ongoing";
 
+    const indication = document.getElementById('sched-indication')?.value.trim() || '';
     const instructions = document.getElementById('sched-instructions').value;
 
     if (!member) return alert("Select a family member first.");
@@ -8909,6 +8917,7 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
         freq: frequencyDetails.freq,
         startDate,
         endDate,
+        indication,
         instructions: instructions,
         linkGroup,
         linkMode,
@@ -8946,6 +8955,8 @@ function clearScheduleEntryFields() {
     document.getElementById('sched-end').value = '';
     document.getElementById('sched-dose-qty').value = '';
     document.getElementById('sched-calculated-dose').value = '';
+    const indication = document.getElementById('sched-indication');
+    if (indication) indication.value = '';
     document.getElementById('sched-instructions').value = '';
     const linkTarget = document.getElementById('sched-link-target');
     if (linkTarget) {
@@ -9006,6 +9017,7 @@ function scheduleSummaryLine(schedule) {
             </span>
             <span class="pending-order-meta">${escapeHtml(member ? memberDisplayName(member) : 'No member')} | ${escapeHtml(dates)}</span>
             ${linkedDetailsHtml(schedule, [...db.schedules, ...pendingScheduleOrders])}
+            ${schedule.indication ? `<span class="pending-order-note"><strong>Used for:</strong> ${escapeHtml(schedule.indication)}</span>` : ''}
             ${schedule.instructions ? `<span class="pending-order-note">${escapeHtml(schedule.instructions)}</span>` : ''}`
     };
 }
@@ -9151,6 +9163,8 @@ window.editPendingScheduleOrder = function(index) {
     document.getElementById('sched-freq').value = order.freq || 'QD';
     document.getElementById('sched-start').value = order.startDate || '';
     document.getElementById('sched-end').value = order.endDate === 'Ongoing' ? '' : (order.endDate || '');
+    const indication = document.getElementById('sched-indication');
+    if (indication) indication.value = order.indication || '';
     document.getElementById('sched-instructions').value = order.instructions || '';
     renderScheduleLinkOptions(order.linkTargetIds?.length ? order.linkTargetIds : (order.linkTargetId || ''));
     document.getElementById('sched-link-mode').value = order.linkMode || '';
@@ -12073,12 +12087,14 @@ window.receiveInventoryOrder = async function() {
     const lineRows = order.lines.map(line => {
         const isNewNonInventory = isOrderLineNewNonInventory(line);
         return `
-        <div class="order-line-item ${line.status === 'received' ? 'receive-line-received' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}">
+        <div class="order-line-item receive-order-line ${line.status === 'received' ? 'receive-line-received' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}">
             <input name="receiveLine" type="checkbox" value="${escapeHtml(line.id)}" ${selectResult.receiveMode === 'manual' && line.status !== 'received' ? 'checked' : ''}>
-            <div><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${line.estimatedUnitPrice ? ` - est. ${escapeHtml(formatCurrency(line.estimatedUnitPrice))}` : ''}${line.status === 'received' ? ` - received${orderLineActualTotal(line) > 0 ? ` (${escapeHtml(formatCurrency(orderLineActualTotal(line)))})` : ''}` : ''}</span>${line.purchaseLink ? `<br><span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}</div>
-            <input name="receiveQty" data-line-id="${escapeHtml(line.id)}" type="number" step="any" value="${escapeHtml(line.requestedQty || '1')}" style="width:80px;">
-            <input name="receiveActualUnitPrice" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Actual price" value="${escapeHtml(line.actualUnitPrice || line.estimatedUnitPrice || '')}" style="width:92px;">
-            <input name="receiveBarcode" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Barcode / QR code" value="" style="width:170px;">
+            <div class="receive-line-copy"><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${line.estimatedUnitPrice ? ` - est. ${escapeHtml(formatCurrency(line.estimatedUnitPrice))}` : ''}${line.status === 'received' ? ` - received${orderLineActualTotal(line) > 0 ? ` (${escapeHtml(formatCurrency(orderLineActualTotal(line)))})` : ''}` : ''}</span>${line.purchaseLink ? `<br><span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}</div>
+            <div class="receive-line-inputs">
+                <label>Received qty<input name="receiveQty" data-line-id="${escapeHtml(line.id)}" type="number" step="any" value="${escapeHtml(line.requestedQty || '1')}"></label>
+                <label>Actual price<input name="receiveActualUnitPrice" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Actual price" value="${escapeHtml(line.actualUnitPrice || line.estimatedUnitPrice || '')}"></label>
+                <label>Barcode / QR code<input name="receiveBarcode" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Scan or type code" value=""></label>
+            </div>
         </div>`;
     }).join('');
     const scanPanel = selectResult.receiveMode === 'scan'
@@ -12091,6 +12107,7 @@ window.receiveInventoryOrder = async function() {
         </div>`
         : '';
     const result = await showActionModal(`Receive Order: ${inventoryOrderName(order)}`, `
+        <div data-action-modal-size="wide" style="display:none;"></div>
         ${scanPanel}
         <div class="order-line-list">${lineRows}</div>
     `, 'Receive Selected', body => ({

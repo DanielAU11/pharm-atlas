@@ -201,6 +201,10 @@
                             <div id="sched-time-fields"></div>
                         </div>
                         <div class="field-row-stacked" style="margin-top:8px;">
+                            <label>Used for / Indication:</label>
+                            <input id="sched-indication" type="text" placeholder="e.g. allergies, migraine, blood pressure, vitamin support">
+                        </div>
+                        <div class="field-row-stacked" style="margin-top:8px;">
                             <label>Additional Instructions:</label>
                             <textarea id="sched-instructions" rows="2" class="schedule-instructions"></textarea>
                         </div>
@@ -1256,6 +1260,7 @@
             <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span></div>
             <div class="field-row link-rule-row"><label>Link to</label><div id="mod-link-target" class="link-choice-panel"></div><label>Meaning</label><select id="mod-link-mode"><option value="">None</option><option value="together">Must take together</option><option value="choose-one">Choose only one</option></select></div>
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
+            <div class="field-row-stacked"><label>Used for / Indication</label><input id="mod-indication" type="text" placeholder="Reason this medication/supplement is used"></div>
             <div class="field-row-stacked"><label>Instructions</label><textarea id="mod-instr" rows="3"></textarea></div>
             <div style="text-align:right; margin-top:10px;">
                 <button onclick="saveOrderModification()">Update Order</button>

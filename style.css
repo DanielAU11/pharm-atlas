@@ -967,6 +967,15 @@ button {
     .use-shared-basis .combo-row {
         grid-template-columns: repeat(2, minmax(120px, 1fr));
     }
+
+    .receive-order-line {
+        grid-template-columns: 20px minmax(0, 1fr);
+    }
+
+    .receive-line-inputs {
+        grid-column: 2;
+        grid-template-columns: repeat(3, minmax(90px, 1fr));
+    }
 }
 
 .safety-warning-modal {
@@ -1145,6 +1154,48 @@ button {
     padding-bottom: 4px;
     font-size: 11px;
     min-width: 0;
+}
+
+.receive-order-line {
+    grid-template-columns: 20px minmax(220px, 1fr) minmax(320px, 0.95fr);
+    align-items: start;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.receive-order-line > input[name="receiveLine"] {
+    margin-top: 18px;
+}
+
+.receive-line-copy {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.receive-line-inputs {
+    display: grid;
+    grid-template-columns: 86px 110px minmax(150px, 1fr);
+    gap: 6px;
+    align-items: end;
+    min-width: 0;
+}
+
+.receive-line-inputs label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    font-size: 10px;
+}
+
+.receive-line-inputs input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    color: #000000;
+    font-weight: normal;
 }
 
 .formulary-item label,
