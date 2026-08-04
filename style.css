@@ -481,6 +481,130 @@ button {
     padding: 3px 4px;
 }
 
+.medication-summary-table td:first-child strong {
+    color: #000080;
+}
+
+.summary-output-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) minmax(460px, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.summary-output-options fieldset,
+.summary-preview-fieldset {
+    margin-bottom: 8px;
+}
+
+.summary-select-actions {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.summary-option-list {
+    max-height: 260px;
+    overflow: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.summary-option-row {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 5px;
+    align-items: start;
+    padding: 5px 6px;
+    border-bottom: 1px dotted #c0c0c0;
+    cursor: pointer;
+}
+
+.summary-option-row:hover {
+    background: #e6f1ff;
+}
+
+.summary-option-row:has(input:checked) {
+    background: #e6ffe6;
+    color: #006000;
+}
+
+.summary-option-row:has(input:checked) strong {
+    color: #006000;
+}
+
+.summary-option-row:has(input:not(:checked)) {
+    background: #f3f3f3;
+    color: #606060;
+}
+
+.summary-option-row strong {
+    display: block;
+    color: #000080;
+    line-height: 1.15;
+}
+
+.summary-option-row small {
+    display: block;
+    color: #404040;
+    margin-top: 2px;
+    line-height: 1.15;
+}
+
+.summary-column-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+    gap: 5px;
+}
+
+.summary-column-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 2px outset #ffffff;
+    background: #e8e8e8;
+    padding: 4px 6px;
+    min-height: 25px;
+}
+
+.summary-column-chip:has(input:checked) {
+    background: #e6ffe6;
+    color: #006000;
+    font-weight: bold;
+}
+
+.report-section-chip {
+    min-height: 32px;
+}
+
+.summary-report-preview {
+    max-height: 520px;
+    overflow: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 8px;
+}
+
+.summary-report-preview h2 {
+    font-size: 14px;
+    margin: 10px 0 5px;
+    border-bottom: 1px solid #808080;
+}
+
+.summary-report-preview .muted {
+    color: #404040;
+}
+
+@media (max-width: 920px) {
+    .summary-output-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .summary-column-list {
+        grid-template-columns: 1fr;
+    }
+}
+
 .win98-star {
     display: inline-block;
     min-width: 14px;
@@ -1107,6 +1231,10 @@ button {
     width: min(1180px, calc(100vw - 24px));
 }
 
+.action-modal-window-wide:has(.receive-order-modal) {
+    width: min(900px, calc(100vw - 36px));
+}
+
 .inventory-workflow-summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -1157,7 +1285,10 @@ button {
 }
 
 .receive-order-line {
-    grid-template-columns: 20px minmax(220px, 1fr) minmax(320px, 0.95fr);
+    grid-template-columns: 22px minmax(0, 1fr) !important;
+    grid-template-areas:
+        "check copy"
+        ". inputs";
     align-items: start;
     padding: 7px;
     border: 2px inset #ffffff;
@@ -1165,20 +1296,32 @@ button {
 }
 
 .receive-order-line > input[name="receiveLine"] {
-    margin-top: 18px;
+    grid-area: check;
+    margin-top: 2px;
 }
 
 .receive-line-copy {
+    grid-area: copy;
     min-width: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+}
+
+.receive-line-copy strong {
+    display: block;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
 }
 
 .receive-line-inputs {
+    grid-area: inputs;
     display: grid;
-    grid-template-columns: 86px 110px minmax(150px, 1fr);
+    grid-template-columns: 94px 120px 240px;
     gap: 6px;
     align-items: end;
     min-width: 0;
+    margin-top: 5px;
+    justify-content: start;
 }
 
 .receive-line-inputs label {
@@ -1196,6 +1339,29 @@ button {
     box-sizing: border-box;
     color: #000000;
     font-weight: normal;
+}
+
+.receive-order-modal .order-line-list {
+    max-height: 520px;
+}
+
+.receive-order-modal .receive-order-line {
+    min-height: 78px;
+    padding: 10px;
+}
+
+.receive-order-modal .receive-line-copy {
+    padding-bottom: 4px;
+}
+
+@media (max-width: 860px) {
+    .receive-order-line {
+        grid-template-columns: 22px minmax(0, 1fr) !important;
+    }
+
+    .receive-line-inputs {
+        grid-template-columns: 1fr;
+    }
 }
 
 .formulary-item label,
@@ -2080,8 +2246,28 @@ button {
 .receive-intake-member {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: 5px;
     white-space: nowrap;
+    padding: 2px 5px;
+    border: 1px solid transparent;
+    font-size: 11px;
+}
+
+.receive-intake-member input[type="checkbox"],
+.member-assignment-option input[type="checkbox"] {
+    width: 13px !important;
+    min-width: 13px;
+    height: 13px;
+    margin: 0;
+    flex: 0 0 13px;
+}
+
+.receive-intake-member:has(input:checked),
+.member-assignment-option:has(input:checked) {
+    background: #dfffe0;
+    border-color: #008000;
+    color: #006000;
+    font-weight: bold;
 }
 
 .receive-line-received {

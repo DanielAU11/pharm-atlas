@@ -42,19 +42,6 @@
                 
                 <!-- 1. DASHBOARD -->
                 <div id="panel-dashboard">
-                    <fieldset class="data-sync-panel">
-                        <legend>Desktop Sync Folder</legend>
-                        <div class="data-sync-grid">
-                            <div>
-                                <strong id="data-location-status">Local data folder</strong>
-                                <div id="data-location-path" class="data-location-path">Checking data folder...</div>
-                            </div>
-                            <div class="field-row data-sync-actions">
-                                <button type="button" onclick="chooseDesktopSyncFolder()">Use Synced Folder</button>
-                                <button type="button" onclick="useLocalDesktopDataFolder()">Use Local Folder</button>
-                            </div>
-                        </div>
-                    </fieldset>
                     <fieldset>
                         <legend>Medication Schedule Calendar</legend>
                         <div class="calendar-controls">
@@ -108,7 +95,21 @@
                         <div id="history-log" class="tree-view" style="height: 120px; overflow-y: scroll; background: white;"></div>
                         <button onclick="clearHistory()" style="margin-top:5px;">Clear Log</button>
                     </fieldset>
-        
+
+                    <fieldset class="data-sync-panel" style="margin-top: 10px;">
+                        <legend>Desktop Sync Folder</legend>
+                        <div class="data-sync-grid">
+                            <div>
+                                <strong id="data-location-status">Local data folder</strong>
+                                <div id="data-location-path" class="data-location-path">Checking data folder...</div>
+                            </div>
+                            <div class="field-row data-sync-actions">
+                                <button type="button" onclick="chooseDesktopSyncFolder()">Use Synced Folder</button>
+                                <button type="button" onclick="useLocalDesktopDataFolder()">Use Local Folder</button>
+                            </div>
+                        </div>
+                    </fieldset>
+
                 </div>
 
 

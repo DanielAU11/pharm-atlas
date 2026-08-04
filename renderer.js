@@ -563,7 +563,14 @@ function intervalAnchorDateTime(schedule, useRolling = true) {
 function latestIntervalAnchorFromHistory(schedule) {
     if (!schedule || schedule.freq !== 'QXH') return null;
     return db.history
-        .filter(entry => entry.scheduleId === schedule.id && ['late', 'early'].includes(entry.doseStatus || 'given'))
+        .filter(entry => {
+            if (entry.scheduleId !== schedule.id || !isGivenStatus(entry.doseStatus || 'given')) return false;
+            if (['late', 'early'].includes(entry.doseStatus || 'given')) return true;
+            const actual = historyEntryDateTime(entry);
+            const scheduledDate = entry.scheduledDate || entry.date;
+            const scheduledTime = entry.scheduledTime || entry.time;
+            return !!(actual.date && actual.time && scheduledDate && scheduledTime && (actual.date !== scheduledDate || actual.time !== scheduledTime));
+        })
         .map(entry => historyEntryDateTime(entry))
         .filter(parts => parts.date && parts.time)
         .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`))[0] || null;
@@ -8074,7 +8081,6 @@ function dataHealthIssues() {
     const issues = [];
     const inventoryIds = new Set(db.inventory.map(item => item.id));
     const memberIds = new Set(db.family.map(item => item.id));
-    const scheduleIds = new Set(db.schedules.map(item => item.id));
     const barcodeMap = new Map();
 
     db.schedules.forEach(schedule => {
@@ -8090,9 +8096,8 @@ function dataHealthIssues() {
         });
     });
 
-    db.history.forEach(entry => {
-        if (entry.scheduleId && !scheduleIds.has(entry.scheduleId)) issues.push({ severity: 'low', repairable: false, type: 'history-orphan', message: `Administration history references a removed schedule: ${entry.medName || entry.scheduleId}.` });
-    });
+    // Administration history can intentionally outlive a removed completed schedule.
+    // Keeping it out of issue counts prevents preserved logs from looking broken.
 
     db.inventory.forEach(med => {
         medicationCodes(med).forEach(code => {
@@ -8128,6 +8133,7 @@ window.runDataHealthCheck = async function() {
     const rows = issues.map(issue => `<tr><td>${escapeHtml(issue.severity)}</td><td>${escapeHtml(issue.message)}</td><td>${issue.repairable ? 'Yes' : 'Review manually'}</td></tr>`).join('');
     await showActionModal('Data Health Check', `
         <div style="font-size:11px; margin-bottom:6px;">This checks for broken schedule links, orphaned records, duplicate barcodes, missing times, and impossible stock counts.</div>
+        <div class="form-help" style="margin-bottom:6px;">Administration history is intentionally preserved when a completed medication record is removed from a profile, so those retained log entries are not counted as data-health issues.</div>
         <table class="win98-report-table">
             <thead><tr><th>Severity</th><th>Finding</th><th>Repair</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="3">No data health issues found.</td></tr>'}</tbody>
@@ -8284,6 +8290,165 @@ function reportPdfFileName(filenamePrefix) {
     return `${sanitizeFilenamePart(filenamePrefix)}_${localDateKey()}.pdf`;
 }
 
+function htmlFromNodes(nodes) {
+    const wrapper = document.createElement('div');
+    nodes.forEach(node => wrapper.appendChild(node.cloneNode(true)));
+    return wrapper.innerHTML;
+}
+
+function buildReportPreviewSections(bodyHtml, title = 'Report') {
+    const template = document.createElement('template');
+    template.innerHTML = bodyHtml;
+    const nodes = Array.from(template.content.childNodes)
+        .filter(node => node.nodeType !== Node.TEXT_NODE || node.textContent.trim());
+    const sections = [];
+    const intro = [];
+    let current = null;
+    nodes.forEach(node => {
+        const tag = node.nodeType === Node.ELEMENT_NODE ? node.tagName : '';
+        if (tag === 'H2' || tag === 'H3') {
+            current = {
+                id: `section_${sections.length}`,
+                label: node.textContent.trim() || `${title} section ${sections.length + 1}`,
+                nodes: []
+            };
+            sections.push(current);
+        }
+        if (current) current.nodes.push(node);
+        else intro.push(node);
+    });
+    if (!sections.length) {
+        return {
+            introHtml: '',
+            sections: [{ id: 'full_report', label: title, html: bodyHtml }]
+        };
+    }
+    return {
+        introHtml: htmlFromNodes(intro),
+        sections: sections.map(section => ({ ...section, html: htmlFromNodes(section.nodes) }))
+    };
+}
+
+function reportColumnLabels(bodyHtml) {
+    const template = document.createElement('template');
+    template.innerHTML = bodyHtml;
+    const labels = [];
+    template.content.querySelectorAll('table').forEach(table => {
+        table.querySelectorAll('thead th').forEach(th => {
+            const label = th.textContent.trim();
+            if (label && !labels.includes(label)) labels.push(label);
+        });
+    });
+    return labels;
+}
+
+function filterReportTableColumns(bodyHtml, selectedLabels) {
+    if (!selectedLabels || !selectedLabels.size) return bodyHtml;
+    const template = document.createElement('template');
+    template.innerHTML = bodyHtml;
+    template.content.querySelectorAll('table').forEach(table => {
+        const headerCells = Array.from(table.querySelectorAll('thead tr:first-child th'));
+        if (!headerCells.length) return;
+        const removeIndexes = headerCells
+            .map((th, index) => selectedLabels.has(th.textContent.trim()) ? -1 : index)
+            .filter(index => index >= 0)
+            .sort((a, b) => b - a);
+        if (!removeIndexes.length) return;
+        table.querySelectorAll('tr').forEach(row => {
+            const cells = Array.from(row.children);
+            removeIndexes.forEach(index => cells[index]?.remove());
+        });
+    });
+    return htmlFromNodes(Array.from(template.content.childNodes));
+}
+
+let activePdfPreviewContext = null;
+
+function selectedReportPreviewBody(body = document.getElementById('action-modal-body')) {
+    if (!activePdfPreviewContext || !body) return '';
+    const selectedIds = new Set([...body.querySelectorAll('input[name="reportSectionIds"]:checked')].map(input => input.value));
+    const selectedColumns = new Set([...body.querySelectorAll('input[name="reportColumnLabels"]:checked')].map(input => input.value));
+    const selectedSections = activePdfPreviewContext.sections
+        .filter(section => selectedIds.has(section.id))
+        .map(section => section.html)
+        .join('');
+    const sectionBody = `${activePdfPreviewContext.introHtml || ''}${selectedSections || '<div>No report sections selected.</div>'}`;
+    return activePdfPreviewContext.columns.length
+        ? filterReportTableColumns(sectionBody, selectedColumns)
+        : sectionBody;
+}
+
+window.refreshPdfReportPreview = function() {
+    const preview = document.getElementById('pdf-report-preview');
+    if (!preview) return;
+    preview.innerHTML = selectedReportPreviewBody();
+};
+
+window.setPdfReportSectionChecks = function(checked) {
+    document.querySelectorAll('#action-modal-body input[name="reportSectionIds"]').forEach(input => {
+        input.checked = checked;
+    });
+    window.refreshPdfReportPreview();
+};
+
+async function choosePdfReportBody(title, bodyHtml) {
+    const context = buildReportPreviewSections(bodyHtml, title);
+    context.columns = reportColumnLabels(bodyHtml);
+    activePdfPreviewContext = context;
+    const sectionOptions = context.sections.map(section => `
+        <label class="summary-column-chip report-section-chip">
+            <input type="checkbox" name="reportSectionIds" value="${escapeHtml(section.id)}" checked onchange="refreshPdfReportPreview()">
+            <span>${escapeHtml(section.label)}</span>
+        </label>`).join('');
+    const columnOptions = context.columns.map(label => `
+        <label class="summary-column-chip">
+            <input type="checkbox" name="reportColumnLabels" value="${escapeHtml(label)}" checked onchange="refreshPdfReportPreview()">
+            <span>${escapeHtml(label)}</span>
+        </label>`).join('');
+    const result = await showActionModal(`PDF Preview: ${title}`, `
+        <div data-action-modal-size="wide" class="pdf-report-output-modal">
+            <div class="summary-output-layout">
+                <div class="summary-output-options">
+                    <fieldset>
+                        <legend>Include / Exclude</legend>
+                        <div class="summary-select-actions">
+                            <button type="button" onclick="setPdfReportSectionChecks(true)">Select All</button>
+                            <button type="button" onclick="setPdfReportSectionChecks(false)">Clear</button>
+                        </div>
+                        <div class="summary-column-list">${sectionOptions}</div>
+                    </fieldset>
+                    ${context.columns.length ? `
+                    <fieldset>
+                        <legend>Columns</legend>
+                        <div class="summary-column-list">${columnOptions}</div>
+                    </fieldset>` : ''}
+                </div>
+                <fieldset class="summary-preview-fieldset">
+                    <legend>Built-in Preview</legend>
+                    <div id="pdf-report-preview" class="summary-report-preview">
+                        ${context.introHtml || ''}${context.sections.map(section => section.html).join('')}
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+    `, 'Generate PDF', body => ({
+        bodyHtml: selectedReportPreviewBody(body),
+        sectionIds: [...body.querySelectorAll('input[name="reportSectionIds"]:checked')].map(input => input.value),
+        columnLabels: [...body.querySelectorAll('input[name="reportColumnLabels"]:checked')].map(input => input.value)
+    }));
+    activePdfPreviewContext = null;
+    if (!result) return null;
+    if (!result.sectionIds.length) {
+        await appAlert('Select at least one report section to include.');
+        return choosePdfReportBody(title, bodyHtml);
+    }
+    if (context.columns.length && !result.columnLabels.length) {
+        await appAlert('Select at least one report column to include.');
+        return choosePdfReportBody(title, bodyHtml);
+    }
+    return result.bodyHtml;
+}
+
 function printReportBody(title, bodyHtml) {
     const printWindow = window.open('', '_blank', 'width=900,height=700');
     if (!printWindow) {
@@ -8297,14 +8462,42 @@ function printReportBody(title, bodyHtml) {
     setTimeout(() => printWindow.print(), 150);
 }
 
-async function saveReportPdf(title, bodyHtml, filenamePrefix) {
+function printReportFromPreview(title, bodyHtml) {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-10000px';
+    iframe.style.top = '0';
+    iframe.style.width = '1px';
+    iframe.style.height = '1px';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
+    const cleanup = () => setTimeout(() => iframe.remove(), 500);
+    iframe.onload = () => {
+        try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+        } catch (error) {
+            console.error(error);
+            appAlert('Unable to print the summary. Try generating the PDF instead.');
+        } finally {
+            cleanup();
+        }
+    };
+    iframe.srcdoc = reportShell(title, `<h1>${escapeHtml(title)}</h1>${bodyHtml}`);
+}
+
+async function saveReportPdf(title, bodyHtml, filenamePrefix, options = {}) {
     if (!window.api?.savePdfReport) {
         alert("PDF report support is not available. Restart the app and try again.");
         return;
     }
+    const finalBodyHtml = options.preview === false ? bodyHtml : await choosePdfReportBody(title, bodyHtml);
+    if (!finalBodyHtml) return;
     try {
         const path = await window.api.savePdfReport({
-            html: reportShell(title, bodyHtml),
+            html: reportShell(title, finalBodyHtml),
             fileName: reportPdfFileName(filenamePrefix)
         });
         alert(`PDF saved:\n${path}`);
@@ -8377,10 +8570,32 @@ window.generateInventoryPdfReport = async function() {
     await saveReportPdf('Current Inventory Report', body, 'Current_Inventory');
 };
 
-function memberMedicationReviewHtml(member, forPdf = false) {
-    if (!member) return '<div class="empty-state">Save member before viewing medication/supplement summary.</div>';
-    const activeSchedules = db.schedules.filter(schedule => schedule.memberId === member.id && !isScheduleArchived(schedule));
-    const rows = activeSchedules
+const medicationSummaryColumns = [
+    { id: 'medication', label: 'Medication' },
+    { id: 'dose', label: 'Dose / Qty' },
+    { id: 'usedFor', label: 'Used For' },
+    { id: 'prescriber', label: 'Prescriber' },
+    { id: 'frequency', label: 'Frequency / Times' },
+    { id: 'inventory', label: 'Inventory Forecast' },
+    { id: 'lastGiven', label: 'Last Given' }
+];
+
+const defaultMedicationSummaryColumnIds = medicationSummaryColumns.map(column => column.id);
+
+function normalizeMedicationSummaryOptions(options = {}) {
+    if (typeof options === 'boolean') return {};
+    return options || {};
+}
+
+function medicationSummarySchedules(member, options = {}) {
+    if (!member) return [];
+    const normalized = normalizeMedicationSummaryOptions(options);
+    const selectedIds = Array.isArray(normalized.scheduleIds) && normalized.scheduleIds.length
+        ? new Set(normalized.scheduleIds)
+        : null;
+    return db.schedules
+        .filter(schedule => schedule.memberId === member.id && !isScheduleArchived(schedule))
+        .filter(schedule => !selectedIds || selectedIds.has(schedule.id))
         .slice()
         .sort((a, b) => {
             const aPrn = a.freq === 'PRN' ? 1 : 0;
@@ -8389,40 +8604,72 @@ function memberMedicationReviewHtml(member, forPdf = false) {
             const aTime = getScheduleTimes(a)[0] || '99:99';
             const bTime = getScheduleTimes(b)[0] || '99:99';
             return aTime.localeCompare(bTime);
-        })
+        });
+}
+
+function medicationSummaryPrescriberName(schedule, med) {
+    const prescriberId = schedule?.prescriberId || med?.prescriberId || '';
+    const prescriber = prescriberId ? db.prescribers.find(item => item.id === prescriberId) : null;
+    return prescriber ? prescriberDisplayName(prescriber) : 'Not specified';
+}
+
+function medicationSummaryRowValues(schedule) {
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    if (!med) return null;
+    const forecast = refillForecastText(med);
+    const lastGiven = db.history
+        .filter(entry => entry.scheduleId === schedule.id && isGivenStatus(entry.doseStatus || 'given'))
+        .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))[0];
+    const times = getScheduleTimes(schedule);
+    const scheduleText = schedule.freq === 'PRN'
+        ? `PRN${prnLimitText(schedule)}`
+        : `${formatFrequency(schedule)} ${times.join(', ') || ''}`.trim();
+    return {
+        medication: `<strong>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong>`,
+        dose: `${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}<br><small>${escapeHtml(formatQtyForSchedule(schedule, med))}</small>`,
+        usedFor: escapeHtml(schedule.indication || 'Not specified'),
+        prescriber: escapeHtml(medicationSummaryPrescriberName(schedule, med)),
+        frequency: `${escapeHtml(scheduleText)}${schedule.instructions ? `<br><small>${escapeHtml(schedule.instructions)}</small>` : ''}`,
+        inventory: `${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}${forecast ? `<br><small>${escapeHtml(forecast)}</small>` : ''}`,
+        lastGiven: escapeHtml(lastGiven?.timestamp || 'Not documented')
+    };
+}
+
+function medicationSummarySelectedColumns(options = {}) {
+    const normalized = normalizeMedicationSummaryOptions(options);
+    const selectedIds = Array.isArray(normalized.columnIds) && normalized.columnIds.length
+        ? new Set(normalized.columnIds)
+        : new Set(defaultMedicationSummaryColumnIds);
+    const columns = medicationSummaryColumns.filter(column => selectedIds.has(column.id));
+    return columns.length ? columns : medicationSummaryColumns;
+}
+
+function memberMedicationReviewHtml(member, options = {}) {
+    if (!member) return '<div class="empty-state">Save member before viewing medication/supplement summary.</div>';
+    const columns = medicationSummarySelectedColumns(options);
+    const rows = medicationSummarySchedules(member, options)
         .map(schedule => {
         const med = db.inventory.find(item => item.id === schedule.medId);
         if (!med) return '';
-        const forecast = refillForecastText(med);
-        const lastGiven = db.history
-            .filter(entry => entry.scheduleId === schedule.id && isGivenStatus(entry.doseStatus || 'given'))
-            .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))[0];
-        const times = getScheduleTimes(schedule);
-        const scheduleText = schedule.freq === 'PRN'
-            ? `PRN${prnLimitText(schedule)}`
-            : `${formatFrequency(schedule)} ${times.join(', ') || ''}`.trim();
+        const values = medicationSummaryRowValues(schedule);
+        if (!values) return '';
         return `<tr>
-            <td>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</td>
-            <td>${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}<br><small>${escapeHtml(formatQtyForSchedule(schedule, med))}</small></td>
-            <td>${escapeHtml(schedule.indication || 'Not specified')}</td>
-            <td>${escapeHtml(scheduleText)}${schedule.instructions ? `<br><small>${escapeHtml(schedule.instructions)}</small>` : ''}</td>
-            <td>${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}${forecast ? `<br><small>${escapeHtml(forecast)}</small>` : ''}</td>
-            <td>${escapeHtml(lastGiven?.timestamp || 'Not documented')}</td>
+            ${columns.map(column => `<td>${values[column.id]}</td>`).join('')}
         </tr>`;
     }).join('');
     return `
         <table class="win98-report-table medication-summary-table">
-            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Frequency / Times</th><th>Inventory Forecast</th><th>Last Given</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="6">No active medications or supplements.</td></tr>'}</tbody>
+            <thead><tr>${columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
+            <tbody>${rows || `<tr><td colspan="${columns.length}">No active medications or supplements.</td></tr>`}</tbody>
         </table>`;
 }
 
-function memberMedicationSummaryReportBody(member) {
+function memberMedicationSummaryReportBody(member, options = {}) {
     return `
         <h2>${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</h2>
         <div class="muted">Includes active scheduled medications, supplements, and PRN medications.</div>
         <h2>Medications/Supplements Summary</h2>
-        ${memberMedicationReviewHtml(member, true)}`;
+        ${memberMedicationReviewHtml(member, options)}`;
 }
 
 function renderMemberMedicationReview(memberId) {
@@ -8432,26 +8679,104 @@ function renderMemberMedicationReview(memberId) {
     container.innerHTML = memberMedicationReviewHtml(member, false);
 }
 
+function medicationSummaryOptionsFromModalBody(body) {
+    const scheduleIds = [...body.querySelectorAll('input[name="summaryScheduleIds"]:checked')].map(input => input.value);
+    const columnIds = [...body.querySelectorAll('input[name="summaryColumnIds"]:checked')].map(input => input.value);
+    return { scheduleIds, columnIds };
+}
+
+window.refreshMedicationSummaryPreview = function(memberId) {
+    const member = db.family.find(item => item.id === memberId);
+    const body = document.getElementById('action-modal-body');
+    const preview = document.getElementById('medication-summary-preview');
+    if (!member || !body || !preview) return;
+    preview.innerHTML = memberMedicationSummaryReportBody(member, medicationSummaryOptionsFromModalBody(body));
+};
+
+async function chooseMedicationSummaryOutputOptions(member, mode) {
+    const schedules = medicationSummarySchedules(member);
+    const medicationOptions = schedules.map(schedule => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        if (!med) return '';
+        const details = `${formatFrequency(schedule)} ${getScheduleTimes(schedule).join(', ') || 'PRN'}`.trim();
+        return `
+            <label class="summary-option-row">
+                <input type="checkbox" name="summaryScheduleIds" value="${escapeHtml(schedule.id)}" checked onchange="refreshMedicationSummaryPreview('${escapeHtml(member.id)}')">
+                <span><strong>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong><small>${escapeHtml(details)}</small></span>
+            </label>`;
+    }).join('');
+    const columnOptions = medicationSummaryColumns.map(column => `
+        <label class="summary-column-chip">
+            <input type="checkbox" name="summaryColumnIds" value="${escapeHtml(column.id)}" checked onchange="refreshMedicationSummaryPreview('${escapeHtml(member.id)}')">
+            <span>${escapeHtml(column.label)}</span>
+        </label>`).join('');
+    const result = await showActionModal(`${mode === 'pdf' ? 'PDF' : 'Print'} Medications/Supplements Summary`, `
+        <div data-action-modal-size="wide" class="medication-summary-output-modal">
+            <div class="summary-output-layout">
+                <div class="summary-output-options">
+                    <fieldset>
+                        <legend>Medications / Supplements</legend>
+                        <div class="summary-select-actions">
+                            <button type="button" onclick="setMedicationSummaryChecks('summaryScheduleIds', true); refreshMedicationSummaryPreview('${escapeHtml(member.id)}')">Select All</button>
+                            <button type="button" onclick="setMedicationSummaryChecks('summaryScheduleIds', false); refreshMedicationSummaryPreview('${escapeHtml(member.id)}')">Clear</button>
+                        </div>
+                        <div class="summary-option-list">${medicationOptions || '<div class="empty-state">No active medications or supplements.</div>'}</div>
+                    </fieldset>
+                    <fieldset>
+                        <legend>Columns</legend>
+                        <div class="summary-column-list">${columnOptions}</div>
+                    </fieldset>
+                </div>
+                <fieldset class="summary-preview-fieldset">
+                    <legend>Built-in Preview</legend>
+                    <div id="medication-summary-preview" class="summary-report-preview">
+                        ${memberMedicationSummaryReportBody(member, { scheduleIds: schedules.map(schedule => schedule.id), columnIds: defaultMedicationSummaryColumnIds })}
+                    </div>
+                </fieldset>
+            </div>
+        </div>
+    `, mode === 'pdf' ? 'Generate PDF' : 'Print', medicationSummaryOptionsFromModalBody);
+    if (!result) return null;
+    if (!result.scheduleIds.length) {
+        await appAlert('Select at least one medication or supplement to include.');
+        return chooseMedicationSummaryOutputOptions(member, mode);
+    }
+    if (!result.columnIds.length) {
+        await appAlert('Select at least one column to include.');
+        return chooseMedicationSummaryOutputOptions(member, mode);
+    }
+    return result;
+}
+
+window.setMedicationSummaryChecks = function(name, checked) {
+    document.querySelectorAll(`#action-modal-body input[name="${name}"]`).forEach(input => {
+        input.checked = checked;
+    });
+};
+
 window.generateMemberMedicationSummaryPdfReport = async function(memberId = currentEditingMemberId) {
     const member = db.family.find(m => m.id === memberId);
     if (!member) return appAlert('Open a saved member profile before generating a medications/supplements summary PDF.');
+    const options = await chooseMedicationSummaryOutputOptions(member, 'pdf');
+    if (!options) return;
     await saveReportPdf(
         `Medications/Supplements Summary - ${member.firstName} ${member.lastName}`,
-        memberMedicationSummaryReportBody(member),
-        `Medications_Supplements_Summary_${member.lastName}_${member.firstName}`
+        memberMedicationSummaryReportBody(member, options),
+        `Medications_Supplements_Summary_${member.lastName}_${member.firstName}`,
+        { preview: false }
     );
 };
 
-window.printMemberMedicationSummaryReport = function(memberId = currentEditingMemberId) {
+window.printMemberMedicationSummaryReport = async function(memberId = currentEditingMemberId) {
     const member = db.family.find(m => m.id === memberId);
     if (!member) {
         appAlert('Open a saved member profile before printing a medications/supplements summary.');
         return;
     }
-    printReportBody(
-        `Medications/Supplements Summary - ${member.firstName} ${member.lastName}`,
-        memberMedicationSummaryReportBody(member)
-    );
+    const options = await chooseMedicationSummaryOutputOptions(member, 'print');
+    if (!options) return;
+    const title = `Medications/Supplements Summary - ${member.firstName} ${member.lastName}`;
+    printReportFromPreview(title, memberMedicationSummaryReportBody(member, options));
 };
 
 window.fillMedicationSummaryProviderEmail = function(providerId) {
@@ -9385,6 +9710,21 @@ function shiftedWeekdays(weekdays, dayDelta) {
     return Array.from(new Set(days.map(day => ((day + dayDelta) % 7 + 7) % 7))).sort((a, b) => a - b);
 }
 
+function shiftedDateKey(dateKey, dayDelta) {
+    if (!dateKey || dateKey === 'Ongoing') return dateKey;
+    return dateKeyPlusDays(dateKey, dayDelta) || dateKey;
+}
+
+function shiftScheduleDateWindow(schedule, dayDelta) {
+    if (!schedule || !Number.isFinite(dayDelta) || dayDelta === 0) return;
+    if (schedule.startDate) schedule.startDate = shiftedDateKey(schedule.startDate, dayDelta);
+    if (schedule.endDate && schedule.endDate !== 'Ongoing') schedule.endDate = shiftedDateKey(schedule.endDate, dayDelta);
+    if (schedule.monthlyAnchor) schedule.monthlyAnchor = shiftedDateKey(schedule.monthlyAnchor, dayDelta);
+    if (Array.isArray(schedule.includedDates) && schedule.includedDates.length) {
+        schedule.includedDates = schedule.includedDates.map(date => shiftedDateKey(date, dayDelta));
+    }
+}
+
 function updateSchedulePatternAfterAdministration(schedule, actual, historyEntry = null) {
     if (!schedule || !['late', 'early'].includes(actual?.doseStatus || 'given')) return;
     if (!actual.actualDate || !actual.actualTime) return;
@@ -9397,19 +9737,61 @@ function updateSchedulePatternAfterAdministration(schedule, actual, historyEntry
     if (!Number.isFinite(dayDelta) || dayDelta === 0) return;
     if (schedule.freq === 'QOD') {
         schedule.qodStart = actual.actualDate;
+        if (schedule.endDate && schedule.endDate !== 'Ongoing') schedule.endDate = shiftedDateKey(schedule.endDate, dayDelta);
+        if (Array.isArray(schedule.includedDates) && schedule.includedDates.length) {
+            schedule.includedDates = schedule.includedDates.map(date => shiftedDateKey(date, dayDelta));
+        }
         if (historyEntry) historyEntry.scheduleShiftDeltaDays = dayDelta;
         return;
     }
     if (schedule.freq === 'QW') {
-        schedule.startDate = actual.actualDate;
+        shiftScheduleDateWindow(schedule, dayDelta);
         if (historyEntry) historyEntry.scheduleShiftDeltaDays = dayDelta;
         return;
     }
     if (schedule.freq === 'QXW' || schedule.freq === 'XPW') {
         schedule.weekdays = shiftedWeekdays(schedule.weekdays, dayDelta);
-        if (schedule.startDate) schedule.startDate = dateKeyPlusDays(schedule.startDate, dayDelta) || schedule.startDate;
-        if (schedule.monthlyAnchor) schedule.monthlyAnchor = dateKeyPlusDays(schedule.monthlyAnchor, dayDelta) || schedule.monthlyAnchor;
+        shiftScheduleDateWindow(schedule, dayDelta);
         if (historyEntry) historyEntry.scheduleShiftDeltaDays = dayDelta;
+    }
+}
+
+function administrationPatternShiftDays(actual) {
+    if (!['late', 'early'].includes(actual?.doseStatus || 'given')) return 0;
+    if (!actual.actualDate || !actual.scheduledDate) return 0;
+    const dayDelta = daysBetween(actual.actualDate, actual.scheduledDate);
+    return Number.isFinite(dayDelta) ? dayDelta : 0;
+}
+
+function adjustSchedulePatternForEditedAdministration(schedule, actual, entry, previousShiftDays = 0) {
+    if (!schedule) return;
+    if (schedule.freq === 'QXH') {
+        recalculateIntervalAnchorFromHistory(schedule);
+        return;
+    }
+    const nextShiftDays = administrationPatternShiftDays(actual);
+    const delta = nextShiftDays - (Number.isFinite(previousShiftDays) ? previousShiftDays : 0);
+    if (schedule.freq === 'QOD') {
+        if (delta !== 0) {
+            if (schedule.endDate && schedule.endDate !== 'Ongoing') schedule.endDate = shiftedDateKey(schedule.endDate, delta);
+            if (Array.isArray(schedule.includedDates) && schedule.includedDates.length) {
+                schedule.includedDates = schedule.includedDates.map(date => shiftedDateKey(date, delta));
+            }
+        }
+        schedule.qodStart = nextShiftDays !== 0
+            ? actual.actualDate
+            : (schedule.startDate || actual.scheduledDate || schedule.qodStart || '');
+    } else if (schedule.freq === 'QW') {
+        shiftScheduleDateWindow(schedule, delta);
+    } else if (schedule.freq === 'QXW' || schedule.freq === 'XPW') {
+        if (delta !== 0) {
+            schedule.weekdays = shiftedWeekdays(schedule.weekdays, delta);
+            shiftScheduleDateWindow(schedule, delta);
+        }
+    }
+    if (entry) {
+        if (nextShiftDays !== 0) entry.scheduleShiftDeltaDays = nextShiftDays;
+        else delete entry.scheduleShiftDeltaDays;
     }
 }
 
@@ -9510,6 +9892,7 @@ window.editAdministration = async function(entryId) {
     const nextStatus = result.doseStatus || 'given';
     const wasGiven = isGivenStatus(entry.doseStatus);
     const willBeGiven = isGivenStatus(nextStatus);
+    const previousShiftDays = parseInt(entry.scheduleShiftDeltaDays, 10) || 0;
     const schedule = db.schedules.find(item => item.id === entry.scheduleId);
     const med = schedule
         ? db.inventory.find(item => item.id === schedule.medId)
@@ -9569,7 +9952,7 @@ window.editAdministration = async function(entryId) {
         : 'No dose administered';
     const overrideText = entry.prnLimitOverride ? '; PRN maximum override confirmed' : '';
     entry.details = `${doseStatusLabel(entry.doseStatus)}; ${scheduledText}${stockDetail} via ${administrationSourceLabel(entry)}${overrideText}${noteText}`;
-    if (schedule?.freq === 'QXH') recalculateIntervalAnchorFromHistory(schedule);
+    adjustSchedulePatternForEditedAdministration(schedule, result, entry, previousShiftDays);
     await sync();
 };
 
@@ -11833,7 +12216,7 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
     const assignmentChoices = db.family.map(member => `
         <label class="receive-intake-member">
             <input name="receiveAssignedMemberIds" type="checkbox" value="${escapeHtml(member.id)}">
-            ${escapeHtml(memberDisplayName(member))}
+            <span>${escapeHtml(memberDisplayName(member))}</span>
         </label>`).join('');
     const intakePromise = showActionModal(`New Inventory Intake: ${line.name}`, `
         <div data-action-modal-size="wide" class="receive-intake">
@@ -12064,9 +12447,12 @@ async function receiveOrderLine(line, receivedQty, barcode, cost = {}) {
 }
 
 window.receiveInventoryOrder = async function() {
-    const orders = (db.inventoryOrders || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const orders = (db.inventoryOrders || [])
+        .filter(order => (order.lines || []).some(line => line.status !== 'received'))
+        .slice()
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     if (orders.length === 0) {
-        await appAlert('No inventory orders have been created yet.');
+        await appAlert('No open inventory orders are ready to receive. Received orders are available in the Order Log.');
         return;
     }
     const orderOptions = orders.map(order => `<option value="${escapeHtml(order.id)}">${escapeHtml(inventoryOrderLabel(order))}</option>`).join('');
@@ -12107,9 +12493,10 @@ window.receiveInventoryOrder = async function() {
         </div>`
         : '';
     const result = await showActionModal(`Receive Order: ${inventoryOrderName(order)}`, `
-        <div data-action-modal-size="wide" style="display:none;"></div>
+        <div data-action-modal-size="wide" class="receive-order-modal">
         ${scanPanel}
         <div class="order-line-list">${lineRows}</div>
+        </div>
     `, 'Receive Selected', body => ({
         lines: Array.from(body.querySelectorAll('.order-line-item')).map(row => ({
             lineId: row.dataset.lineId,

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Notification, nativeImage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
 if (require('electron-squirrel-startup')) app.quit();
@@ -39,6 +40,11 @@ let dataDir = loadDataDirSetting();
 let dbPath = path.join(dataDir, 'db.json');
 const emailConfigPath = path.join(defaultDataDir, 'email-config.json');
 let lastKnownDbMtimeMs = 0;
+let lastKnownDbFingerprint = '';
+
+function dbFingerprintFromText(text) {
+    return crypto.createHash('sha256').update(String(text || '').replace(/^\uFEFF/, '')).digest('hex');
+}
 
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
@@ -107,9 +113,13 @@ function defaultEmptyDb() {
 
 function readDbFromPath(filePath) {
     if (!fs.existsSync(filePath)) return defaultEmptyDb();
-    const data = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    const rawData = fs.readFileSync(filePath, 'utf8');
+    const data = rawData.replace(/^\uFEFF/, '');
     try {
-        if (path.resolve(filePath) === path.resolve(dbPath)) lastKnownDbMtimeMs = fs.statSync(filePath).mtimeMs;
+        if (path.resolve(filePath) === path.resolve(dbPath)) {
+            lastKnownDbMtimeMs = fs.statSync(filePath).mtimeMs;
+            lastKnownDbFingerprint = dbFingerprintFromText(rawData);
+        }
     } catch (error) {
         console.error('Unable to read database timestamp:', error.message);
     }
@@ -118,9 +128,13 @@ function readDbFromPath(filePath) {
 
 function writeDbToPath(filePath, data) {
     ensureDir(path.dirname(filePath));
-    fs.writeFileSync(filePath, JSON.stringify(data || defaultEmptyDb(), null, 2));
+    const serialized = JSON.stringify(data || defaultEmptyDb(), null, 2);
+    fs.writeFileSync(filePath, serialized);
     try {
-        if (path.resolve(filePath) === path.resolve(dbPath)) lastKnownDbMtimeMs = fs.statSync(filePath).mtimeMs;
+        if (path.resolve(filePath) === path.resolve(dbPath)) {
+            lastKnownDbMtimeMs = fs.statSync(filePath).mtimeMs;
+            lastKnownDbFingerprint = dbFingerprintFromText(serialized);
+        }
     } catch (error) {
         console.error('Unable to update database timestamp:', error.message);
     }
@@ -131,9 +145,16 @@ function preserveDbConflictBackupIfNeeded() {
     try {
         const currentMtime = fs.statSync(dbPath).mtimeMs;
         if (lastKnownDbMtimeMs && currentMtime > lastKnownDbMtimeMs + 1000) {
+            const currentText = fs.readFileSync(dbPath, 'utf8');
+            const currentFingerprint = dbFingerprintFromText(currentText);
+            if (lastKnownDbFingerprint && currentFingerprint === lastKnownDbFingerprint) {
+                lastKnownDbMtimeMs = currentMtime;
+                return null;
+            }
             const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
             const backupPath = path.join(dataDir, `db_conflict_backup_${stamp}.json`);
             fs.copyFileSync(dbPath, backupPath);
+            lastKnownDbFingerprint = currentFingerprint;
             return backupPath;
         }
     } catch (error) {
