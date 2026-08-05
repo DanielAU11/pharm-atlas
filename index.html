@@ -1068,7 +1068,17 @@
                 <label>Calendar color:</label><input id="m-calendar-color" type="color" value="#000080" title="Color used for this member on the calendar">
             </div>
 
-            <fieldset style="margin-top:10px;">
+            <div class="member-profile-tabbar">
+                <button type="button" class="member-profile-tab active" data-member-profile-tab="main" onclick="switchMemberProfileTab('main')">Main</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="orders" onclick="switchMemberProfileTab('orders')">Medication Orders</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="summary" onclick="switchMemberProfileTab('summary')">Current List / Summary</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="monitoring" onclick="switchMemberProfileTab('monitoring')">Monitoring</button>
+            </div>
+
+            <input id="m-current-med-list-data" type="hidden">
+            <input id="m-lab-documents-data" type="hidden">
+
+            <fieldset data-member-section="main" style="margin-top:10px;">
                 <legend>Contact & Medical</legend>
                 <input id="m-providers" type="hidden">
                 <input id="m-diag" type="hidden">
@@ -1112,7 +1122,7 @@
                 </div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="main" style="margin-top:10px;">
                 <legend>Vitals Goals</legend>
                 <div class="field-row">
                     <label>Glucose Goals:</label>
@@ -1146,7 +1156,7 @@
                 </div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Medication &amp; Lab Monitoring</legend>
                 <div id="member-monitoring-list" class="sunken-panel" style="min-height:62px; max-height:180px; overflow-y:auto; background:white;"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
@@ -1154,7 +1164,7 @@
                 </div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>Medication Schedule Calendar</legend>
                 <div class="calendar-controls">
                     <button type="button" onclick="shiftMemberCalendar(-7)">Previous 7 Days</button>
@@ -1165,7 +1175,15 @@
                 <div id="member-calendar-grid" class="member-calendar-grid"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="summary" style="margin-top:10px;">
+                <legend>Current Meds / Supplements List</legend>
+                <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
+                    <button type="button" onclick="openMemberCurrentMedsBuilder()">Create/Edit Current List</button>
+                </div>
+                <div id="member-current-med-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="summary" style="margin-top:10px;">
                 <legend>Medications/Supplements Summary</legend>
                 <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
                     <button type="button" onclick="generateMemberMedicationSummaryPdfReport()">PDF</button>
@@ -1175,32 +1193,48 @@
                 <div id="member-med-review"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>Active Medications</legend>
                 <div id="member-active-meds-list"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>PRN Medications</legend>
                 <div id="member-prn-meds-list"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>Completed Medication Schedules</legend>
                 <div id="member-completed-meds-list"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
+                <legend>Lab PDF Documents</legend>
+                <div class="member-lab-upload">
+                    <div class="lab-upload-heading">
+                        <strong>Save Lab Reports</strong>
+                        <span>Attach PDF lab results to this member's monitoring record.</span>
+                    </div>
+                    <div class="lab-upload-grid">
+                        <label class="field-row-stacked">Document date<input id="member-lab-date" type="date"></label>
+                        <label class="field-row-stacked lab-file-control">PDF file<input id="member-lab-pdf-input" type="file" accept="application/pdf" onchange="addMemberLabPdf(this)"></label>
+                        <label class="field-row-stacked lab-notes-control">Notes<textarea id="member-lab-notes" rows="2" placeholder="e.g. CMP, CBC, INR, lipid panel"></textarea></label>
+                    </div>
+                </div>
+                <div id="member-lab-document-list" class="member-lab-document-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Medication Adherence</legend>
                 <div id="member-adherence-chart"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>Administration Log</legend>
                 <div id="member-admin-log" class="sunken-panel" style="height:500px; overflow-y:scroll; background:white;"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Monitoring Trends</legend>
                 <div id="member-vitals-trends"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:8px;">

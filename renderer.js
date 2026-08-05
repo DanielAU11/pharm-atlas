@@ -2574,6 +2574,262 @@ function setHiddenJson(id, value) {
     if (input) input.value = JSON.stringify(value || []);
 }
 
+function currentMemberMedicationList() {
+    return getHiddenJson('m-current-med-list-data');
+}
+
+function currentMemberLabDocuments() {
+    return getHiddenJson('m-lab-documents-data');
+}
+
+function defaultCurrentMedicationListForMember(memberId) {
+    if (!memberId) return [];
+    const byMed = new Map();
+    db.schedules
+        .filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule))
+        .forEach(schedule => {
+            const med = db.inventory.find(item => item.id === schedule.medId);
+            if (!med || byMed.has(med.id)) return;
+            byMed.set(med.id, {
+                medId: med.id,
+                doseQty: `${formatPrescribedDose(med, schedule.doseQty)}${schedule.doseQty ? `; ${formatQtyForSchedule(schedule, med)}` : ''}`,
+                indication: schedule.indication || '',
+                prescriberId: schedule.prescriberId || med.prescriberId || '',
+                frequency: `${formatFrequency(schedule)} ${getScheduleTimes(schedule).join(', ') || 'PRN'}`.trim()
+            });
+        });
+    return [...byMed.values()];
+}
+
+window.switchMemberProfileTab = function(tab = 'main') {
+    document.querySelectorAll('.member-profile-tab').forEach(button => {
+        button.classList.toggle('active', button.dataset.memberProfileTab === tab);
+    });
+    document.querySelectorAll('[data-member-section]').forEach(section => {
+        section.style.display = section.dataset.memberSection === tab ? '' : 'none';
+    });
+};
+
+function renderMemberCurrentMedicationList() {
+    const container = document.getElementById('member-current-med-list');
+    if (!container) return;
+    const rows = currentMemberMedicationList()
+        .map(item => {
+            const med = db.inventory.find(candidate => candidate.id === item.medId);
+            if (!med) return '';
+            const prescriber = item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med);
+            return `<tr>
+                <td><strong>${escapeHtml(med.name)}</strong></td>
+                <td>${escapeHtml(item.doseQty || '')}</td>
+                <td>${escapeHtml(item.indication || 'Not specified')}</td>
+                <td>${escapeHtml(prescriber || 'Not specified')}</td>
+                <td>${escapeHtml(item.frequency || '')}</td>
+            </tr>`;
+        })
+        .filter(Boolean)
+        .join('');
+    container.innerHTML = `
+        <table class="win98-report-table current-med-list-table">
+            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Prescriber</th><th>Frequency</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="5">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
+        </table>`;
+}
+
+window.filterCurrentMedsBuilder = function() {
+    const query = String(document.getElementById('current-meds-builder-search')?.value || '').trim().toLowerCase();
+    document.querySelectorAll('.current-meds-builder-row').forEach(row => {
+        row.style.display = !query || row.dataset.search.includes(query) ? '' : 'none';
+    });
+};
+
+window.currentMedsBuilderSelectionChanged = function(input) {
+    input?.closest('.current-meds-builder-row')?.classList.toggle('selected', !!input.checked);
+    renderCurrentMedsBuilderPreview();
+};
+
+window.removeCurrentMedsBuilderSelection = function(medId) {
+    const row = [...document.querySelectorAll('#action-modal-body .current-meds-builder-row')]
+        .find(candidate => candidate.dataset.medId === medId);
+    const input = row?.querySelector('input[name="currentMedIds"]');
+    if (!input) return;
+    input.checked = false;
+    currentMedsBuilderSelectionChanged(input);
+};
+
+window.renderCurrentMedsBuilderPreview = function() {
+    const body = document.getElementById('action-modal-body');
+    const panel = document.getElementById('current-meds-builder-preview');
+    if (!body || !panel) return;
+    const selectedRows = [...body.querySelectorAll('.current-meds-builder-row')]
+        .filter(row => row.querySelector('input[name="currentMedIds"]')?.checked);
+    panel.innerHTML = selectedRows.length ? selectedRows.map(row => {
+        const medId = row.dataset.medId || '';
+        const name = row.querySelector('.current-meds-builder-name strong')?.textContent || 'Medication';
+        const dose = row.querySelector('input[name="currentDoseQty"]')?.value.trim() || 'Dose not entered';
+        const indication = row.querySelector('input[name="currentIndication"]')?.value.trim() || 'Use not entered';
+        const frequency = row.querySelector('input[name="currentFrequency"]')?.value.trim() || 'Frequency not entered';
+        const prescriberSelect = row.querySelector('select[name="currentPrescriberId"]');
+        const prescriber = prescriberSelect?.selectedOptions?.[0]?.textContent || 'Optional';
+        return `<div class="current-meds-preview-item">
+            <div class="current-meds-preview-copy">
+                <strong>${escapeHtml(name)}</strong>
+                <small>${escapeHtml(dose)} | ${escapeHtml(frequency)}</small>
+                <small>Used for: ${escapeHtml(indication)}</small>
+                <small>Prescriber: ${escapeHtml(prescriber)}</small>
+            </div>
+            <button type="button" class="inventory-builder-remove" onclick="removeCurrentMedsBuilderSelection('${escapeHtml(medId)}')" title="Remove from selected list">X</button>
+        </div>`;
+    }).join('') : '<div class="empty-state">Checked medications will appear here.</div>';
+};
+
+window.openMemberCurrentMedsBuilder = async function() {
+    let seedList = currentMemberMedicationList();
+    if (seedList.length === 0 && currentEditingMemberId) {
+        seedList = defaultCurrentMedicationListForMember(currentEditingMemberId);
+    }
+    const existing = new Map(seedList.map(item => [item.medId, item]));
+    const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    const memberProviderIds = member ? new Set(memberPrescriberIds(member)) : new Set();
+    const memberPrescriberOptions = selected => {
+        const options = db.prescribers
+            .filter(prescriber => memberProviderIds.has(prescriber.id))
+            .sort((a, b) => prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(prescriber => `<option value="${escapeHtml(prescriber.id)}" ${prescriber.id === selected ? 'selected' : ''}>${escapeHtml(prescriberDisplayName(prescriber))}</option>`)
+            .join('');
+        return `<option value="">Optional</option>${options}`;
+    };
+    const inventoryRows = db.inventory
+        .slice()
+        .sort((a, b) => inventoryDisplayName(a).localeCompare(inventoryDisplayName(b), undefined, { sensitivity: 'base' }))
+        .map(med => {
+            const saved = existing.get(med.id) || {};
+            const inputId = `current-med-${med.id}`;
+            const searchText = `${med.name} ${formatMedStrength(med)} ${formatInventoryUnits(med)}`.toLowerCase();
+            return `<div class="formulary-item inventory-builder-source-item current-meds-builder-row ${saved.medId ? 'selected' : ''}" data-med-id="${escapeHtml(med.id)}" data-search="${escapeHtml(searchText)}">
+                <input id="${escapeHtml(inputId)}" name="currentMedIds" type="checkbox" value="${escapeHtml(med.id)}" ${saved.medId ? 'checked' : ''} onchange="currentMedsBuilderSelectionChanged(this)">
+                <label class="current-meds-builder-name" for="${escapeHtml(inputId)}">
+                    <span><strong>${escapeHtml(med.name)}</strong><small>${escapeHtml(formatMedStrength(med))} | ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</small></span>
+                </label>
+                <div class="current-meds-builder-fields">
+                    <label>Dose / Qty<input name="currentDoseQty" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. 1 tablet, 5 mL, 2 puffs" value="${escapeHtml(saved.doseQty || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Used For<input name="currentIndication" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. allergies, migraine" value="${escapeHtml(saved.indication || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Prescriber<select name="currentPrescriberId" data-med-id="${escapeHtml(med.id)}" onchange="renderCurrentMedsBuilderPreview()">${memberPrescriberOptions(saved.prescriberId || '')}</select></label>
+                    <label>Frequency<input name="currentFrequency" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. daily, PRN, weekly" value="${escapeHtml(saved.frequency || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                </div>
+            </div>`;
+        })
+        .join('');
+    const modalPromise = showActionModal('Create/Edit Current Meds & Supplements List', `
+        <div data-action-modal-size="wide" class="current-meds-builder inventory-builder-layout">
+            <div class="current-meds-builder-source inventory-builder-source">
+                <div class="current-meds-builder-toolbar">
+                    <label>Search inventory</label>
+                    <input id="current-meds-builder-search" type="text" placeholder="Find medication or supplement..." oninput="filterCurrentMedsBuilder()">
+                </div>
+                <div class="current-meds-builder-list">${inventoryRows || '<div class="empty-state">No inventory items available.</div>'}</div>
+            </div>
+            <div class="current-meds-builder-selected">
+                <div class="inventory-builder-panel-title">Selected medications</div>
+                <div id="current-meds-builder-preview" class="inventory-builder-panel"></div>
+            </div>
+        </div>
+    `, 'Save List', body => {
+        const selectedIds = new Set([...body.querySelectorAll('input[name="currentMedIds"]:checked')].map(input => input.value));
+        return [...selectedIds].map(medId => ({
+            medId,
+            doseQty: body.querySelector(`input[name="currentDoseQty"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+            indication: body.querySelector(`input[name="currentIndication"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+            prescriberId: body.querySelector(`select[name="currentPrescriberId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
+            frequency: body.querySelector(`input[name="currentFrequency"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || ''
+        }));
+    });
+    renderCurrentMedsBuilderPreview();
+    const result = await modalPromise;
+    if (!result) return;
+    setHiddenJson('m-current-med-list-data', result);
+    if (member) {
+        member.currentMedicationList = result;
+        await sync();
+    }
+    renderMemberCurrentMedicationList();
+};
+
+function renderMemberLabDocuments() {
+    const container = document.getElementById('member-lab-document-list');
+    if (!container) return;
+    const docs = currentMemberLabDocuments();
+    container.innerHTML = docs.length
+        ? docs.map(doc => `<div class="member-lab-document-card">
+            <div>
+                <strong>${escapeHtml(doc.name || 'Lab PDF')}</strong>
+                <div class="form-help">${escapeHtml(doc.date || 'No date')}${doc.notes ? ` | ${escapeHtml(doc.notes)}` : ''}</div>
+            </div>
+            <div class="field-row">
+                <button type="button" onclick="previewMemberLabPdf('${escapeHtml(doc.id)}')">Preview PDF</button>
+                <button type="button" onclick="removeMemberLabPdf('${escapeHtml(doc.id)}')">Remove</button>
+            </div>
+        </div>`).join('')
+        : '<div class="empty-state">No lab PDFs saved for this member.</div>';
+}
+
+window.addMemberLabPdf = async function(input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')) {
+        await appAlert('Select a PDF lab document.');
+        input.value = '';
+        return;
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+    const doc = {
+        id: `lab_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: file.name || 'Lab PDF',
+        date: document.getElementById('member-lab-date')?.value || localDateKey(),
+        notes: document.getElementById('member-lab-notes')?.value.trim() || '',
+        dataUrl,
+        addedAt: new Date().toISOString()
+    };
+    const docs = [doc, ...currentMemberLabDocuments()];
+    setHiddenJson('m-lab-documents-data', docs);
+    const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    if (member) {
+        member.labDocuments = docs;
+        await sync();
+    }
+    if (input) input.value = '';
+    const notes = document.getElementById('member-lab-notes');
+    if (notes) notes.value = '';
+    renderMemberLabDocuments();
+};
+
+window.previewMemberLabPdf = async function(docId) {
+    const doc = currentMemberLabDocuments().find(item => item.id === docId);
+    if (!doc) return;
+    await showActionModal(`Lab PDF Preview: ${doc.name || 'Document'}`, `
+        <div data-action-modal-size="wide" class="lab-pdf-preview-shell">
+            <div class="form-help">${escapeHtml(doc.date || 'No date')}${doc.notes ? ` | ${escapeHtml(doc.notes)}` : ''}</div>
+            <iframe class="lab-pdf-preview-frame" src="${escapeHtml(doc.dataUrl)}"></iframe>
+        </div>
+    `, 'Close');
+};
+
+window.removeMemberLabPdf = async function(docId) {
+    if (!await appConfirm('Remove this lab PDF from the member profile?', 'Remove Lab PDF')) return;
+    const docs = currentMemberLabDocuments().filter(item => item.id !== docId);
+    setHiddenJson('m-lab-documents-data', docs);
+    const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    if (member) {
+        member.labDocuments = docs;
+        await sync();
+    }
+    renderMemberLabDocuments();
+};
+
 function renderMemberCareLists() {
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
     const diagnoses = getHiddenJson('m-diagnoses-data');
@@ -3377,6 +3633,8 @@ async function sync() {
         renderMemberAdherenceProfile(currentEditingMemberId);
         renderMemberMonitoringProfiles(currentEditingMemberId);
         renderMemberPrnMedicationOrders(currentEditingMemberId);
+        renderMemberCurrentMedicationList();
+        renderMemberLabDocuments();
         renderMemberMedicationReview(currentEditingMemberId);
         renderMemberMedicationTimelines();
         renderMemberCalendar(currentEditingMemberId);
@@ -3584,6 +3842,8 @@ function collectMemberFormData() {
             medicationReminders: document.getElementById('m-notify-enabled')?.checked !== false,
             emailReminders: document.getElementById('m-email-reminders')?.checked === true
         },
+        currentMedicationList: currentMemberMedicationList(),
+        labDocuments: currentMemberLabDocuments(),
         calendarColor: document.getElementById('m-calendar-color').value || '#000080',
         vitalGoals,
         name: `${firstName} ${lastName}`
@@ -3660,17 +3920,22 @@ window.openMemberModal = async function(id = null) {
     };
 
     // 1. Clear all fields safely
-    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-providers', 'm-diag', 'm-addr', 'm-phone', 'm-email', 'm-meds'];
+    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-providers', 'm-diag', 'm-addr', 'm-phone', 'm-email', 'm-meds', 'member-lab-notes'];
     fields.forEach(f => safeSet(f, ''));
+    safeSet('member-lab-date', localDateKey());
     setHiddenJson('m-prescriber-ids-data', []);
     setHiddenJson('m-diagnoses-data', []);
     setHiddenJson('m-allergies-data', []);
+    setHiddenJson('m-current-med-list-data', []);
+    setHiddenJson('m-lab-documents-data', []);
     const notifyEnabled = document.getElementById('m-notify-enabled');
     const emailReminders = document.getElementById('m-email-reminders');
     if (notifyEnabled) notifyEnabled.checked = true;
     if (emailReminders) emailReminders.checked = false;
     renderMemberCareLists();
     renderMemberMonitoringProfiles(null);
+    renderMemberCurrentMedicationList();
+    renderMemberLabDocuments();
 
     const activeMedsContainer = document.getElementById('member-active-meds-list');
     if (activeMedsContainer) activeMedsContainer.innerHTML = '';
@@ -3707,8 +3972,12 @@ window.openMemberModal = async function(id = null) {
             setHiddenJson('m-prescriber-ids-data', memberPrescriberIds(m));
             setHiddenJson('m-diagnoses-data', normalizeMemberDiagnoses(m));
             setHiddenJson('m-allergies-data', normalizeMemberAllergies(m));
+            setHiddenJson('m-current-med-list-data', Array.isArray(m.currentMedicationList) ? m.currentMedicationList : []);
+            setHiddenJson('m-lab-documents-data', Array.isArray(m.labDocuments) ? m.labDocuments : []);
             renderMemberCareLists();
             renderMemberMonitoringProfiles(m.id);
+            renderMemberCurrentMedicationList();
+            renderMemberLabDocuments();
             setMemberGoalFields(m);
 
             // 3. Populate Active Meds
@@ -3847,6 +4116,8 @@ window.openMemberModal = async function(id = null) {
         if (adherence) adherence.innerHTML = '<div style="font-size:11px;">Save member before tracking adherence.</div>';
         const medReview = document.getElementById('member-med-review');
         if (medReview) medReview.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before viewing medication/supplement summary.</div>';
+        renderMemberCurrentMedicationList();
+        renderMemberLabDocuments();
         const adminLog = document.getElementById('member-admin-log');
         if (adminLog) adminLog.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before recording administrations.</div>';
         const memberCalendar = document.getElementById('member-calendar-grid');
@@ -3866,6 +4137,7 @@ window.openMemberModal = async function(id = null) {
         });
         activeMemberTaskId = requestedTaskId;
         enhanceButtonIcons(modal);
+        switchMemberProfileTab('main');
     }
 };
 

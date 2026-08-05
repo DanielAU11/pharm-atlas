@@ -623,6 +623,267 @@ button {
     font-weight: bold;
 }
 
+.member-profile-tabbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-top: 10px;
+    border-bottom: 2px inset #ffffff;
+    padding-left: 4px;
+}
+
+.member-profile-tab {
+    min-height: 26px;
+    padding: 4px 12px;
+    background: #d8d8d8;
+}
+
+.member-profile-tab.active {
+    background: #e6f1ff;
+    color: #000080;
+    font-weight: bold;
+    border-bottom-color: #e6f1ff;
+}
+
+.current-med-list-table td:first-child strong {
+    color: #000080;
+}
+
+.current-meds-builder-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(240px, 1fr);
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 8px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.current-meds-builder-list {
+    max-height: 520px;
+    overflow: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 2px;
+}
+
+.current-meds-builder-row {
+    grid-template-areas:
+        "check label label label label"
+        ". fields fields fields fields";
+}
+
+.inventory-builder-source .current-meds-builder-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+        "check label"
+        ". fields";
+}
+
+.current-meds-builder-row.selected,
+.current-meds-builder-row:has(input[name="currentMedIds"]:checked) {
+    background: #e6ffe6;
+    outline: none;
+}
+
+.current-meds-builder-name {
+    grid-area: label;
+}
+
+.current-meds-builder-name strong,
+.current-meds-builder-name small {
+    display: block;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: break-word;
+    line-height: 1.25;
+}
+
+.current-meds-builder-name small {
+    color: #202020;
+    font-weight: normal;
+    margin-top: 2px;
+}
+
+.current-meds-builder-fields {
+    grid-area: fields;
+    display: none;
+    grid-template-columns: minmax(130px, 0.75fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(150px, 0.9fr);
+    gap: 7px;
+    min-width: 0;
+    margin: 4px 0 2px 0;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #f3f3f3;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.current-meds-builder-row.selected .current-meds-builder-fields,
+.current-meds-builder-row:has(input[name="currentMedIds"]:checked) .current-meds-builder-fields {
+    display: grid;
+}
+
+.current-meds-builder-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    min-width: 0;
+}
+
+.current-meds-builder-fields input,
+.current-meds-builder-fields select {
+    width: 100%;
+}
+
+.current-meds-builder-selected {
+    min-width: 0;
+}
+
+.current-meds-preview-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 22px;
+    gap: 6px;
+    align-items: start;
+    border-bottom: 1px dotted #c0c0c0;
+    padding: 5px 0;
+}
+
+.current-meds-preview-item:last-child {
+    border-bottom: 0;
+}
+
+.current-meds-preview-copy {
+    min-width: 0;
+}
+
+.current-meds-preview-copy strong {
+    display: block;
+    color: #000080;
+    overflow-wrap: break-word;
+}
+
+.current-meds-preview-copy small {
+    display: block;
+    line-height: 1.25;
+}
+
+.current-meds-preview-item .inventory-builder-remove {
+    min-width: 20px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: #800000;
+    font-weight: bold;
+}
+
+.member-lab-upload {
+    display: grid;
+    grid-template-columns: minmax(190px, 250px) minmax(420px, 1fr);
+    gap: 10px;
+    align-items: stretch;
+    margin-bottom: 8px;
+    border: 2px inset #ffffff;
+    background: #dcecff;
+    padding: 8px;
+}
+
+.lab-upload-heading {
+    border: 2px outset #ffffff;
+    background: #fff6a5;
+    padding: 8px;
+    color: #000080;
+}
+
+.lab-upload-heading strong,
+.lab-upload-heading span {
+    display: block;
+}
+
+.lab-upload-heading span {
+    margin-top: 4px;
+    color: #202020;
+    line-height: 1.35;
+}
+
+.lab-upload-grid {
+    display: grid;
+    grid-template-columns: 150px minmax(260px, 360px) minmax(0, 1fr);
+    gap: 8px;
+    align-items: end;
+}
+
+.lab-upload-grid .field-row-stacked {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.lab-upload-grid label {
+    color: #000080;
+    font-weight: bold;
+}
+
+.lab-notes-control {
+    grid-column: 1 / -1;
+}
+
+.lab-notes-control textarea {
+    width: 100%;
+    min-height: 44px;
+    resize: vertical;
+}
+
+.lab-file-control input {
+    width: 100%;
+}
+
+.member-lab-document-list {
+    display: grid;
+    gap: 6px;
+}
+
+.member-lab-document-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 6px;
+}
+
+.member-lab-document-card strong {
+    color: #000080;
+}
+
+.lab-pdf-preview-frame {
+    width: 100%;
+    height: min(70vh, 720px);
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+@media (max-width: 940px) {
+    .current-meds-builder-head {
+        display: none;
+    }
+
+    .current-meds-builder-row,
+    .member-lab-upload,
+    .lab-upload-grid,
+    .member-lab-document-card {
+        grid-template-columns: 1fr;
+    }
+
+    .lab-notes-control {
+        grid-column: auto;
+    }
+}
+
 .compound-layout {
     display: grid;
     grid-template-columns: minmax(520px, 1.05fr) minmax(430px, 0.95fr);
@@ -1235,6 +1496,10 @@ button {
     width: min(900px, calc(100vw - 36px));
 }
 
+.action-modal-window-wide:has(.current-meds-builder) {
+    width: min(1120px, calc(100vw - 36px));
+}
+
 .inventory-workflow-summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -1387,6 +1652,28 @@ button {
 
 .inventory-builder-source .formulary-item > label {
     grid-area: label;
+}
+
+.inventory-builder-source .formulary-item.current-meds-builder-row {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-areas:
+        "check label"
+        ". fields" !important;
+}
+
+.inventory-builder-source .formulary-item.current-meds-builder-row > input[type="checkbox"] {
+    grid-area: check;
+}
+
+.inventory-builder-source .formulary-item.current-meds-builder-row > .current-meds-builder-name {
+    grid-area: label;
+}
+
+.inventory-builder-source .formulary-item.current-meds-builder-row > .current-meds-builder-fields {
+    grid-area: fields;
+    justify-self: stretch;
+    width: 100%;
+    max-width: none;
 }
 
 .inventory-builder-source .formulary-item > input[type="text"],
