@@ -8,6 +8,7 @@ const emptyDb = {
     vitals: [],
     orderSets: [],
     prescribers: [],
+    pharmacies: [],
     reminderLog: [],
     prepackQueues: [],
     formularyItems: [],
@@ -61,11 +62,58 @@ const dosageFormDefinitions = {
     Other: { label: 'Unit Dose', stockUnit: 'unit', adminUnit: 'unit', perUnit: 'unit', strengthStyle: 'per-unit' }
 };
 const glucoseGoalPresets = {
-    diabetic: { low: 70, high: 180 },
-    nondiabetic: { low: 70, high: 140 },
-    custom: { low: 70, high: 180 }
+    diabetic: {
+        low: 80,
+        high: 180,
+        note: 'ADA-style adult diabetes tracking: before-meal lows are commonly watched near 80-130; post-meal peaks are commonly watched below 180.'
+    },
+    diabetic_fasting: {
+        low: 80,
+        high: 130,
+        note: 'Before-meal diabetes range commonly used for many nonpregnant adults. Individual goals may be higher or lower.'
+    },
+    nondiabetic: {
+        low: 70,
+        high: 140,
+        note: 'General non-diabetic tracking range. The red 70 mg/dL hypoglycemia reference line still appears on glucose graphs.'
+    },
+    custom: {
+        low: 70,
+        high: 180,
+        note: 'Custom goal range. Use the patient-specific goal from the clinician when one is available.'
+    }
 };
-const defaultBpGoals = { systolicLow: 90, systolicHigh: 130, diastolicLow: 60, diastolicHigh: 80 };
+const bpGoalPresets = {
+    treated: {
+        systolicLow: 90,
+        systolicHigh: 130,
+        diastolicLow: 60,
+        diastolicHigh: 80,
+        note: 'Common treated BP watch range. Many adults with risk factors are tracked against goals around less than 130/80 when appropriate.'
+    },
+    normal: {
+        systolicLow: 90,
+        systolicHigh: 120,
+        diastolicLow: 60,
+        diastolicHigh: 80,
+        note: 'Normal BP category is below 120 systolic and below 80 diastolic.'
+    },
+    stage2_alert: {
+        systolicLow: 90,
+        systolicHigh: 140,
+        diastolicLow: 60,
+        diastolicHigh: 90,
+        note: 'Stage 2 high BP begins around 140 systolic or 90 diastolic. Use this as a looser alert threshold only if intended.'
+    },
+    custom: {
+        systolicLow: 90,
+        systolicHigh: 130,
+        diastolicLow: 60,
+        diastolicHigh: 80,
+        note: 'Custom BP goal range. Match the clinician plan when one exists.'
+    }
+};
+const defaultBpGoals = { preset: 'treated', ...bpGoalPresets.treated };
 const defaultHrGoals = { low: 60, high: 100 };
 const defaultWeightGoals = { low: '', high: '', unit: 'lb' };
 let memberTimelineStart = null;
@@ -81,6 +129,8 @@ let pendingModalMedImage = null;
 let modalBarcodeCodes = [];
 let orderSetRowCounter = 0;
 let lastDataConflictBackup = '';
+let activeProgressNotePreviewId = null;
+let pendingProgressNoteAttachments = [];
 
 window.addEventListener('DOMContentLoaded', async () => {
     const loadedData = await window.api.load();
@@ -999,21 +1049,180 @@ window.useLocalDesktopDataFolder = async function() {
     }
 };
 
+window.setupGuideGoTo = function(tabName) {
+    document.getElementById('action-modal-x')?.click();
+    switchTab(tabName);
+};
+
 window.openFirstRunSetupGuide = async function() {
+    const setupCards = [
+        {
+            title: '1. Members',
+            ready: (db.family || []).length > 0,
+            text: 'Create each person, then add allergies, diagnoses, providers, pharmacies, goals, and calendar color.',
+            tab: 'family',
+            button: 'Open Members'
+        },
+        {
+            title: '2. Inventory',
+            ready: (db.inventory || []).length > 0,
+            text: 'Add products with formulation, stock unit, expiration, barcode, assignment, and storage details.',
+            tab: 'inventory',
+            button: 'Open Inventory'
+        },
+        {
+            title: '3. Regimens',
+            ready: (db.orderSets || []).length > 0,
+            text: 'Build reusable or assigned regimens for repeated medication groups.',
+            tab: 'order-sets',
+            button: 'Open Regimens'
+        },
+        {
+            title: '4. Scheduling',
+            ready: (db.schedules || []).length > 0,
+            text: 'Stage medications, review pending items, then schedule them to a member profile.',
+            tab: 'schedules',
+            button: 'Schedule'
+        },
+        {
+            title: '5. Labels & Prepacks',
+            ready: (db.prepackQueues || []).length > 0,
+            text: 'Preview labels, calibrate the printer, and use Prepackage Meds for scan/manual checks.',
+            tab: 'prepackage',
+            button: 'Open Prepacks'
+        },
+        {
+            title: '6. Safety Checks',
+            ready: dataHealthIssues().length === 0,
+            text: 'Run Data Health Check, review Audit Trail, and make backups before major changes.',
+            tab: 'dashboard',
+            button: 'Dashboard'
+        }
+    ];
     await showActionModal('PharmAtlas Setup Guide', `
-        <div class="setup-guide">
-            <div class="setup-step"><strong>1. Add members</strong><span>Create each person profile, then add allergies, intolerances, diagnoses, providers, goals, and preferred calendar color.</span></div>
-            <div class="setup-step"><strong>2. Add inventory</strong><span>Enter medication name, strength, formulation, stock unit, expiration, storage, assignment, barcode, and stock tracking mode.</span></div>
-            <div class="setup-step"><strong>3. Schedule medications</strong><span>Stage orders in Pending Scheduled Medications, review safety warnings, then Schedule Medications.</span></div>
-            <div class="setup-step"><strong>4. Print labels / prepackage</strong><span>Use individual labels, date-range labels, or Prepackage Meds when preparing doses ahead of time.</span></div>
-            <div class="setup-step"><strong>5. Document doses</strong><span>Use Today View, member profiles, calendar blocks, or regimen administer buttons. Late, early, skipped, and missed doses stay in the record.</span></div>
-            <div class="setup-step"><strong>6. Maintain data</strong><span>Use Backup Data, Desktop Sync Folder, Data Health Check, Audit Trail, and reports before major workflow changes.</span></div>
-            <div class="important-note"><strong>Safety note:</strong> PharmAtlas organizes medication information and documentation. It does not replace prescriber, pharmacist, emergency, or clinical judgment.</div>
+        <div class="setup-guide-panel">
+            ${setupCards.map(card => `
+                <div class="setup-guide-card ${card.ready ? 'ready' : ''}">
+                    <strong>${card.ready ? 'Done - ' : ''}${escapeHtml(card.title)}</strong>
+                    <small>${escapeHtml(card.text)}</small>
+                    <button type="button" onclick="setupGuideGoTo('${escapeHtml(card.tab)}')">${escapeHtml(card.button)}</button>
+                </div>
+            `).join('')}
+            <div class="setup-guide-card">
+                <strong>Printer calibration</strong>
+                <small>Print one test label before changing label rolls, printers, or scaling.</small>
+                <button type="button" onclick="document.getElementById('action-modal-x')?.click(); openPrinterCalibration()">Open Calibration</button>
+            </div>
+            <div class="setup-guide-card ready">
+                <strong>Safety note</strong>
+                <small>PharmAtlas organizes medication information and documentation. It does not replace prescriber, pharmacist, emergency, or clinical judgment.</small>
+            </div>
         </div>
     `, 'Close');
     db.settings = { ...(db.settings || {}), setupGuideSeen: true };
     await window.api.save(db);
 };
+
+window.openPrinterCalibration = function() {
+    const labelClass = getLabelClass([
+        'PharmAtlas Label Test',
+        'Border, bold text, small text, and QR/scanner line should be readable.',
+        'ABCDEFGHIJKLM 1234567890',
+        'If clipped, adjust printer scale/margins or label roll alignment.'
+    ], 5);
+    previewLabelHtml(`
+        <div class="${labelClass}">
+            <div class="label-date">CALIBRATION LABEL</div>
+            <div class="label-title">PharmAtlas Label Test</div>
+            <div class="label-small"><b>Top / bottom / left / right border visible?</b></div>
+            <div class="label-small">Small text: ABCDEFGHIJKLM 1234567890</div>
+            <div class="label-small">Scanner line: PA-CAL-0001-TEST</div>
+            <div class="calibration-label-mark">Print one label. If any edge is cut off, recalibrate the printer before medication labels.</div>
+        </div>
+    `);
+};
+
+const guidedHelpTips = [
+    { selector: '#select-member', text: 'Select the member first. This filters optional prescribers, assignment checks, allergies/intolerances, linked medication choices, and the final profile destination.' },
+    { selector: '#med-search-input', text: 'Search inventory by medication or supplement name, then choose the exact strength from the strength dropdown. If the item is not in inventory yet, add it in Inventory first.' },
+    { selector: '#sched-strength-display', text: 'Pick the package strength/formulation that matches the product on hand. The calculated dose uses this selection plus the Give Qty field.' },
+    { selector: '#sched-dose-qty', text: 'Enter how many tablets, capsules, mL, sprays, drops, patches, applications, or other administration units are given each scheduled time.' },
+    { selector: '#sched-calculated-dose', text: 'This read-only preview shows the actual dose delivered from the selected strength and quantity. Verify it before adding to pending medications.' },
+    { selector: '#sched-freq', text: 'Frequency controls future calendar blocks, date-range labels, missed-dose logic, and every-X-hours previews. For one-time doses, no end date is needed.' },
+    { selector: '#sched-weekday-container', text: 'For weekly-style frequencies, select the days that apply. If a late dose should shift the future pattern, edit the administration as late so PharmAtlas can adjust the schedule.' },
+    { selector: '#sched-time-fields', text: 'Administration times should reflect when the dose is intended to be due. BID/TID/QID and every-X-hours orders can have multiple times on the same line/label.' },
+    { selector: '#sched-indication', text: 'Used for / Indication is optional, but helpful on summaries, caregiver handoffs, and medication reviews.' },
+    { selector: '#sched-instructions', text: 'Use instructions for patient-facing directions such as take with food, apply to affected area, shake well, or separate from another product.' },
+    { selector: '#pending-schedule-list', text: 'Pending medications are not active yet. Review, modify, link medications, or remove mistakes here before clicking Schedule Medications.' },
+    { selector: '#inventory-search', text: 'Search the inventory quickly by name, strength, barcode, assignment, storage, notes, or formulation. Clear the search to return to the full alphabetized list.' },
+    { selector: '#med-prescriber', text: 'Optional prescriber attached to this inventory item. Member-specific provider lists are managed from each member profile.' },
+    { selector: '#med-pharmacy', text: 'Optional preferred pharmacy/source for this item. Pharmacy names stay out of thermal labels but can be used in summaries and reorder workflows.' },
+    { selector: '#med-assignment-mode', text: 'Assignment limits who can use or schedule this item. Use selected members for patient-specific medications, or all members for shared supplies.' },
+    { selector: '#med-barcode-code', text: 'Scan, paste, or generate a QR/barcode. Codes must be unique unless they are aliases for the same medication profile.' },
+    { selector: '#med-formulation', text: 'Formulation drives stock tracking. Tablets/capsules reduce by dose quantity; liquids/sprays/drops reduce by volume/count; many topical containers reduce when marked finished.' },
+    { selector: '#med-track-mode', text: 'Choose whether inventory is tracked by individual dose units or by containers. This affects Take, Administer, Med Kits, prepacks, and stock forecasts.' },
+    { selector: '#med-stock-unit', text: 'Stock unit is how the inventory count is displayed, such as tablet, capsule, mL, bottle, tube, syringe, packet, spray, or drop.' },
+    { selector: '#med-administration-unit', text: 'Give/apply unit is what the user documents per administration, such as tablet, mL, spray, drop, patch, application, or suppository.' },
+    { selector: '#prepack-queue-list', text: 'Prepack queues hold label runs until you are ready to prepare them. Scan labels when possible or use manual completion if no scanner is available.' },
+    { selector: '#prepack-workspace', text: 'The workspace verifies each queued item. Correct scans turn green and completed prepacks move to the completed list; changed medications may require updated labels.' },
+    { selector: '#recipe-name', text: 'Recipe name is the reusable formula name. Saved recipes can later be prepared, labeled, and added to inventory as compounded preparations.' },
+    { selector: '#recipe-final-name', text: 'Final product name is what will appear in inventory and on the compounded bottle label after preparation.' },
+    { selector: '#recipe-ingredients', text: 'Ingredients can come from inventory or be custom non-inventory components. Inventory ingredients can be scanned and subtracted during preparation.' },
+    { selector: '#recipe-prep-panel', text: 'Use the prep panel to verify ingredients, enter prepared quantity, beyond-use date, optional lot/batch, and preview the bottle label before adding to inventory.' },
+    { selector: '#vital-member', text: 'Select the member before entering readings so graphs, goals, PDFs, and provider-send reports stay attached to the correct profile.' },
+    { selector: '#vital-type', text: 'Choose the monitoring type. PharmAtlas supports vitals and medication/lab monitoring such as INR, drug levels, and custom therapeutic goals.' },
+    { selector: '#member-calendar-grid', text: 'The member calendar mirrors scheduled doses for this person. Upcoming doses turn orange near due time, overdue doses turn red, and completed days turn green.' },
+    { selector: '#member-active-meds', text: 'Active medications show timelines, linked medication groups, labels, administration, discontinuation, and order-specific audit history.' },
+    { selector: '#member-med-review', text: 'Medication/Supplements Summary is a practical current list for caregivers or providers. Choose what medications and columns to include before printing or saving PDF.' },
+    { selector: '#m-progress-note-template', text: 'Templates insert reusable diary structures. Built-in templates can be copied, and custom templates can be edited with the rich text toolbar.' },
+    { selector: '#m-progress-note-editor', text: 'Write searchable progress notes here. Use flags, tags, scales, links, attachments, and private caregiver notes when helpful.' },
+    { selector: '#m-progress-note-tags', text: 'Tags make diary entries easier to filter later, such as migraine, sleep, side-effect, refill, provider-call, lab, pain, or appetite.' },
+    { selector: '#m-lab-document-file', text: 'Attach lab PDFs to a member profile for future reference. Use the preview to confirm the correct file before relying on it.' },
+    { selector: '#data-health-summary', text: 'Data Health Check looks for orphaned schedules, duplicate barcodes, missing times, and stock problems. Use Repair Safe Issues for low-risk automatic fixes.' },
+    { selector: '#history-log', text: 'Recent Activity Log is a simple timeline of app actions. The Audit Trail is more structured and better for safety-relevant review.' }
+];
+
+window.toggleGuidedHelp = async function(enabled = null) {
+    const nextEnabled = enabled === null ? !!db.settings?.guidedHelpDisabled : !!enabled;
+    db.settings = { ...(db.settings || {}), guidedHelpDisabled: !nextEnabled };
+    await window.api.save(db);
+    renderGuidedHelpTips();
+};
+
+function updateGuidedHelpToggleControl() {
+    const button = document.getElementById('guided-help-toggle-button');
+    if (!button) return;
+    const enabled = !db.settings?.guidedHelpDisabled;
+    button.textContent = enabled ? 'Hover help: On' : 'Hover help: Off';
+    button.classList.toggle('guided-help-off', !enabled);
+    button.title = enabled
+        ? 'Click to hide the small question-mark helper tips.'
+        : 'Click to show small question-mark helper tips throughout the app.';
+}
+
+function renderGuidedHelpTips(root = document) {
+    if (!root?.querySelectorAll) return;
+    root.querySelectorAll('.guide-tip').forEach(tip => tip.remove());
+    root.querySelectorAll('[data-guide-tip-attached="true"]').forEach(target => {
+        delete target.dataset.guideTipAttached;
+    });
+    updateGuidedHelpToggleControl();
+    const enabled = !db.settings?.guidedHelpDisabled;
+    if (!enabled) return;
+    guidedHelpTips.forEach(tip => {
+        const target = root.querySelector(tip.selector);
+        if (!target || target.dataset.guideTipAttached === 'true') return;
+        const bubble = document.createElement('span');
+        bubble.className = 'guide-tip';
+        bubble.tabIndex = 0;
+        bubble.textContent = '?';
+        bubble.dataset.tip = tip.text;
+        bubble.setAttribute('aria-label', tip.text);
+        const wrapper = target.closest('label') || target;
+        wrapper.insertAdjacentElement('afterend', bubble);
+        target.dataset.guideTipAttached = 'true';
+    });
+}
 
 function maybeOpenFirstRunSetupGuide() {
     const isEmptyStart = (db.family || []).length === 0 && (db.inventory || []).length === 0;
@@ -1204,12 +1413,47 @@ function getMemberGoals(member) {
     };
 }
 
+function updateGoalReferenceNotes() {
+    const glucosePreset = document.getElementById('m-glucose-preset')?.value || 'custom';
+    const bpPreset = document.getElementById('m-bp-preset')?.value || 'custom';
+    const glucoseNote = document.getElementById('m-glucose-goal-note');
+    const bpNote = document.getElementById('m-bp-goal-note');
+    if (glucoseNote) glucoseNote.textContent = glucoseGoalPresets[glucosePreset]?.note || glucoseGoalPresets.custom.note;
+    if (bpNote) bpNote.textContent = bpGoalPresets[bpPreset]?.note || bpGoalPresets.custom.note;
+}
+
+window.markGoalPresetCustom = function(selectId) {
+    const select = document.getElementById(selectId);
+    if (select) select.value = 'custom';
+    updateGoalReferenceNotes();
+};
+
 window.applyGlucosePreset = function() {
     const preset = document.getElementById('m-glucose-preset')?.value || 'custom';
-    if (preset === 'custom') return;
     const goals = glucoseGoalPresets[preset];
+    if (!goals) return;
+    if (preset === 'custom') {
+        updateGoalReferenceNotes();
+        return;
+    }
     document.getElementById('m-glucose-low').value = goals.low;
     document.getElementById('m-glucose-high').value = goals.high;
+    updateGoalReferenceNotes();
+};
+
+window.applyBpPreset = function() {
+    const preset = document.getElementById('m-bp-preset')?.value || 'custom';
+    const goals = bpGoalPresets[preset];
+    if (!goals) return;
+    if (preset === 'custom') {
+        updateGoalReferenceNotes();
+        return;
+    }
+    document.getElementById('m-bp-sys-low').value = goals.systolicLow;
+    document.getElementById('m-bp-sys-high').value = goals.systolicHigh;
+    document.getElementById('m-bp-dia-low').value = goals.diastolicLow;
+    document.getElementById('m-bp-dia-high').value = goals.diastolicHigh;
+    updateGoalReferenceNotes();
 };
 
 function setMemberGoalFields(member) {
@@ -1221,6 +1465,7 @@ function setMemberGoalFields(member) {
     safeSet('m-glucose-preset', goals.glucose.preset);
     safeSet('m-glucose-low', goals.glucose.low);
     safeSet('m-glucose-high', goals.glucose.high);
+    safeSet('m-bp-preset', goals.bp.preset || 'treated');
     safeSet('m-bp-sys-low', goals.bp.systolicLow);
     safeSet('m-bp-sys-high', goals.bp.systolicHigh);
     safeSet('m-bp-dia-low', goals.bp.diastolicLow);
@@ -1230,6 +1475,7 @@ function setMemberGoalFields(member) {
     safeSet('m-weight-low', goals.weight.low);
     safeSet('m-weight-high', goals.weight.high);
     safeSet('m-weight-unit', goals.weight.unit || 'lb');
+    updateGoalReferenceNotes();
 }
 
 function collectMemberGoals() {
@@ -1240,6 +1486,7 @@ function collectMemberGoals() {
             high: parseAmount(document.getElementById('m-glucose-high').value, 180)
         },
         bp: {
+            preset: document.getElementById('m-bp-preset')?.value || 'custom',
             systolicLow: parseAmount(document.getElementById('m-bp-sys-low').value, 90),
             systolicHigh: parseAmount(document.getElementById('m-bp-sys-high').value, 130),
             diastolicLow: parseAmount(document.getElementById('m-bp-dia-low').value, 60),
@@ -1256,19 +1503,19 @@ function collectMemberGoals() {
         }
     };
     if (goals.glucose.high <= goals.glucose.low) {
-        alert("Glucose high goal must be greater than glucose low goal.");
+        void appAlert('Glucose high goal must be greater than glucose low goal.', 'Goal Needs Review');
         return null;
     }
     if (goals.bp.systolicHigh <= goals.bp.systolicLow || goals.bp.diastolicHigh <= goals.bp.diastolicLow) {
-        alert("BP high goals must be greater than BP low goals.");
+        void appAlert('BP high goals must be greater than BP low goals.', 'Goal Needs Review');
         return null;
     }
     if (goals.hr.high <= goals.hr.low) {
-        alert("Heart rate high goal must be greater than heart rate low goal.");
+        void appAlert('Heart rate high goal must be greater than heart rate low goal.', 'Goal Needs Review');
         return null;
     }
     if (Number.isFinite(goals.weight.low) && Number.isFinite(goals.weight.high) && goals.weight.high <= goals.weight.low) {
-        alert("Weight high goal must be greater than weight low goal.");
+        void appAlert('Weight high goal must be greater than weight low goal.', 'Goal Needs Review');
         return null;
     }
     return goals;
@@ -1986,6 +2233,7 @@ function enhanceButtonIcons(root = document) {
             button.dataset.iconEnhanced === 'true' ||
             button.querySelector('.win98-icon') ||
             button.closest('.title-bar-controls') ||
+            button.closest('.rich-text-toolbar') ||
             button.classList.contains('taskbar-button') ||
             button.classList.contains('taskbar-close') ||
             button.classList.contains('inventory-builder-remove') ||
@@ -2038,6 +2286,7 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
     windowEl?.classList.toggle('action-modal-window-wide', isTaskbarWindow);
     ok.innerText = confirmText;
     enhanceButtonIcons(body);
+    renderGuidedHelpTips(body);
     if (minimize) minimize.style.display = isTaskbarWindow ? '' : 'none';
     modal.style.display = 'flex';
     if (isTaskbarWindow) {
@@ -2478,6 +2727,31 @@ function memberPrescriberRecords(member) {
     return db.prescribers.filter(prescriber => ids.has(prescriber.id));
 }
 
+function pharmacyDisplayName(pharmacy) {
+    if (!pharmacy) return '';
+    return [pharmacy.name, pharmacy.phone].filter(Boolean).join(' - ');
+}
+
+function pharmacyIdentityKey(pharmacy) {
+    return [
+        pharmacy?.name,
+        pharmacy?.phone,
+        pharmacy?.fax,
+        pharmacy?.email,
+        pharmacy?.address,
+        pharmacy?.website
+    ].map(value => String(value || '').trim().toLowerCase()).join('|');
+}
+
+function memberPharmacyIds(member) {
+    return Array.isArray(member?.pharmacyIds) ? member.pharmacyIds.filter(Boolean) : [];
+}
+
+function memberPharmacyRecords(member) {
+    const ids = new Set(memberPharmacyIds(member));
+    return (db.pharmacies || []).filter(pharmacy => ids.has(pharmacy.id));
+}
+
 function getMemberDiagnoses(member) {
     return normalizeMemberDiagnoses(member);
 }
@@ -2558,6 +2832,30 @@ function prescriberNameById(id) {
     return prescriber ? prescriberDisplayName(prescriber) : '';
 }
 
+function pharmacyOptionsHtml(selected = '', memberId = '', includeAll = true) {
+    const member = db.family.find(item => item.id === memberId);
+    const allowedIds = member ? new Set(memberPharmacyIds(member)) : null;
+    const seen = new Set();
+    const pharmacies = (db.pharmacies || [])
+        .slice()
+        .filter(pharmacy => includeAll || !allowedIds || allowedIds.has(pharmacy.id) || pharmacy.id === selected)
+        .filter(pharmacy => {
+            const key = pharmacyIdentityKey(pharmacy) || pharmacy.id;
+            if (pharmacy.id !== selected && seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .sort((a, b) => pharmacyDisplayName(a).localeCompare(pharmacyDisplayName(b), undefined, { sensitivity: 'base' }));
+    return `<option value="">Optional</option>` + pharmacies
+        .map(pharmacy => `<option value="${escapeHtml(pharmacy.id)}" ${pharmacy.id === selected ? 'selected' : ''}>${escapeHtml(pharmacyDisplayName(pharmacy))}</option>`)
+        .join('');
+}
+
+function pharmacyNameById(id) {
+    const pharmacy = (db.pharmacies || []).find(item => item.id === id);
+    return pharmacy ? pharmacyDisplayName(pharmacy) : '';
+}
+
 function getHiddenJson(id, fallback = []) {
     const input = document.getElementById(id);
     if (!input?.value) return fallback;
@@ -2582,6 +2880,10 @@ function currentMemberLabDocuments() {
     return getHiddenJson('m-lab-documents-data');
 }
 
+function currentMemberProgressNotes() {
+    return getHiddenJson('m-progress-notes-data');
+}
+
 function defaultCurrentMedicationListForMember(memberId) {
     if (!memberId) return [];
     const byMed = new Map();
@@ -2595,6 +2897,7 @@ function defaultCurrentMedicationListForMember(memberId) {
                 doseQty: `${formatPrescribedDose(med, schedule.doseQty)}${schedule.doseQty ? `; ${formatQtyForSchedule(schedule, med)}` : ''}`,
                 indication: schedule.indication || '',
                 prescriberId: schedule.prescriberId || med.prescriberId || '',
+                pharmacyId: schedule.pharmacyId || med.pharmacyId || '',
                 frequency: `${formatFrequency(schedule)} ${getScheduleTimes(schedule).join(', ') || 'PRN'}`.trim()
             });
         });
@@ -2618,11 +2921,13 @@ function renderMemberCurrentMedicationList() {
             const med = db.inventory.find(candidate => candidate.id === item.medId);
             if (!med) return '';
             const prescriber = item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med);
+            const pharmacy = item.pharmacyId ? pharmacyNameById(item.pharmacyId) : medicationSummaryPharmacyName(null, med);
             return `<tr>
                 <td><strong>${escapeHtml(med.name)}</strong></td>
                 <td>${escapeHtml(item.doseQty || '')}</td>
                 <td>${escapeHtml(item.indication || 'Not specified')}</td>
                 <td>${escapeHtml(prescriber || 'Not specified')}</td>
+                <td>${escapeHtml(pharmacy || 'Not specified')}</td>
                 <td>${escapeHtml(item.frequency || '')}</td>
             </tr>`;
         })
@@ -2630,8 +2935,8 @@ function renderMemberCurrentMedicationList() {
         .join('');
     container.innerHTML = `
         <table class="win98-report-table current-med-list-table">
-            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Prescriber</th><th>Frequency</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="5">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
+            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Prescriber</th><th>Pharmacy</th><th>Frequency</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
         </table>`;
 }
 
@@ -2670,12 +2975,15 @@ window.renderCurrentMedsBuilderPreview = function() {
         const frequency = row.querySelector('input[name="currentFrequency"]')?.value.trim() || 'Frequency not entered';
         const prescriberSelect = row.querySelector('select[name="currentPrescriberId"]');
         const prescriber = prescriberSelect?.selectedOptions?.[0]?.textContent || 'Optional';
+        const pharmacySelect = row.querySelector('select[name="currentPharmacyId"]');
+        const pharmacy = pharmacySelect?.selectedOptions?.[0]?.textContent || 'Optional';
         return `<div class="current-meds-preview-item">
             <div class="current-meds-preview-copy">
                 <strong>${escapeHtml(name)}</strong>
                 <small>${escapeHtml(dose)} | ${escapeHtml(frequency)}</small>
                 <small>Used for: ${escapeHtml(indication)}</small>
                 <small>Prescriber: ${escapeHtml(prescriber)}</small>
+                <small>Pharmacy: ${escapeHtml(pharmacy)}</small>
             </div>
             <button type="button" class="inventory-builder-remove" onclick="removeCurrentMedsBuilderSelection('${escapeHtml(medId)}')" title="Remove from selected list">X</button>
         </div>`;
@@ -2690,11 +2998,20 @@ window.openMemberCurrentMedsBuilder = async function() {
     const existing = new Map(seedList.map(item => [item.medId, item]));
     const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
     const memberProviderIds = member ? new Set(memberPrescriberIds(member)) : new Set();
+    const memberPharmacyIdsSet = member ? new Set(memberPharmacyIds(member)) : new Set();
     const memberPrescriberOptions = selected => {
         const options = db.prescribers
             .filter(prescriber => memberProviderIds.has(prescriber.id))
             .sort((a, b) => prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }))
             .map(prescriber => `<option value="${escapeHtml(prescriber.id)}" ${prescriber.id === selected ? 'selected' : ''}>${escapeHtml(prescriberDisplayName(prescriber))}</option>`)
+            .join('');
+        return `<option value="">Optional</option>${options}`;
+    };
+    const memberPharmacyOptions = selected => {
+        const options = (db.pharmacies || [])
+            .filter(pharmacy => memberPharmacyIdsSet.has(pharmacy.id))
+            .sort((a, b) => pharmacyDisplayName(a).localeCompare(pharmacyDisplayName(b), undefined, { sensitivity: 'base' }))
+            .map(pharmacy => `<option value="${escapeHtml(pharmacy.id)}" ${pharmacy.id === selected ? 'selected' : ''}>${escapeHtml(pharmacyDisplayName(pharmacy))}</option>`)
             .join('');
         return `<option value="">Optional</option>${options}`;
     };
@@ -2714,6 +3031,7 @@ window.openMemberCurrentMedsBuilder = async function() {
                     <label>Dose / Qty<input name="currentDoseQty" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. 1 tablet, 5 mL, 2 puffs" value="${escapeHtml(saved.doseQty || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
                     <label>Used For<input name="currentIndication" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. allergies, migraine" value="${escapeHtml(saved.indication || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
                     <label>Prescriber<select name="currentPrescriberId" data-med-id="${escapeHtml(med.id)}" onchange="renderCurrentMedsBuilderPreview()">${memberPrescriberOptions(saved.prescriberId || '')}</select></label>
+                    <label>Pharmacy<select name="currentPharmacyId" data-med-id="${escapeHtml(med.id)}" onchange="renderCurrentMedsBuilderPreview()">${memberPharmacyOptions(saved.pharmacyId || med.pharmacyId || '')}</select></label>
                     <label>Frequency<input name="currentFrequency" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. daily, PRN, weekly" value="${escapeHtml(saved.frequency || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
                 </div>
             </div>`;
@@ -2740,6 +3058,7 @@ window.openMemberCurrentMedsBuilder = async function() {
             doseQty: body.querySelector(`input[name="currentDoseQty"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
             indication: body.querySelector(`input[name="currentIndication"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
             prescriberId: body.querySelector(`select[name="currentPrescriberId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
+            pharmacyId: body.querySelector(`select[name="currentPharmacyId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
             frequency: body.querySelector(`input[name="currentFrequency"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || ''
         }));
     });
@@ -2830,13 +3149,1003 @@ window.removeMemberLabPdf = async function(docId) {
     renderMemberLabDocuments();
 };
 
+function defaultProgressNoteTime() {
+    const now = new Date();
+    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+}
+
+function resetProgressNoteEditor() {
+    const date = document.getElementById('m-progress-note-date');
+    const time = document.getElementById('m-progress-note-time');
+    const title = document.getElementById('m-progress-note-title');
+    const tags = document.getElementById('m-progress-note-tags');
+    const editId = document.getElementById('m-progress-note-edit-id');
+    const editor = document.getElementById('m-progress-note-editor');
+    const color = document.getElementById('m-progress-note-color');
+    const saveButton = document.getElementById('m-progress-note-save-button');
+    if (date) date.value = localDateKey();
+    if (time) time.value = defaultProgressNoteTime();
+    if (title) title.value = '';
+    if (tags) tags.value = '';
+    if (editId) editId.value = '';
+    if (editor) editor.innerHTML = '';
+    if (color) color.value = '#000000';
+    if (saveButton) saveButton.innerHTML = '<span class="button-plus-sign">+</span>Add Entry';
+    renderProgressNoteTemplateSelect();
+    ['template', 'link-type', 'link-id'].forEach(suffix => {
+        const input = document.getElementById(`m-progress-note-${suffix}`);
+        if (input) input.value = '';
+    });
+    ['pinned', 'important', 'followup', 'provider', 'private', 'resolved'].forEach(suffix => {
+        const input = document.getElementById(`m-progress-note-${suffix}`);
+        if (input) input.checked = false;
+    });
+    ['pain', 'mood', 'sleep', 'nausea', 'energy'].forEach(suffix => {
+        const input = document.getElementById(`m-progress-note-${suffix}`);
+        if (input) input.value = '';
+    });
+    const fileInput = document.getElementById('m-progress-note-attachment');
+    if (fileInput) fileInput.value = '';
+    pendingProgressNoteAttachments = [];
+    updateProgressNoteFlagVisuals();
+    renderProgressNoteLinkOptions();
+    renderProgressNoteAttachmentList();
+    refreshProgressNoteTagSuggestions();
+}
+
+function safeProgressNoteColor(value) {
+    const color = String(value || '').trim();
+    if (/^#[0-9a-f]{6}$/i.test(color)) return color.toLowerCase();
+    const rgb = color.match(/^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/i);
+    if (!rgb) return '';
+    const parts = rgb.slice(1).map(Number);
+    if (parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return '';
+    return `#${parts.map(part => part.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function sanitizeProgressNoteHtml(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '');
+    const allowed = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'BR', 'P', 'DIV', 'UL', 'OL', 'LI', 'SPAN', 'FONT']);
+    const cleanNode = node => {
+        if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent || '');
+        if (node.nodeType !== Node.ELEMENT_NODE) return document.createTextNode('');
+        const tag = node.tagName.toUpperCase();
+        const children = Array.from(node.childNodes).map(cleanNode);
+        if (!allowed.has(tag)) {
+            const fragment = document.createDocumentFragment();
+            children.forEach(child => fragment.appendChild(child));
+            return fragment;
+        }
+        const clean = document.createElement(tag === 'FONT' ? 'span' : tag.toLowerCase());
+        if (tag === 'SPAN' || tag === 'FONT') {
+            const color = safeProgressNoteColor(node.getAttribute('color') || node.style?.color);
+            if (color) clean.style.color = color;
+        }
+        children.forEach(child => clean.appendChild(child));
+        return clean;
+    };
+    const output = document.createElement('div');
+    Array.from(template.content.childNodes).forEach(node => output.appendChild(cleanNode(node)));
+    return output.innerHTML.trim();
+}
+
+function progressNotePlainText(html) {
+    const temp = document.createElement('div');
+    temp.innerHTML = sanitizeProgressNoteHtml(html);
+    return String(temp.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function progressNoteDayLabel(dateStr) {
+    const date = parseLocal(dateStr);
+    if (!date) return 'No Date';
+    return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function normalizeProgressNoteTags(value) {
+    const source = Array.isArray(value) ? value.join(',') : String(value || '');
+    return Array.from(new Set(source
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean)
+        .map(tag => tag.slice(0, 32))));
+}
+
+function progressNoteTagsHtml(tags = []) {
+    return normalizeProgressNoteTags(tags)
+        .map(tag => `<span class="profile-diary-tag">${escapeHtml(tag)}</span>`)
+        .join('');
+}
+
+function progressNoteFlags(note = {}) {
+    const flags = note.flags || {};
+    return {
+        pinned: !!flags.pinned,
+        important: !!flags.important,
+        followup: !!flags.followup,
+        provider: !!flags.provider,
+        private: !!flags.private,
+        resolved: !!flags.resolved
+    };
+}
+
+window.updateProgressNoteFlagVisuals = function() {
+    document.querySelectorAll('.profile-diary-flag-toggle').forEach(label => {
+        const input = label.querySelector('input[type="checkbox"]');
+        label.classList.toggle('selected', !!input?.checked);
+    });
+};
+
+function progressNoteFlagBadgesHtml(note = {}) {
+    const flags = progressNoteFlags(note);
+    const badges = [];
+    if (flags.pinned) badges.push(['pinned', 'Pinned']);
+    if (flags.important) badges.push(['important', 'Important']);
+    if (flags.followup) badges.push(['followup', 'Follow-up']);
+    if (flags.provider) badges.push(['provider', 'Provider']);
+    if (flags.private) badges.push(['private', 'Private']);
+    if (flags.resolved) badges.push(['resolved', 'Resolved']);
+    return badges.map(([key, label]) => `<span class="profile-diary-badge ${key}">${escapeHtml(label)}</span>`).join('');
+}
+
+function progressNoteScaleValue(value, min, max) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return '';
+    return Math.min(max, Math.max(min, parsed));
+}
+
+function collectProgressNoteScales() {
+    return {
+        pain: progressNoteScaleValue(document.getElementById('m-progress-note-pain')?.value, 0, 10),
+        mood: progressNoteScaleValue(document.getElementById('m-progress-note-mood')?.value, 1, 5),
+        sleep: progressNoteScaleValue(document.getElementById('m-progress-note-sleep')?.value, 1, 5),
+        nausea: progressNoteScaleValue(document.getElementById('m-progress-note-nausea')?.value, 0, 10),
+        energy: progressNoteScaleValue(document.getElementById('m-progress-note-energy')?.value, 1, 5)
+    };
+}
+
+function progressNoteScalesHtml(scales = {}) {
+    const labels = [
+        ['pain', 'Pain', '/10'],
+        ['mood', 'Mood', '/5'],
+        ['sleep', 'Sleep', '/5'],
+        ['nausea', 'Nausea', '/10'],
+        ['energy', 'Energy', '/5']
+    ];
+    const chips = labels
+        .filter(([key]) => scales[key] !== '' && scales[key] !== undefined && scales[key] !== null)
+        .map(([key, label, suffix]) => `<span class="profile-diary-scale-chip ${key}">${escapeHtml(label)}: <strong>${escapeHtml(scales[key])}${suffix}</strong></span>`);
+    return chips.length ? `<div class="profile-diary-scale-chips">${chips.join('')}</div>` : '';
+}
+
+function progressNoteAttachmentIcon(attachment = {}) {
+    return /pdf/i.test(attachment.type || attachment.name || '') ? 'PDF' : 'IMG';
+}
+
+function progressNoteAttachmentsHtml(note = {}) {
+    const attachments = Array.isArray(note.attachments) ? note.attachments : [];
+    if (!attachments.length) return '';
+    return `<div class="profile-diary-attachment-preview">
+        <strong>Attachments</strong>
+        ${attachments.map(file => `
+            <button type="button" onclick="previewProgressNoteAttachment('${escapeHtml(note.id)}', '${escapeHtml(file.id)}')">
+                <span class="profile-diary-file-chip">${escapeHtml(progressNoteAttachmentIcon(file))}</span>
+                ${escapeHtml(file.name || 'Attachment')}
+            </button>`).join('')}
+    </div>`;
+}
+
+function progressNoteLinkedContext(note = {}) {
+    const link = note.link || {};
+    if (!link.type || !link.id) return '';
+    if (link.type === 'medication') {
+        const schedule = db.schedules.find(item => item.id === link.id);
+        const med = schedule ? db.inventory.find(item => item.id === schedule.medId) : null;
+        return med ? `${med.name} ${formatMedStrength(med)} | ${formatFrequency(schedule)} ${getScheduleTimes(schedule).join(', ') || 'PRN'}`.trim() : 'Medication link unavailable';
+    }
+    if (link.type === 'administration') {
+        const entry = db.history.find(item => item.id === link.id);
+        return entry ? `${entry.timestamp || ''} | ${entry.medName || 'Medication'} | ${doseStatusLabel(entry.doseStatus || 'given')}` : 'Administration link unavailable';
+    }
+    if (link.type === 'vital') {
+        const reading = db.vitals.find(item => item.id === link.id);
+        return reading ? `${reading.date || ''} ${reading.time || ''} | ${reading.type || 'Monitoring'} | ${formatVitalReading(reading)}` : 'Monitoring link unavailable';
+    }
+    if (link.type === 'lab') {
+        const doc = currentMemberLabDocuments().find(item => item.id === link.id);
+        return doc ? `${doc.date || 'No date'} | ${doc.name || 'Lab PDF'}` : 'Lab link unavailable';
+    }
+    if (link.type === 'regimen') {
+        const set = (db.orderSets || []).find(item => item.id === link.id);
+        return set ? `${set.name || 'Regimen'}${set.start ? ` | ${set.start}` : ''}${set.end ? ` to ${set.end}` : ''}` : 'Regimen link unavailable';
+    }
+    if (link.type === 'inventory') {
+        const med = db.inventory.find(item => item.id === link.id);
+        return med ? `${med.name} ${formatMedStrength(med)}` : 'Inventory link unavailable';
+    }
+    return '';
+}
+
+function progressNoteLinkHtml(note = {}) {
+    const context = progressNoteLinkedContext(note);
+    return context ? `<div class="profile-diary-linked-context"><strong>Linked:</strong> ${escapeHtml(context)}</div>` : '';
+}
+
+function progressNoteSearchText(note) {
+    return [
+        note.title,
+        note.date,
+        note.time,
+        progressNoteLinkedContext(note),
+        progressNotePlainText(note.html),
+        ...(Array.isArray(note.tags) ? note.tags : []),
+        ...Object.entries(progressNoteFlags(note)).filter(([, value]) => value).map(([key]) => key),
+        ...Object.entries(note.scales || {}).map(([key, value]) => `${key} ${value}`),
+        ...(Array.isArray(note.attachments) ? note.attachments.map(file => file.name || '') : [])
+    ].join(' ').toLowerCase();
+}
+
+function updateProgressNoteTagFilter(notes) {
+    const select = document.getElementById('m-progress-note-tag-filter');
+    if (!select) return;
+    const selected = select.value || '';
+    const tags = Array.from(new Set(notes.flatMap(note => normalizeProgressNoteTags(note.tags))))
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    select.innerHTML = '<option value="">All tags</option>' + tags
+        .map(tag => `<option value="${escapeHtml(tag)}" ${tag === selected ? 'selected' : ''}>${escapeHtml(tag)}</option>`)
+        .join('');
+    if (selected && !tags.includes(selected)) select.value = '';
+}
+
+function progressNoteLinkOptions(type, selected = '') {
+    const memberId = currentEditingMemberId;
+    if (!type) return '<option value="">Choose after selecting a link type</option>';
+    if (type === 'medication') {
+        const schedules = db.schedules
+            .filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule))
+            .sort((a, b) => {
+                const medA = db.inventory.find(item => item.id === a.medId);
+                const medB = db.inventory.find(item => item.id === b.medId);
+                return inventoryDisplayName(medA || {}).localeCompare(inventoryDisplayName(medB || {}), undefined, { sensitivity: 'base' });
+            });
+        return '<option value="">Select medication</option>' + schedules.map(schedule => {
+            const med = db.inventory.find(item => item.id === schedule.medId);
+            const text = med ? `${med.name} ${formatMedStrength(med)} (${formatFrequency(schedule)} ${getScheduleTimes(schedule).join(', ') || 'PRN'})` : 'Medication';
+            return `<option value="${escapeHtml(schedule.id)}" ${schedule.id === selected ? 'selected' : ''}>${escapeHtml(text)}</option>`;
+        }).join('');
+    }
+    if (type === 'administration') {
+        const entries = db.history
+            .filter(entry => entry.memberId === memberId)
+            .slice()
+            .sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))
+            .slice(0, 100);
+        return '<option value="">Select administration</option>' + entries.map(entry => {
+            const text = `${entry.timestamp || 'No time'} - ${entry.medName || 'Medication'} - ${doseStatusLabel(entry.doseStatus || 'given')}`;
+            return `<option value="${escapeHtml(entry.id)}" ${entry.id === selected ? 'selected' : ''}>${escapeHtml(text)}</option>`;
+        }).join('');
+    }
+    if (type === 'vital') {
+        const readings = db.vitals
+            .filter(reading => reading.memberId === memberId)
+            .slice()
+            .sort((a, b) => String(`${b.date || ''} ${b.time || ''}`).localeCompare(String(`${a.date || ''} ${a.time || ''}`)))
+            .slice(0, 100);
+        return '<option value="">Select monitoring reading</option>' + readings.map(reading => {
+            const text = `${reading.date || ''} ${reading.time || ''} - ${vitalTypeLabel(reading.type, reading)} - ${formatVitalReading(reading)}`;
+            return `<option value="${escapeHtml(reading.id)}" ${reading.id === selected ? 'selected' : ''}>${escapeHtml(text)}</option>`;
+        }).join('');
+    }
+    if (type === 'lab') {
+        return '<option value="">Select lab PDF</option>' + currentMemberLabDocuments().map(doc => {
+            const text = `${doc.date || 'No date'} - ${doc.name || 'Lab PDF'}`;
+            return `<option value="${escapeHtml(doc.id)}" ${doc.id === selected ? 'selected' : ''}>${escapeHtml(text)}</option>`;
+        }).join('');
+    }
+    if (type === 'regimen') {
+        const sets = (db.orderSets || [])
+            .filter(set => !memberId || !set.memberId || set.memberId === memberId)
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+        return '<option value="">Select regimen</option>' + sets.map(set => {
+            return `<option value="${escapeHtml(set.id)}" ${set.id === selected ? 'selected' : ''}>${escapeHtml(set.name || 'Regimen')}</option>`;
+        }).join('');
+    }
+    if (type === 'inventory') {
+        const items = db.inventory
+            .filter(med => medicationAssignedToMember(med, memberId))
+            .slice()
+            .sort((a, b) => inventoryDisplayName(a).localeCompare(inventoryDisplayName(b), undefined, { sensitivity: 'base' }));
+        return '<option value="">Select inventory item</option>' + items.map(med => {
+            return `<option value="${escapeHtml(med.id)}" ${med.id === selected ? 'selected' : ''}>${escapeHtml(`${med.name} ${formatMedStrength(med)}`)}</option>`;
+        }).join('');
+    }
+    return '<option value="">No items available</option>';
+}
+
+window.renderProgressNoteLinkOptions = function(selectedId = '') {
+    const type = document.getElementById('m-progress-note-link-type')?.value || '';
+    const select = document.getElementById('m-progress-note-link-id');
+    if (!select) return;
+    select.innerHTML = progressNoteLinkOptions(type, selectedId);
+};
+
+const defaultProgressNoteTemplates = [
+    {
+        id: 'daily',
+        system: true,
+        name: 'Daily check-in',
+        title: 'Daily check-in',
+        tags: ['daily', 'routine'],
+        html: '<p><b>Overall:</b> </p><p><b>Medications:</b> </p><p><b>Food / hydration:</b> </p><p><b>Plan:</b> </p>'
+    },
+    {
+        id: 'symptoms',
+        system: true,
+        name: 'Symptom update',
+        title: 'Symptom update',
+        tags: ['symptoms'],
+        html: '<p><b>Symptom:</b> </p><p><b>Started:</b> </p><p><b>Severity / pattern:</b> </p><p><b>What helped or worsened it:</b> </p>'
+    },
+    {
+        id: 'side_effect',
+        system: true,
+        name: 'Possible side effect',
+        title: 'Possible side effect',
+        tags: ['side effect', 'medication'],
+        html: '<p><b>Medication suspected:</b> </p><p><b>Reaction / concern:</b> </p><p><b>Timing after dose:</b> </p><p><b>Action taken:</b> </p>'
+    },
+    {
+        id: 'missed_dose',
+        system: true,
+        name: 'Missed / skipped dose',
+        title: 'Missed / skipped dose',
+        tags: ['missed dose'],
+        html: '<p><b>Medication:</b> </p><p><b>Scheduled time:</b> </p><p><b>Reason:</b> </p><p><b>Next step:</b> </p>'
+    },
+    {
+        id: 'provider_call',
+        system: true,
+        name: 'Provider call',
+        title: 'Provider call',
+        tags: ['provider', 'follow-up'],
+        html: '<p><b>Provider / office:</b> </p><p><b>Reason for call:</b> </p><p><b>Instructions received:</b> </p><p><b>Follow-up needed:</b> </p>'
+    },
+    {
+        id: 'lab_followup',
+        system: true,
+        name: 'Lab follow-up',
+        title: 'Lab follow-up',
+        tags: ['labs', 'follow-up'],
+        html: '<p><b>Lab / result:</b> </p><p><b>Concern or goal:</b> </p><p><b>Medication link:</b> </p><p><b>Plan:</b> </p>'
+    },
+    {
+        id: 'handoff',
+        system: true,
+        name: 'Caregiver handoff',
+        title: 'Caregiver handoff',
+        tags: ['handoff', 'caregiver'],
+        html: '<p><b>What happened:</b> </p><p><b>Needs attention:</b> </p><p><b>Next dose / appointment:</b> </p><p><b>Supplies / inventory:</b> </p>'
+    }
+];
+
+function progressNoteTemplates() {
+    const custom = Array.isArray(db.settings?.progressNoteTemplates) ? db.settings.progressNoteTemplates : [];
+    const customIds = new Set(custom.map(template => template.id));
+    return [
+        ...defaultProgressNoteTemplates.filter(template => !customIds.has(template.id)),
+        ...custom.map(template => ({
+            id: template.id || `template_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            name: template.name || template.title || 'Custom template',
+            title: template.title || template.name || '',
+            tags: normalizeProgressNoteTags(template.tags || ''),
+            html: sanitizeProgressNoteHtml(template.html || ''),
+            system: false
+        }))
+    ].sort((a, b) => (a.system === b.system ? a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) : a.system ? -1 : 1));
+}
+
+function renderProgressNoteTemplateSelect(selected = '') {
+    const select = document.getElementById('m-progress-note-template');
+    if (!select) return;
+    select.innerHTML = '<option value="">Blank note</option>' + progressNoteTemplates()
+        .map(template => `<option value="${escapeHtml(template.id)}" ${template.id === selected ? 'selected' : ''}>${escapeHtml(template.name)}${template.system ? ' (built-in)' : ''}</option>`)
+        .join('');
+}
+
+window.applyProgressNoteTemplate = function(key) {
+    const template = progressNoteTemplates().find(item => item.id === key);
+    if (!template) return;
+    const title = document.getElementById('m-progress-note-title');
+    const tags = document.getElementById('m-progress-note-tags');
+    const editor = document.getElementById('m-progress-note-editor');
+    if (title && !title.value.trim()) title.value = template.title;
+    if (tags) {
+        const merged = normalizeProgressNoteTags([...normalizeProgressNoteTags(tags.value), ...template.tags]);
+        tags.value = merged.join(', ');
+    }
+    if (editor && !progressNotePlainText(editor.innerHTML)) editor.innerHTML = template.html;
+    refreshProgressNoteTagSuggestions();
+};
+
+window.openProgressNoteTemplateManager = async function() {
+    const templateOptions = progressNoteTemplates().map(template => `
+        <option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}${template.system ? ' (built-in copy)' : ''}</option>
+    `).join('');
+    const modalPromise = showActionModal('Create / Edit Diary Templates', `
+        <div data-action-modal-size="wide" class="progress-template-manager">
+            <div class="template-manager-sidebar">
+                <label>Load template
+                    <select name="loadTemplate" onchange="loadProgressTemplateIntoManager(this.value)">
+                        <option value="">New blank template</option>
+                        ${templateOptions}
+                    </select>
+                </label>
+                <div class="form-help">Built-in templates are copied when edited. Custom templates can be updated or deleted.</div>
+                <div id="progress-template-existing-list" class="template-existing-list"></div>
+            </div>
+            <div class="template-manager-editor">
+                <input name="templateId" type="hidden">
+                <label>Template name<input name="name" type="text" placeholder="e.g. Migraine diary"></label>
+                <label>Default note title<input name="title" type="text" placeholder="Optional title inserted into the note"></label>
+                <label>Tags<input name="tags" type="text" placeholder="Tags, comma separated"></label>
+                <div class="template-body-label">Template body</div>
+                <div class="rich-text-toolbar template-rich-toolbar" aria-label="Template formatting">
+                    <button type="button" class="rich-tool-button" onclick="formatProgressTemplateBody('bold')" title="Bold"><span class="rich-tool-icon rich-tool-bold">B</span></button>
+                    <button type="button" class="rich-tool-button" onclick="formatProgressTemplateBody('italic')" title="Italic"><span class="rich-tool-icon rich-tool-italic">I</span></button>
+                    <button type="button" class="rich-tool-button" onclick="formatProgressTemplateBody('underline')" title="Underline"><span class="rich-tool-icon rich-tool-underline">U</span></button>
+                    <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressTemplateBody('insertUnorderedList')" title="Bulleted list"><span class="rich-tool-icon">&bull;</span> List</button>
+                    <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressTemplateBody('insertOrderedList')" title="Numbered list"><span class="rich-tool-icon">1.</span> List</button>
+                    <label class="rich-color-tool" title="Text color">
+                        <span class="rich-tool-icon rich-tool-color">A</span>
+                        <input id="progress-template-color" type="color" value="#000000" onchange="applyProgressTemplateColor(this.value)">
+                    </label>
+                    <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressTemplateBody('removeFormat')" title="Clear formatting">Clear Format</button>
+                </div>
+                <div id="progress-template-body-editor" class="rich-text-editor template-body-editor" contenteditable="true" data-placeholder="Write the reusable note structure here. Use the toolbar above instead of HTML."></div>
+                <div class="template-danger-zone">
+                    <button id="progress-template-delete-button" type="button" class="danger-button" onclick="deleteProgressNoteTemplateFromManager()" disabled>Delete Template</button>
+                    <span id="progress-template-delete-help">Select a custom template to delete it.</span>
+                </div>
+            </div>
+        </div>
+    `, 'Save Template', body => ({
+        id: body.querySelector('input[name="templateId"]')?.value || '',
+        name: body.querySelector('input[name="name"]')?.value.trim() || '',
+        title: body.querySelector('input[name="title"]')?.value.trim() || '',
+        tags: body.querySelector('input[name="tags"]')?.value || '',
+        html: body.querySelector('#progress-template-body-editor')?.innerHTML || ''
+    }));
+    renderProgressTemplateManagerCustomList();
+    window.loadProgressTemplateIntoManager('');
+    const result = await modalPromise;
+    if (!result) return;
+    if (!db.settings) db.settings = {};
+    db.settings.progressNoteTemplates = Array.isArray(db.settings.progressNoteTemplates) ? db.settings.progressNoteTemplates : [];
+    if (!result.name && !result.title) {
+        await appAlert('Name the template before saving it.', 'Diary Template');
+        return;
+    }
+    const template = {
+        id: result.id && !defaultProgressNoteTemplates.some(item => item.id === result.id) ? result.id : `template_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: result.name || result.title,
+        title: result.title || result.name,
+        tags: normalizeProgressNoteTags(result.tags),
+        html: sanitizeProgressNoteHtml(result.html)
+    };
+    const index = db.settings.progressNoteTemplates.findIndex(item => item.id === template.id);
+    if (index >= 0) db.settings.progressNoteTemplates[index] = template;
+    else db.settings.progressNoteTemplates.push(template);
+    await sync();
+    renderProgressNoteTemplateSelect(template.id);
+};
+
+window.loadProgressTemplateIntoManager = function(templateId) {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const template = progressNoteTemplates().find(item => item.id === templateId);
+    const loadSelect = body.querySelector('select[name="loadTemplate"]');
+    if (loadSelect && loadSelect.value !== (templateId || '')) loadSelect.value = templateId || '';
+    body.querySelector('input[name="templateId"]').value = template && !template.system ? template.id : '';
+    body.querySelector('input[name="name"]').value = template?.name || '';
+    body.querySelector('input[name="title"]').value = template?.title || '';
+    body.querySelector('input[name="tags"]').value = normalizeProgressNoteTags(template?.tags || '').join(', ');
+    const editor = body.querySelector('#progress-template-body-editor');
+    if (editor) editor.innerHTML = template?.html ? sanitizeProgressNoteHtml(template.html) : '';
+    const deleteButton = body.querySelector('#progress-template-delete-button');
+    const deleteHelp = body.querySelector('#progress-template-delete-help');
+    if (deleteButton) deleteButton.disabled = !(template && !template.system);
+    if (deleteHelp) deleteHelp.textContent = template && !template.system
+        ? `Deletes "${template.name || template.title || 'this template'}".`
+        : 'Select a custom template to delete it.';
+};
+
+window.formatProgressTemplateBody = function(command) {
+    const editor = document.getElementById('progress-template-body-editor');
+    if (!editor) return;
+    editor.focus();
+    document.execCommand(command, false, null);
+};
+
+window.applyProgressTemplateColor = function(color) {
+    const safeColor = safeProgressNoteColor(color);
+    const editor = document.getElementById('progress-template-body-editor');
+    if (!editor || !safeColor) return;
+    editor.focus();
+    document.execCommand('foreColor', false, safeColor);
+};
+
+window.renderProgressTemplateManagerCustomList = function() {
+    const body = document.getElementById('action-modal-body');
+    const list = body?.querySelector('#progress-template-existing-list');
+    if (!list) return;
+    const customTemplates = Array.isArray(db.settings?.progressNoteTemplates) ? db.settings.progressNoteTemplates.slice() : [];
+    list.innerHTML = customTemplates.length ? customTemplates
+        .sort((a, b) => String(a.name || a.title || '').localeCompare(String(b.name || b.title || ''), undefined, { sensitivity: 'base' }))
+        .map(template => `
+            <button type="button" onclick="loadProgressTemplateIntoManager('${escapeHtml(template.id)}')">
+                <strong>${escapeHtml(template.name || template.title || 'Custom template')}</strong>
+                <small>${escapeHtml(normalizeProgressNoteTags(template.tags || '').join(', ') || 'No tags')}</small>
+            </button>
+        `).join('') : '<div class="empty-state">No custom templates yet.</div>';
+};
+
+window.deleteProgressNoteTemplateFromManager = async function() {
+    const body = document.getElementById('action-modal-body');
+    const templateId = body?.querySelector('input[name="templateId"]')?.value || '';
+    const template = (db.settings?.progressNoteTemplates || []).find(item => item.id === templateId);
+    if (!template) {
+        await showChildActionModal('Diary Template', '<div style="font-size:11px; padding:4px 0;">Select a custom template first.</div>', 'OK');
+        return;
+    }
+    const confirmed = await showChildActionModal(
+        'Delete Diary Template',
+        `<div style="font-size:11px; padding:4px 0;">Delete the custom template <strong>${escapeHtml(template.name || template.title || 'Template')}</strong>?</div>`,
+        'Delete'
+    );
+    if (!confirmed) return;
+    db.settings.progressNoteTemplates = db.settings.progressNoteTemplates.filter(item => item.id !== templateId);
+    await sync();
+    renderProgressNoteTemplateSelect();
+    renderProgressTemplateManagerCustomList();
+    window.loadProgressTemplateIntoManager('');
+};
+
+function smartProgressNoteTags() {
+    const title = document.getElementById('m-progress-note-title')?.value || '';
+    const editor = progressNotePlainText(document.getElementById('m-progress-note-editor')?.innerHTML || '');
+    const text = `${title} ${editor}`.toLowerCase();
+    const suggestions = new Set();
+    const keywordTags = [
+        [/pain|ache|sore/, 'pain'],
+        [/nausea|vomit|stomach/, 'nausea'],
+        [/dizzy|lightheaded/, 'dizziness'],
+        [/sleep|insomnia|tired/, 'sleep'],
+        [/mood|anxiety|depress|irritable/, 'mood'],
+        [/rash|itch|hives/, 'skin'],
+        [/dose|medication|pill|tablet|capsule/, 'medication'],
+        [/missed|skipped|forgot/, 'missed dose'],
+        [/lab|inr|level|blood work/, 'labs'],
+        [/provider|doctor|pharmacist|clinic/, 'provider'],
+        [/follow.?up|call back|appointment/, 'follow-up'],
+        [/inventory|stock|refill|restock/, 'inventory']
+    ];
+    keywordTags.forEach(([pattern, tag]) => {
+        if (pattern.test(text)) suggestions.add(tag);
+    });
+    db.inventory.forEach(med => {
+        const name = String(med.name || '').toLowerCase();
+        if (name && text.includes(name.slice(0, Math.min(name.length, 12)))) suggestions.add(med.name.slice(0, 32));
+    });
+    return [...suggestions];
+}
+
+window.refreshProgressNoteTagSuggestions = function() {
+    const container = document.getElementById('m-progress-note-tag-suggestions');
+    if (!container) return;
+    const currentTags = new Set(normalizeProgressNoteTags(document.getElementById('m-progress-note-tags')?.value || '').map(tag => tag.toLowerCase()));
+    const suggestions = smartProgressNoteTags().filter(tag => !currentTags.has(tag.toLowerCase())).slice(0, 8);
+    container.innerHTML = suggestions.length
+        ? `<span>Suggested tags:</span>${suggestions.map(tag => `<button type="button" onclick="addProgressNoteTagSuggestion('${escapeHtml(tag)}')">${escapeHtml(tag)}</button>`).join('')}`
+        : '';
+};
+
+window.addProgressNoteTagSuggestion = function(tag) {
+    const tags = document.getElementById('m-progress-note-tags');
+    if (!tags) return;
+    tags.value = normalizeProgressNoteTags([...normalizeProgressNoteTags(tags.value), tag]).join(', ');
+    refreshProgressNoteTagSuggestions();
+};
+
+window.addProgressNoteAttachments = async function(input) {
+    const files = [...(input?.files || [])];
+    if (!files.length) return;
+    const additions = [];
+    for (const file of files) {
+        if (file.size > 8 * 1024 * 1024) {
+            await appAlert(`${file.name} is larger than 8 MB. Attach a smaller file.`);
+            continue;
+        }
+        if (!/^image\//i.test(file.type || '') && file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')) {
+            await appAlert(`${file.name} is not an image or PDF.`);
+            continue;
+        }
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+        additions.push({
+            id: `att_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            name: file.name,
+            type: file.type || (/\.pdf$/i.test(file.name || '') ? 'application/pdf' : 'image'),
+            size: file.size,
+            dataUrl,
+            addedAt: new Date().toISOString()
+        });
+    }
+    pendingProgressNoteAttachments = [...pendingProgressNoteAttachments, ...additions].slice(0, 8);
+    if (input) input.value = '';
+    renderProgressNoteAttachmentList();
+};
+
+function renderProgressNoteAttachmentList() {
+    const container = document.getElementById('m-progress-note-attachment-list');
+    if (!container) return;
+    container.innerHTML = pendingProgressNoteAttachments.length
+        ? pendingProgressNoteAttachments.map(file => `
+            <span class="profile-diary-attachment-pill">
+                <strong>${escapeHtml(progressNoteAttachmentIcon(file))}</strong>
+                ${escapeHtml(file.name || 'Attachment')}
+                <button type="button" onclick="removePendingProgressNoteAttachment('${escapeHtml(file.id)}')">X</button>
+            </span>`).join('')
+        : '<span class="form-help">Images and PDFs can be attached to the note.</span>';
+}
+
+window.removePendingProgressNoteAttachment = function(attachmentId) {
+    pendingProgressNoteAttachments = pendingProgressNoteAttachments.filter(file => file.id !== attachmentId);
+    renderProgressNoteAttachmentList();
+};
+
+window.previewProgressNoteAttachment = async function(noteId, attachmentId) {
+    const note = currentMemberProgressNotes().find(item => item.id === noteId);
+    const attachment = (note?.attachments || []).find(file => file.id === attachmentId);
+    if (!attachment?.dataUrl) return;
+    const content = /pdf/i.test(attachment.type || attachment.name || '')
+        ? `<iframe class="lab-pdf-preview-frame" src="${escapeHtml(attachment.dataUrl)}"></iframe>`
+        : `<div class="progress-note-image-preview"><img src="${escapeHtml(attachment.dataUrl)}" alt="${escapeHtml(attachment.name || 'Attachment')}"></div>`;
+    await showActionModal(`Attachment: ${attachment.name || 'File'}`, `
+        <div data-action-modal-size="wide">${content}</div>
+    `, 'Close');
+};
+
+function renderProgressNotePreview(noteId = activeProgressNotePreviewId) {
+    const container = document.getElementById('m-progress-note-preview');
+    if (!container) return;
+    const note = currentMemberProgressNotes().find(item => item.id === noteId);
+    if (!note) {
+        container.innerHTML = '<div class="empty-state">Click a note to preview it here.</div>';
+        return;
+    }
+    container.innerHTML = `
+        <div class="profile-diary-preview-heading">
+            <strong>${escapeHtml(note.title || 'Diary entry')}</strong>
+            <small>${escapeHtml(progressNoteDayLabel(note.date))}${note.time ? ` at ${escapeHtml(note.time)}` : ''}</small>
+            <div>${progressNoteFlagBadgesHtml(note)}</div>
+            <div>${progressNoteTagsHtml(note.tags)}</div>
+        </div>
+        ${progressNoteLinkHtml(note)}
+        ${progressNoteScalesHtml(note.scales || {})}
+        <div class="profile-diary-preview-body">${sanitizeProgressNoteHtml(note.html) || '<em>No note text.</em>'}</div>
+        ${progressNoteAttachmentsHtml(note)}
+        <div class="profile-diary-preview-actions">
+            <button type="button" onclick="editMemberProgressNote('${escapeHtml(note.id)}')">Edit Entry</button>
+            <button type="button" onclick="deleteMemberProgressNote('${escapeHtml(note.id)}')">Delete</button>
+        </div>`;
+}
+
+function renderProgressNoteTimeline(notes) {
+    const container = document.getElementById('m-progress-note-timeline');
+    if (!container) return;
+    const visible = notes
+        .slice()
+        .sort((a, b) => String(`${b.date || ''} ${b.time || ''}`).localeCompare(String(`${a.date || ''} ${a.time || ''}`)))
+        .slice(0, 18);
+    container.innerHTML = visible.length
+        ? visible.map(note => `
+            <button type="button" class="profile-diary-timeline-item ${progressNoteFlags(note).important ? 'important' : ''}" onclick="previewMemberProgressNote('${escapeHtml(note.id)}')">
+                <span class="profile-diary-timeline-dot"></span>
+                <span><strong>${escapeHtml(note.date || 'No date')} ${escapeHtml(note.time || '')}</strong>${escapeHtml(note.title || progressNotePlainText(note.html).slice(0, 45) || 'Diary entry')}</span>
+            </button>`).join('')
+        : '<div class="empty-state">Timeline will appear after notes are saved.</div>';
+}
+
+function renderMemberProgressNotes() {
+    const container = document.getElementById('m-progress-note-list');
+    if (!container) return;
+    const allNotes = currentMemberProgressNotes()
+        .slice()
+        .sort((a, b) => String(`${b.date || ''} ${b.time || ''}`).localeCompare(String(`${a.date || ''} ${a.time || ''}`)));
+    updateProgressNoteTagFilter(allNotes);
+    const query = String(document.getElementById('m-progress-note-search')?.value || '').trim().toLowerCase();
+    const selectedTag = String(document.getElementById('m-progress-note-tag-filter')?.value || '').trim();
+    const selectedFlag = String(document.getElementById('m-progress-note-flag-filter')?.value || '').trim();
+    const notes = allNotes.filter(note => {
+        const tags = normalizeProgressNoteTags(note.tags);
+        const flags = progressNoteFlags(note);
+        const tagMatch = !selectedTag || tags.includes(selectedTag);
+        const flagMatch = !selectedFlag || !!flags[selectedFlag];
+        const searchMatch = !query || progressNoteSearchText(note).includes(query);
+        return tagMatch && flagMatch && searchMatch;
+    });
+    if (!notes.length) {
+        container.innerHTML = allNotes.length
+            ? '<div class="empty-state">No notes match the current search/filter.</div>'
+            : '<div class="empty-state">No progress notes saved yet.</div>';
+        renderProgressNotePreview();
+        renderProgressNoteTimeline([]);
+        return;
+    }
+    const pinned = notes.filter(note => progressNoteFlags(note).pinned);
+    const pinnedHtml = pinned.length ? `
+        <section class="profile-diary-pinned">
+            <div class="profile-diary-day-header"><strong>Pinned Notes</strong><span>${pinned.length}</span></div>
+            ${pinned.map(note => {
+                const isPreview = activeProgressNotePreviewId === note.id;
+                const summary = progressNotePlainText(note.html).slice(0, 100);
+                return `<div class="profile-diary-entry pinned-note ${isPreview ? 'preview-open' : ''}" onclick="previewMemberProgressNote('${escapeHtml(note.id)}')">
+                    <div class="profile-diary-entry-heading">
+                        <span>
+                            <strong>${escapeHtml(note.title || 'Diary entry')}</strong>
+                            <small>${escapeHtml(note.date || 'No date')} ${escapeHtml(note.time || '')}${summary ? ` | ${escapeHtml(summary)}${summary.length >= 100 ? '...' : ''}` : ''}</small>
+                            ${progressNoteFlagBadgesHtml(note)}${progressNoteTagsHtml(note.tags)}
+                        </span>
+                        <span class="profile-diary-entry-actions">
+                            <button type="button" onclick="event.stopPropagation(); editMemberProgressNote('${escapeHtml(note.id)}')">Edit</button>
+                            <button type="button" onclick="event.stopPropagation(); deleteMemberProgressNote('${escapeHtml(note.id)}')">Delete</button>
+                        </span>
+                    </div>
+                </div>`;
+            }).join('')}
+        </section>` : '';
+    const byDay = notes.reduce((map, note) => {
+        const key = note.date || 'No Date';
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(note);
+        return map;
+    }, new Map());
+    container.innerHTML = pinnedHtml + [...byDay.entries()].map(([date, dayNotes]) => `
+        <section class="profile-diary-day">
+            <div class="profile-diary-day-header">
+                <strong>${escapeHtml(progressNoteDayLabel(date))}</strong>
+                <span>${dayNotes.length} entr${dayNotes.length === 1 ? 'y' : 'ies'}</span>
+            </div>
+            ${dayNotes.map(note => {
+                const isPreview = activeProgressNotePreviewId === note.id;
+                const summary = progressNotePlainText(note.html).slice(0, 120);
+                return `<div class="profile-diary-entry ${isPreview ? 'preview-open' : ''}" onclick="previewMemberProgressNote('${escapeHtml(note.id)}')">
+                    <div class="profile-diary-entry-heading">
+                        <span>
+                            <strong>${escapeHtml(note.title || 'Diary entry')}</strong>
+                            <small>${escapeHtml(note.time || '--:--')}${note.updatedAt ? ` | edited ${escapeHtml(note.updatedAt.slice(0, 10))}` : ''}${summary ? ` | ${escapeHtml(summary)}${summary.length >= 120 ? '...' : ''}` : ''}</small>
+                            ${progressNoteFlagBadgesHtml(note)}
+                            ${progressNoteTagsHtml(note.tags)}
+                            ${progressNoteLinkedContext(note) ? `<small class="profile-diary-entry-link">Linked: ${escapeHtml(progressNoteLinkedContext(note))}</small>` : ''}
+                        </span>
+                        <span class="profile-diary-entry-actions">
+                            <button type="button" onclick="event.stopPropagation(); editMemberProgressNote('${escapeHtml(note.id)}')">Edit</button>
+                            <button type="button" onclick="event.stopPropagation(); deleteMemberProgressNote('${escapeHtml(note.id)}')">Delete</button>
+                        </span>
+                    </div>
+                </div>`;
+            }).join('')}
+        </section>`).join('');
+    renderProgressNotePreview();
+    renderProgressNoteTimeline(notes);
+}
+
+window.formatProgressNote = function(command) {
+    const editor = document.getElementById('m-progress-note-editor');
+    if (!editor) return;
+    editor.focus();
+    document.execCommand(command, false, null);
+};
+
+window.applyProgressNoteColor = function(color) {
+    const safeColor = safeProgressNoteColor(color);
+    const editor = document.getElementById('m-progress-note-editor');
+    if (!editor || !safeColor) return;
+    editor.focus();
+    document.execCommand('foreColor', false, safeColor);
+};
+
+window.previewMemberProgressNote = function(noteId) {
+    activeProgressNotePreviewId = noteId;
+    renderMemberProgressNotes();
+};
+
+window.editMemberProgressNote = function(noteId) {
+    const note = currentMemberProgressNotes().find(item => item.id === noteId);
+    if (!note) return;
+    const date = document.getElementById('m-progress-note-date');
+    const time = document.getElementById('m-progress-note-time');
+    const title = document.getElementById('m-progress-note-title');
+    const tags = document.getElementById('m-progress-note-tags');
+    const editId = document.getElementById('m-progress-note-edit-id');
+    const editor = document.getElementById('m-progress-note-editor');
+    const saveButton = document.getElementById('m-progress-note-save-button');
+    if (date) date.value = note.date || localDateKey();
+    if (time) time.value = note.time || defaultProgressNoteTime();
+    if (title) title.value = note.title || '';
+    if (tags) tags.value = normalizeProgressNoteTags(note.tags).join(', ');
+    if (editId) editId.value = note.id;
+    const linkType = document.getElementById('m-progress-note-link-type');
+    if (linkType) linkType.value = note.link?.type || '';
+    renderProgressNoteLinkOptions(note.link?.id || '');
+    const flags = progressNoteFlags(note);
+    Object.entries(flags).forEach(([key, value]) => {
+        const input = document.getElementById(`m-progress-note-${key}`);
+        if (input) input.checked = !!value;
+    });
+    updateProgressNoteFlagVisuals();
+    Object.entries(note.scales || {}).forEach(([key, value]) => {
+        const input = document.getElementById(`m-progress-note-${key}`);
+        if (input) input.value = value === undefined || value === null ? '' : value;
+    });
+    ['pain', 'mood', 'sleep', 'nausea', 'energy'].forEach(key => {
+        if (!Object.prototype.hasOwnProperty.call(note.scales || {}, key)) {
+            const input = document.getElementById(`m-progress-note-${key}`);
+            if (input) input.value = '';
+        }
+    });
+    pendingProgressNoteAttachments = Array.isArray(note.attachments) ? note.attachments.slice() : [];
+    renderProgressNoteAttachmentList();
+    if (editor) {
+        editor.innerHTML = sanitizeProgressNoteHtml(note.html);
+        editor.focus();
+    }
+    if (saveButton) saveButton.textContent = 'Save Entry';
+    refreshProgressNoteTagSuggestions();
+};
+
+window.clearMemberProgressNoteEditor = function() {
+    resetProgressNoteEditor();
+};
+
+window.saveMemberProgressNote = async function() {
+    const editor = document.getElementById('m-progress-note-editor');
+    const titleInput = document.getElementById('m-progress-note-title');
+    const tagsInput = document.getElementById('m-progress-note-tags');
+    const editId = document.getElementById('m-progress-note-edit-id')?.value || '';
+    const html = sanitizeProgressNoteHtml(editor?.innerHTML || '');
+    if (!progressNotePlainText(html) && !String(titleInput?.value || '').trim()) {
+        await appAlert('Write a note or title before saving the diary entry.', 'Progress Note');
+        return;
+    }
+    const existingNotes = currentMemberProgressNotes();
+    const existing = existingNotes.find(note => note.id === editId);
+    const note = {
+        ...(existing || {}),
+        id: existing?.id || `note_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        date: document.getElementById('m-progress-note-date')?.value || localDateKey(),
+        time: document.getElementById('m-progress-note-time')?.value || defaultProgressNoteTime(),
+        title: String(titleInput?.value || '').trim(),
+        tags: normalizeProgressNoteTags(tagsInput?.value || ''),
+        flags: {
+            pinned: !!document.getElementById('m-progress-note-pinned')?.checked,
+            important: !!document.getElementById('m-progress-note-important')?.checked,
+            followup: !!document.getElementById('m-progress-note-followup')?.checked,
+            provider: !!document.getElementById('m-progress-note-provider')?.checked,
+            private: !!document.getElementById('m-progress-note-private')?.checked,
+            resolved: !!document.getElementById('m-progress-note-resolved')?.checked
+        },
+        scales: collectProgressNoteScales(),
+        link: {
+            type: document.getElementById('m-progress-note-link-type')?.value || '',
+            id: document.getElementById('m-progress-note-link-id')?.value || ''
+        },
+        attachments: pendingProgressNoteAttachments.slice(),
+        html,
+        createdAt: existing?.createdAt || new Date().toISOString(),
+        updatedAt: existing ? new Date().toISOString() : ''
+    };
+    if (!note.link.type || !note.link.id) note.link = {};
+    const notes = existing
+        ? existingNotes.map(item => item.id === existing.id ? note : item)
+        : [note, ...existingNotes];
+    setHiddenJson('m-progress-notes-data', notes);
+    const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    if (member) {
+        member.progressNotes = notes;
+        await sync();
+    }
+    activeProgressNotePreviewId = note.id;
+    resetProgressNoteEditor();
+    renderMemberProgressNotes();
+};
+
+window.deleteMemberProgressNote = async function(noteId) {
+    if (!await appConfirm('Remove this progress note from the member profile?', 'Delete Progress Note')) return;
+    const notes = currentMemberProgressNotes().filter(note => note.id !== noteId);
+    setHiddenJson('m-progress-notes-data', notes);
+    const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    if (member) {
+        member.progressNotes = notes;
+        await sync();
+    }
+    if (document.getElementById('m-progress-note-edit-id')?.value === noteId) resetProgressNoteEditor();
+    if (activeProgressNotePreviewId === noteId) activeProgressNotePreviewId = null;
+    renderMemberProgressNotes();
+};
+
+function progressNotesForReport(member, options = {}) {
+    const from = options.from || document.getElementById('m-progress-note-report-from')?.value || '';
+    const to = options.to || document.getElementById('m-progress-note-report-to')?.value || '';
+    const includePrivate = options.includePrivate ?? !!document.getElementById('m-progress-note-report-private')?.checked;
+    return (Array.isArray(member?.progressNotes) ? member.progressNotes : [])
+        .filter(note => includePrivate || !progressNoteFlags(note).private)
+        .filter(note => !from || String(note.date || '') >= from)
+        .filter(note => !to || String(note.date || '') <= to)
+        .slice()
+        .sort((a, b) => String(`${b.date || ''} ${b.time || ''}`).localeCompare(String(`${a.date || ''} ${a.time || ''}`)));
+}
+
+function progressNoteReportRow(note) {
+    const scales = progressNoteScalesHtml(note.scales || {});
+    const attachments = Array.isArray(note.attachments) && note.attachments.length
+        ? `<div><strong>Attachments:</strong> ${note.attachments.map(file => escapeHtml(file.name || 'Attachment')).join(', ')}</div>`
+        : '';
+    return `<section class="report-section progress-note-report-entry">
+        <h2>${escapeHtml(note.title || 'Diary entry')}</h2>
+        <div class="muted">${escapeHtml(progressNoteDayLabel(note.date))}${note.time ? ` at ${escapeHtml(note.time)}` : ''}</div>
+        <div>${progressNoteFlagBadgesHtml(note)}${progressNoteTagsHtml(note.tags)}</div>
+        ${progressNoteLinkHtml(note)}
+        ${scales}
+        <div>${sanitizeProgressNoteHtml(note.html) || '<em>No note text.</em>'}</div>
+        ${attachments}
+    </section>`;
+}
+
+function memberProgressNotesReportBody(member, options = {}) {
+    const notes = progressNotesForReport(member, options);
+    const from = options.from || document.getElementById('m-progress-note-report-from')?.value || '';
+    const to = options.to || document.getElementById('m-progress-note-report-to')?.value || '';
+    const dateText = from || to ? `${from || 'Beginning'} to ${to || 'Today'}` : 'All saved dates';
+    return `
+        <h2>${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</h2>
+        <div class="muted">Progress Notes / Diary | Date range: ${escapeHtml(dateText)}</div>
+        <h2>Progress Notes / Diary</h2>
+        ${notes.length ? notes.map(progressNoteReportRow).join('') : '<div>No diary entries match the selected filters.</div>'}`;
+}
+
+window.generateMemberProgressNotesPdfReport = async function(memberId = currentEditingMemberId) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return appAlert('Open a saved member profile before generating a diary PDF.');
+    await saveReportPdf(
+        `Progress Notes Diary - ${member.firstName} ${member.lastName}`,
+        memberProgressNotesReportBody(member),
+        `Progress_Notes_Diary_${member.lastName}_${member.firstName}`
+    );
+};
+
+window.printMemberProgressNotesReport = async function(memberId = currentEditingMemberId) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return appAlert('Open a saved member profile before printing diary notes.');
+    printReportFromPreview(
+        `Progress Notes Diary - ${member.firstName} ${member.lastName}`,
+        memberProgressNotesReportBody(member)
+    );
+};
+
 function renderMemberCareLists() {
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
+    const pharmacyIds = getHiddenJson('m-pharmacy-ids-data');
     const diagnoses = getHiddenJson('m-diagnoses-data');
     const allergies = document.getElementById('m-allergies-data')
         ? getHiddenJson('m-allergies-data')
         : [];
     const prescriberList = document.getElementById('m-prescriber-list');
+    const pharmacyList = document.getElementById('m-pharmacy-list');
     const diagnosisList = document.getElementById('m-diagnosis-list');
     const allergyList = document.getElementById('m-allergy-list');
 
@@ -2844,13 +4153,30 @@ function renderMemberCareLists() {
         prescriberList.innerHTML = prescriberIds.length
             ? prescriberIds.map(id => {
                 const prescriber = db.prescribers.find(item => item.id === id);
-                return `<div class="med-item-row" style="font-size:11px;">
+                return `<div class="med-item-row care-list-row" style="font-size:11px;">
                     <span>${escapeHtml(prescriber ? prescriberDisplayName(prescriber) : 'Unknown prescriber')}</span>
-                    ${prescriber ? `<button type="button" onclick="editPrescriberProfile('${escapeHtml(id)}')">Edit</button>` : ''}
-                    <button type="button" onclick="deleteMemberPrescriber('${escapeHtml(id)}')">Delete</button>
+                    <span class="care-list-actions">
+                        ${prescriber ? `<button type="button" onclick="editPrescriberProfile('${escapeHtml(id)}')">Edit</button>` : ''}
+                        <button type="button" onclick="deleteMemberPrescriber('${escapeHtml(id)}')">Delete</button>
+                    </span>
                 </div>`;
             }).join('')
             : '<div style="font-size:11px; padding:4px;">No providers added.</div>';
+    }
+
+    if (pharmacyList) {
+        pharmacyList.innerHTML = pharmacyIds.length
+            ? pharmacyIds.map(id => {
+                const pharmacy = (db.pharmacies || []).find(item => item.id === id);
+                return `<div class="med-item-row care-list-row" style="font-size:11px;">
+                    <span>${escapeHtml(pharmacy ? pharmacyDisplayName(pharmacy) : 'Unknown pharmacy')}</span>
+                    <span class="care-list-actions">
+                        ${pharmacy ? `<button type="button" onclick="editPharmacyProfile('${escapeHtml(id)}')">Edit</button>` : ''}
+                        <button type="button" onclick="deleteMemberPharmacy('${escapeHtml(id)}')">Delete</button>
+                    </span>
+                </div>`;
+            }).join('')
+            : '<div style="font-size:11px; padding:4px;">No pharmacies added.</div>';
     }
 
     if (diagnosisList) {
@@ -3095,6 +4421,105 @@ window.deleteMemberPrescriber = async function(id) {
 
 window.removeMemberPrescriber = function(id) {
     setHiddenJson('m-prescriber-ids-data', getHiddenJson('m-prescriber-ids-data').filter(item => item !== id));
+    renderMemberCareLists();
+};
+
+async function openPharmacyProfileEditor(pharmacy = null) {
+    const result = await showActionModal(pharmacy ? 'Edit Pharmacy' : 'Add Pharmacy', `
+        <div class="field-row-stacked"><label>Name:</label><input name="name" type="text" style="width:100%;" value="${escapeHtml(pharmacy?.name || '')}"></div>
+        <div class="field-row" style="margin-top:6px;">
+            <label>Phone:</label><input name="phone" type="text" style="width:130px;" value="${escapeHtml(pharmacy?.phone || '')}">
+            <label>Fax:</label><input name="fax" type="text" style="width:130px;" value="${escapeHtml(pharmacy?.fax || '')}">
+        </div>
+        <div class="field-row" style="margin-top:6px;">
+            <label>Email:</label><input name="email" type="email" style="width:190px;" value="${escapeHtml(pharmacy?.email || '')}">
+            <label>Website:</label><input name="website" type="url" style="width:190px;" value="${escapeHtml(pharmacy?.website || '')}">
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px;"><label>Address:</label><input name="address" type="text" style="width:100%;" value="${escapeHtml(pharmacy?.address || '')}"></div>
+        <div class="field-row-stacked" style="margin-top:6px;"><label>Notes:</label><textarea name="notes" rows="2" style="width:100%; resize:none;">${escapeHtml(pharmacy?.notes || '')}</textarea></div>
+    `, pharmacy ? 'Save' : 'Add');
+    if (!result) return;
+    const name = String(result.name || '').trim();
+    if (!name) {
+        await appAlert('Pharmacy name is required.');
+        return null;
+    }
+    return {
+        ...(pharmacy || {}),
+        id: pharmacy?.id || Date.now().toString(),
+        name,
+        phone: String(result.phone || '').trim(),
+        fax: String(result.fax || '').trim(),
+        email: String(result.email || '').trim(),
+        website: String(result.website || '').trim(),
+        address: String(result.address || '').trim(),
+        notes: String(result.notes || '').trim()
+    };
+}
+
+window.addMemberPharmacy = async function() {
+    const pharmacy = await openPharmacyProfileEditor();
+    if (!pharmacy) return;
+    const existing = (db.pharmacies || []).find(item => pharmacyIdentityKey(item) === pharmacyIdentityKey(pharmacy));
+    if (existing) {
+        pharmacy.id = existing.id;
+    } else {
+        if (!Array.isArray(db.pharmacies)) db.pharmacies = [];
+        db.pharmacies.push(pharmacy);
+    }
+    const ids = getHiddenJson('m-pharmacy-ids-data');
+    setHiddenJson('m-pharmacy-ids-data', Array.from(new Set([...ids, pharmacy.id])));
+    renderMemberCareLists();
+    await sync();
+    renderMemberCareLists();
+};
+
+window.editPharmacyProfile = async function(id) {
+    if (!Array.isArray(db.pharmacies)) db.pharmacies = [];
+    const index = db.pharmacies.findIndex(item => item.id === id);
+    if (index < 0) {
+        await appAlert('Pharmacy profile was not found.');
+        return;
+    }
+    const updated = await openPharmacyProfileEditor(db.pharmacies[index]);
+    if (!updated) return;
+    db.pharmacies[index] = updated;
+    renderMemberCareLists();
+    await sync();
+    renderMemberCareLists();
+};
+
+function clearPharmacyReferences(id) {
+    db.family.forEach(member => {
+        member.pharmacyIds = memberPharmacyIds(member).filter(item => item !== id);
+    });
+    db.inventory.forEach(med => {
+        if (med.pharmacyId === id) med.pharmacyId = '';
+    });
+    db.schedules.forEach(schedule => {
+        if (schedule.pharmacyId === id) schedule.pharmacyId = '';
+    });
+    db.family.forEach(member => {
+        if (Array.isArray(member.currentMedicationList)) {
+            member.currentMedicationList.forEach(item => {
+                if (item.pharmacyId === id) item.pharmacyId = '';
+            });
+        }
+    });
+}
+
+window.deleteMemberPharmacy = async function(id) {
+    if (!await appConfirm('Delete this pharmacy profile and remove it from medication/pharmacy dropdowns?', 'Delete Pharmacy')) return;
+    clearPharmacyReferences(id);
+    db.pharmacies = (db.pharmacies || []).filter(item => item.id !== id);
+    setHiddenJson('m-pharmacy-ids-data', getHiddenJson('m-pharmacy-ids-data').filter(item => item !== id));
+    renderMemberCareLists();
+    await sync();
+    renderMemberCareLists();
+};
+
+window.removeMemberPharmacy = function(id) {
+    setHiddenJson('m-pharmacy-ids-data', getHiddenJson('m-pharmacy-ids-data').filter(item => item !== id));
     renderMemberCareLists();
 };
 
@@ -3675,6 +5100,7 @@ function renderMemberPrnMedicationOrders(memberId) {
             <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
             <div style="text-align:right; margin-top:5px;">
                 <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
+                <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button onclick="event.stopPropagation(); administerDose('${escapeHtml(schedule.medId)}','${escapeHtml(schedule.id)}')">Administer</button>
                 ${usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${escapeHtml(schedule.id)}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                 ${set
@@ -3706,6 +5132,7 @@ function completedScheduleSummaryHtml(schedule, candidates = null) {
             <div class="completed-med-actions">
                 ${modifyAction}
                 ${linkedRemoveAction}
+                <button type="button" onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button type="button" onclick="event.stopPropagation(); removeCompletedSchedule('${escapeHtml(schedule.id)}')">Remove</button>
                 ${med ? `<button type="button" onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>` : ''}
             </div>
@@ -3803,9 +5230,37 @@ function memberTaskIconHtml(member) {
 }
 
 function memberFormHasAnyInput() {
-    return ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-addr', 'm-phone', 'm-email']
+    return ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-height', 'm-current-weight', 'm-addr', 'm-phone', 'm-email', 'm-care-notes']
         .some(fieldId => String(document.getElementById(fieldId)?.value || '').trim());
 }
+
+function calculateBmiValue(heightValue, heightUnit, weightValue, weightUnit) {
+    const height = parseAmount(heightValue, NaN);
+    const weight = parseAmount(weightValue, NaN);
+    if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(weight) || weight <= 0) return '';
+    const heightMeters = heightUnit === 'cm' ? height / 100 : height * 0.0254;
+    const weightKg = weightUnit === 'kg' ? weight : weight * 0.45359237;
+    if (!heightMeters) return '';
+    return (weightKg / (heightMeters * heightMeters)).toFixed(1);
+}
+
+function latestWeightReadingForMember(memberId) {
+    return db.vitals
+        .filter(reading => reading.memberId === memberId && reading.type === 'weight' && reading.weight !== undefined && reading.weight !== '')
+        .slice()
+        .sort((a, b) => String(`${b.date || ''} ${b.time || ''}`).localeCompare(String(`${a.date || ''} ${a.time || ''}`)))[0] || null;
+}
+
+window.updateMemberBmiPreview = function() {
+    const bmi = calculateBmiValue(
+        document.getElementById('m-height')?.value,
+        document.getElementById('m-height-unit')?.value || 'in',
+        document.getElementById('m-current-weight')?.value,
+        document.getElementById('m-current-weight-unit')?.value || 'lb'
+    );
+    const input = document.getElementById('m-bmi');
+    if (input) input.value = bmi || '';
+};
 
 function collectMemberFormData() {
     const vitalGoals = collectMemberGoals();
@@ -3816,11 +5271,12 @@ function collectMemberFormData() {
         .filter(Boolean);
     const diagnosesList = Array.from(new Set([...getHiddenJson('m-diagnoses-data'), ...typedDiagnoses]));
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
+    const pharmacyIds = getHiddenJson('m-pharmacy-ids-data');
     const allergies = normalizeMemberAllergies({ allergies: getHiddenJson('m-allergies-data') });
     const firstName = document.getElementById('m-first').value.trim();
     const lastName = document.getElementById('m-last').value.trim();
     if (!firstName || !lastName) {
-        alert("First and Last Name required.");
+        void appAlert('First and last name are required.', 'Member Profile Needs Review');
         return null;
     }
     return {
@@ -3830,6 +5286,11 @@ function collectMemberFormData() {
         sex: document.getElementById('m-sex').value,
         age: document.getElementById('m-age').value,
         dob: document.getElementById('m-dob').value,
+        height: document.getElementById('m-height')?.value || '',
+        heightUnit: document.getElementById('m-height-unit')?.value || 'in',
+        currentWeight: document.getElementById('m-current-weight')?.value || '',
+        currentWeightUnit: document.getElementById('m-current-weight-unit')?.value || 'lb',
+        bmi: document.getElementById('m-bmi')?.value || '',
         providers: document.getElementById('m-providers').value,
         diagnoses: diagnosesList.join(', '),
         diagnosesList,
@@ -3837,13 +5298,16 @@ function collectMemberFormData() {
         address: document.getElementById('m-addr').value,
         phone: document.getElementById('m-phone').value,
         email: document.getElementById('m-email').value,
+        careNotes: document.getElementById('m-care-notes')?.value || '',
         prescriberIds,
+        pharmacyIds,
         notificationPrefs: {
             medicationReminders: document.getElementById('m-notify-enabled')?.checked !== false,
             emailReminders: document.getElementById('m-email-reminders')?.checked === true
         },
         currentMedicationList: currentMemberMedicationList(),
         labDocuments: currentMemberLabDocuments(),
+        progressNotes: currentMemberProgressNotes(),
         calendarColor: document.getElementById('m-calendar-color').value || '#000080',
         vitalGoals,
         name: `${firstName} ${lastName}`
@@ -3920,14 +5384,26 @@ window.openMemberModal = async function(id = null) {
     };
 
     // 1. Clear all fields safely
-    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-providers', 'm-diag', 'm-addr', 'm-phone', 'm-email', 'm-meds', 'member-lab-notes'];
+    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-height', 'm-current-weight', 'm-bmi', 'm-providers', 'm-diag', 'm-addr', 'm-phone', 'm-email', 'm-care-notes', 'm-meds', 'member-lab-notes', 'm-progress-note-title'];
     fields.forEach(f => safeSet(f, ''));
+    safeSet('m-height-unit', 'in');
+    safeSet('m-current-weight-unit', 'lb');
     safeSet('member-lab-date', localDateKey());
+    safeSet('m-progress-note-date', localDateKey());
+    safeSet('m-progress-note-time', defaultProgressNoteTime());
     setHiddenJson('m-prescriber-ids-data', []);
+    setHiddenJson('m-pharmacy-ids-data', []);
     setHiddenJson('m-diagnoses-data', []);
     setHiddenJson('m-allergies-data', []);
     setHiddenJson('m-current-med-list-data', []);
     setHiddenJson('m-lab-documents-data', []);
+    setHiddenJson('m-progress-notes-data', []);
+    activeProgressNotePreviewId = null;
+    resetProgressNoteEditor();
+    safeSet('m-progress-note-report-from', '');
+    safeSet('m-progress-note-report-to', '');
+    const reportPrivate = document.getElementById('m-progress-note-report-private');
+    if (reportPrivate) reportPrivate.checked = false;
     const notifyEnabled = document.getElementById('m-notify-enabled');
     const emailReminders = document.getElementById('m-email-reminders');
     if (notifyEnabled) notifyEnabled.checked = true;
@@ -3936,6 +5412,7 @@ window.openMemberModal = async function(id = null) {
     renderMemberMonitoringProfiles(null);
     renderMemberCurrentMedicationList();
     renderMemberLabDocuments();
+    renderMemberProgressNotes();
 
     const activeMedsContainer = document.getElementById('member-active-meds-list');
     if (activeMedsContainer) activeMedsContainer.innerHTML = '';
@@ -3959,25 +5436,35 @@ window.openMemberModal = async function(id = null) {
             safeSet('m-sex', m.sex || 'Male');
             safeSet('m-age', m.age);
             safeSet('m-dob', m.dob);
+            safeSet('m-height', m.height || '');
+            safeSet('m-height-unit', m.heightUnit || 'in');
+            const latestWeight = latestWeightReadingForMember(m.id);
+            safeSet('m-current-weight', m.currentWeight || latestWeight?.weight || '');
+            safeSet('m-current-weight-unit', m.currentWeightUnit || latestWeight?.weightUnit || 'lb');
+            updateMemberBmiPreview();
             safeSet('m-providers', m.providers);
             safeSet('m-diag', '');
             safeSet('m-addr', m.address);
             safeSet('m-phone', m.phone);
             safeSet('m-email', m.email);
+            safeSet('m-care-notes', m.careNotes);
             safeSet('m-meds', m.prescribedMeds);
             safeSet('m-calendar-color', m.calendarColor || (m.sex === 'Female' ? '#8b1558' : '#000080'));
             const notifications = m.notificationPrefs || {};
             if (notifyEnabled) notifyEnabled.checked = notifications.medicationReminders !== false;
             if (emailReminders) emailReminders.checked = notifications.emailReminders === true;
             setHiddenJson('m-prescriber-ids-data', memberPrescriberIds(m));
+            setHiddenJson('m-pharmacy-ids-data', memberPharmacyIds(m));
             setHiddenJson('m-diagnoses-data', normalizeMemberDiagnoses(m));
             setHiddenJson('m-allergies-data', normalizeMemberAllergies(m));
             setHiddenJson('m-current-med-list-data', Array.isArray(m.currentMedicationList) ? m.currentMedicationList : []);
             setHiddenJson('m-lab-documents-data', Array.isArray(m.labDocuments) ? m.labDocuments : []);
+            setHiddenJson('m-progress-notes-data', Array.isArray(m.progressNotes) ? m.progressNotes : []);
             renderMemberCareLists();
             renderMemberMonitoringProfiles(m.id);
             renderMemberCurrentMedicationList();
             renderMemberLabDocuments();
+            renderMemberProgressNotes();
             setMemberGoalFields(m);
 
             // 3. Populate Active Meds
@@ -4050,6 +5537,7 @@ window.openMemberModal = async function(id = null) {
                         <div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>
                         <div style="text-align:right; margin-top:3px;">
                             <button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button>
+                            <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${schedule.id}')">Audit</button>
                             ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${schedule.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         </div>
                     </div>`;
@@ -4085,6 +5573,7 @@ window.openMemberModal = async function(id = null) {
                     <div class="member-med-timeline" data-schedule-id="${s.id}"></div>
                     <div style="text-align:right; margin-top:5px;">
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
+                        <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
                         ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
@@ -4280,7 +5769,11 @@ window.saveOrderModification = async function() {
         });
         const med = db.inventory.find(item => item.id === sched.medId);
         const member = db.family.find(item => item.id === sched.memberId);
-        addAudit('Medication modified', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(sched)} ${getScheduleTimes(sched).join(', ') || 'PRN'}`);
+        addAudit('Medication modified', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(sched)} ${getScheduleTimes(sched).join(', ') || 'PRN'}`, {
+            scheduleId: sched.id,
+            medId: sched.medId,
+            memberId: sched.memberId
+        });
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
         openMemberModal(sched.memberId); // Refresh member profile
@@ -4325,6 +5818,7 @@ window.addInventory = async function() {
     const qty = parseAmount(document.getElementById('med-qty').value, NaN);
     const formulation = document.getElementById('med-formulation').value;
     const prescriberId = document.getElementById('med-prescriber')?.value || '';
+    const pharmacyId = document.getElementById('med-pharmacy')?.value || '';
     const inventoryBehavior = dosageFormUsesContainerTracking(formulation)
         ? 'container-finish'
         : (document.getElementById('med-inventory-behavior')?.value || defaultInventoryBehaviorForFormulation(formulation));
@@ -4411,6 +5905,7 @@ window.addInventory = async function() {
         components: components, // Only for combinations
         minThreshold: parseAmount(document.getElementById('med-threshold').value, 5),
         prescriberId,
+        pharmacyId,
         assignedMemberIds: inventoryAssignedMemberIds,
         barcodeCode,
         barcodeCodes: [barcodeCode],
@@ -4434,6 +5929,8 @@ window.addInventory = async function() {
     if (sharedComboAmount) sharedComboAmount.value = '1';
     const medPrescriber = document.getElementById('med-prescriber');
     if (medPrescriber) medPrescriber.value = '';
+    const medPharmacy = document.getElementById('med-pharmacy');
+    if (medPharmacy) medPharmacy.value = '';
     const assignmentMode = document.getElementById('med-assignment-mode');
     if (assignmentMode) assignmentMode.value = 'all';
     renderMedicationAssignmentControls('med', []);
@@ -5043,6 +6540,8 @@ window.openMedProfile = function(id) {
     updateMedProfileMode();
     const prescriberSelect = document.getElementById('modal-prescriber');
     if (prescriberSelect) prescriberSelect.innerHTML = prescriberOptionsHtml(med.prescriberId || '', '', true);
+    const pharmacySelect = document.getElementById('modal-pharmacy');
+    if (pharmacySelect) pharmacySelect.innerHTML = pharmacyOptionsHtml(med.pharmacyId || '', '', true);
     renderMedicationAssignmentControls('modal', assignedMemberIds(med));
     const imgContainer = document.getElementById('modal-image-container');
     imgContainer.innerHTML = med.imagePath ? `<img src="${imageSrc(med.imagePath)}" style="max-width:100%; max-height:100%;">` : "No Photo";
@@ -5121,6 +6620,7 @@ window.saveMedProfile = async function() {
         med.controlLevel = document.getElementById('modal-control-level').value;
         med.expiry = document.getElementById('modal-expiry').value;
         med.prescriberId = document.getElementById('modal-prescriber')?.value || '';
+        med.pharmacyId = document.getElementById('modal-pharmacy')?.value || '';
         med.assignedMemberIds = profileAssignedMemberIds;
         med.barcodeCode = barcodeCodes[0];
         med.barcodeCodes = barcodeCodes;
@@ -8442,6 +9942,54 @@ window.viewAuditTrail = async function() {
     `, 'Close');
 };
 
+window.viewMedicationOrderAudit = async function(scheduleId) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    if (!schedule) {
+        await appAlert('That medication order is no longer available.', 'Medication Audit');
+        return;
+    }
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    const member = db.family.find(item => item.id === schedule.memberId);
+    const medName = med?.name || schedule.medName || 'Medication';
+    const memberName = member ? memberDisplayName(member) : schedule.memberName || '';
+    const auditRows = (db.auditTrail || [])
+        .filter(entry => {
+            const meta = entry.meta || {};
+            if (meta.scheduleId === scheduleId) return true;
+            if (meta.medId && meta.medId === schedule.medId && (!meta.memberId || meta.memberId === schedule.memberId)) return true;
+            const searchable = `${entry.subject || ''} ${entry.details || ''}`.toLowerCase();
+            return searchable.includes(String(medName).toLowerCase()) && (!memberName || searchable.includes(memberName.toLowerCase()));
+        })
+        .map(entry => ({
+            when: auditDisplayTime(entry),
+            type: entry.action || 'Audit',
+            details: `${entry.subject || ''}${entry.details ? ` | ${entry.details}` : ''}`
+        }));
+    const historyRows = (db.history || [])
+        .filter(entry => entry.scheduleId === scheduleId)
+        .map(entry => ({
+            when: entry.timestamp || '',
+            type: 'Administration',
+            details: `${doseStatusLabel(entry.doseStatus || 'given')}${entry.scheduledDate || entry.scheduledTime ? ` | Scheduled ${entry.scheduledDate || ''} ${entry.scheduledTime || ''}` : ''}${entry.doseNote ? ` | Note: ${entry.doseNote}` : ''}${entry.details ? ` | ${entry.details}` : ''}`
+        }));
+    const rows = [...auditRows, ...historyRows]
+        .sort((a, b) => String(b.when).localeCompare(String(a.when)))
+        .map(row => `<tr><td>${escapeHtml(row.when)}</td><td>${escapeHtml(row.type)}</td><td>${escapeHtml(row.details)}</td></tr>`)
+        .join('');
+    await showActionModal(`Medication Audit: ${medName}`, `
+        <div style="font-size:11px; margin-bottom:6px;">
+            <strong>${escapeHtml(medName)} ${med ? escapeHtml(formatMedStrength(med)) : ''}</strong>
+            ${memberName ? ` | ${escapeHtml(memberName)}` : ''}
+        </div>
+        <div class="audit-detail-list">
+            <table class="win98-report-table">
+                <thead><tr><th>Date/Time</th><th>Type</th><th>Details</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="3">No audit or administration history found for this order.</td></tr>'}</tbody>
+            </table>
+        </div>
+    `, 'Close');
+};
+
 function getInventoryStatusGroups() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -8535,6 +10083,15 @@ function reportStyles() {
         .status-box { border: 1px solid #000; padding: 6px; min-height: 70px; }
         .paper-check { font-size: 16px; line-height: 1; text-align: center; }
         .comment-cell { min-width: 140px; height: 28px; }
+        .progress-note-report-entry { border: 1px solid #888; padding: 8px; margin: 8px 0; background: #fffef0; }
+        .profile-diary-tag, .profile-diary-badge, .profile-diary-scale-chip { display: inline-block; border: 1px solid #777; padding: 1px 5px; margin: 2px 3px 2px 0; font-size: 10px; font-weight: bold; }
+        .profile-diary-tag { color: #006000; background: #e6ffe6; }
+        .profile-diary-badge.important { color: #b00000; background: #ffe0e0; }
+        .profile-diary-badge.followup, .profile-diary-badge.provider { color: #000080; background: #e0ecff; }
+        .profile-diary-badge.private { color: #703090; background: #f0e0ff; }
+        .profile-diary-badge.resolved { color: #006000; background: #e0ffe0; }
+        .profile-diary-linked-context { border-left: 4px solid #008000; padding: 4px 6px; margin: 5px 0; background: #f2fff2; }
+        .profile-diary-scale-chips { margin: 4px 0; }
         ul { margin: 4px 0 0 16px; padding: 0; }
     `;
 }
@@ -8847,6 +10404,7 @@ const medicationSummaryColumns = [
     { id: 'dose', label: 'Dose / Qty' },
     { id: 'usedFor', label: 'Used For' },
     { id: 'prescriber', label: 'Prescriber' },
+    { id: 'pharmacy', label: 'Pharmacy' },
     { id: 'frequency', label: 'Frequency / Times' },
     { id: 'inventory', label: 'Inventory Forecast' },
     { id: 'lastGiven', label: 'Last Given' }
@@ -8885,6 +10443,12 @@ function medicationSummaryPrescriberName(schedule, med) {
     return prescriber ? prescriberDisplayName(prescriber) : 'Not specified';
 }
 
+function medicationSummaryPharmacyName(schedule, med) {
+    const pharmacyId = schedule?.pharmacyId || med?.pharmacyId || '';
+    const pharmacy = pharmacyId ? (db.pharmacies || []).find(item => item.id === pharmacyId) : null;
+    return pharmacy ? pharmacyDisplayName(pharmacy) : 'Not specified';
+}
+
 function medicationSummaryRowValues(schedule) {
     const med = db.inventory.find(item => item.id === schedule.medId);
     if (!med) return null;
@@ -8901,6 +10465,7 @@ function medicationSummaryRowValues(schedule) {
         dose: `${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}<br><small>${escapeHtml(formatQtyForSchedule(schedule, med))}</small>`,
         usedFor: escapeHtml(schedule.indication || 'Not specified'),
         prescriber: escapeHtml(medicationSummaryPrescriberName(schedule, med)),
+        pharmacy: escapeHtml(medicationSummaryPharmacyName(schedule, med)),
         frequency: `${escapeHtml(scheduleText)}${schedule.instructions ? `<br><small>${escapeHtml(schedule.instructions)}</small>` : ''}`,
         inventory: `${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}${forecast ? `<br><small>${escapeHtml(forecast)}</small>` : ''}`,
         lastGiven: escapeHtml(lastGiven?.timestamp || 'Not documented')
@@ -9807,7 +11372,11 @@ window.finalizePendingScheduleOrders = async function() {
         });
         const med = db.inventory.find(item => item.id === order.medId);
         const member = db.family.find(item => item.id === order.memberId);
-        addAudit('Medication scheduled', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(order)} ${getScheduleTimes(order).join(', ') || 'PRN'}`);
+        addAudit('Medication scheduled', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(order)} ${getScheduleTimes(order).join(', ') || 'PRN'}`, {
+            scheduleId: order.id,
+            medId: order.medId,
+            memberId: order.memberId
+        });
     });
     pendingScheduleOrders = pendingScheduleOrders.filter(order => !selectedIds.includes(order.id));
     await sync();
@@ -9970,7 +11539,12 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${overrideText}${noteText}`
     };
     db.history.unshift(historyEntry);
-    addAudit('Dose documented', med.name, `${memberDisplayName(db.family.find(member => member.id === sched.memberId))} | ${doseStatusLabel(status)} | ${formatActualTimestamp(actual)}`);
+    addAudit('Dose documented', med.name, `${memberDisplayName(db.family.find(member => member.id === sched.memberId))} | ${doseStatusLabel(status)} | ${formatActualTimestamp(actual)}`, {
+        scheduleId: sched.id,
+        medId: sched.medId,
+        memberId: sched.memberId,
+        historyId: historyEntry.id
+    });
 
     if (sched.isOneTime) markScheduleCompleted(sched);
     updateSchedulePatternAfterAdministration(sched, actual, historyEntry);
@@ -10332,7 +11906,11 @@ window.finishTopicalContainer = async function(scheduleId) {
         stockLogDetail: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished`,
         details: `${formatAmount(containers)} ${inventoryUnitFor(med)} marked finished; container inventory reduced${result.note ? `; Note: ${result.note}` : ''}`
     });
-    addAudit('Container finished', med.name, `${formatAmount(containers)} ${inventoryUnitFor(med)} removed and order completed.`);
+    addAudit('Container finished', med.name, `${formatAmount(containers)} ${inventoryUnitFor(med)} removed and order completed.`, {
+        scheduleId: schedule.id,
+        medId: schedule.medId,
+        memberId: schedule.memberId
+    });
     markScheduleCompleted(schedule);
     await sync();
     const memberModal = document.getElementById('member-modal');
@@ -10479,7 +12057,11 @@ window.deleteSchedule = async function(id) {
         item.completedAt = new Date().toISOString();
         if (!item.endDate || item.endDate === 'Ongoing') item.endDate = localDateKey();
         const itemMed = db.inventory.find(inv => inv.id === item.medId);
-        addAudit('Medication discontinued', itemMed?.name || 'Medication', `${scope === 'linked' ? 'Linked group' : 'Single order'} | ${localDateKey()}`);
+        addAudit('Medication discontinued', itemMed?.name || 'Medication', `${scope === 'linked' ? 'Linked group' : 'Single order'} | ${localDateKey()}`, {
+            scheduleId: item.id,
+            medId: item.medId,
+            memberId: item.memberId
+        });
     });
     await sync();
 
@@ -13091,9 +14673,11 @@ function renderAll() {
     const tableBody = document.getElementById('inventory-table-body');
     const medDataList = document.getElementById('med-options');
     const medPrescriberSelect = document.getElementById('med-prescriber');
+    const medPharmacySelect = document.getElementById('med-pharmacy');
     if (tableBody) tableBody.innerHTML = '';
     if (medDataList) medDataList.innerHTML = '';
     if (medPrescriberSelect) medPrescriberSelect.innerHTML = prescriberOptionsHtml(medPrescriberSelect.value, '', true);
+    if (medPharmacySelect) medPharmacySelect.innerHTML = pharmacyOptionsHtml(medPharmacySelect.value, '', true);
     renderMedicationAssignmentControls('med');
     renderSchedulePrescriberOptions();
     const inventoryQuery = (document.getElementById('inventory-search')?.value || '').trim().toLowerCase();
@@ -13193,6 +14777,7 @@ sortedInventory.forEach(med => {
     renderVitalDashboard();
     renderDataHealthSummary();
     enhanceButtonIcons();
+    renderGuidedHelpTips();
 }
 window.calculateLiveDose = function() {
     const medId = document.getElementById('sched-strength-display').value;

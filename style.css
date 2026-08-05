@@ -645,6 +645,53 @@ button {
     border-bottom-color: #e6f1ff;
 }
 
+.profile-demographics-strip {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.62fr) minmax(520px, 1fr);
+    gap: 10px;
+    align-items: end;
+    padding: 6px 8px;
+    border: 2px outset #ffffff;
+    background: linear-gradient(90deg, #dbeaff 0%, #ecf8ff 52%, #fff3cc 100%);
+}
+
+.profile-name-grid,
+.profile-demo-grid {
+    display: grid;
+    gap: 7px;
+    align-items: end;
+}
+
+.profile-name-grid {
+    grid-template-columns: minmax(110px, 1fr) 64px minmax(110px, 1fr);
+}
+
+.profile-demo-grid {
+    grid-template-columns: minmax(116px, 1.1fr) 56px 120px 72px 54px 72px 54px 58px 88px;
+}
+
+.profile-demo-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.profile-name-grid input,
+.profile-demo-grid input,
+.profile-demo-grid select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#m-bmi {
+    background: #e8e8e8;
+    color: #000080;
+    font-weight: bold;
+}
+
 .current-med-list-table td:first-child strong {
     color: #000080;
 }
@@ -708,7 +755,7 @@ button {
 .current-meds-builder-fields {
     grid-area: fields;
     display: none;
-    grid-template-columns: minmax(130px, 0.75fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(150px, 0.9fr);
+    grid-template-columns: minmax(120px, 0.7fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(130px, 0.8fr);
     gap: 7px;
     min-width: 0;
     margin: 4px 0 2px 0;
@@ -860,6 +907,1036 @@ button {
     color: #000080;
 }
 
+.care-list-row {
+    gap: 6px;
+}
+
+.care-list-row > span:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.care-list-actions {
+    display: inline-flex;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.profile-main-grid {
+    display: grid;
+    grid-template-columns: minmax(360px, 0.85fr) minmax(520px, 1.15fr);
+    gap: 10px;
+    margin-top: 10px;
+    align-items: start;
+}
+
+.profile-card {
+    margin: 0;
+    min-width: 0;
+    padding: 10px;
+    border-color: #ffffff #808080 #808080 #ffffff;
+}
+
+.profile-card > legend {
+    color: #000080;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 0 5px;
+}
+
+.profile-card-contact {
+    background: linear-gradient(90deg, #eef6ff 0%, #d7ebff 100%);
+}
+
+.profile-card-care {
+    background: linear-gradient(90deg, #f0fff0 0%, #def5df 100%);
+}
+
+.profile-card-safety {
+    background: linear-gradient(90deg, #fff7db 0%, #ffeec0 100%);
+}
+
+.profile-card-goals {
+    grid-column: 1 / -1;
+    background: linear-gradient(90deg, #f3f7ff 0%, #edf8ef 55%, #fff8dc 100%);
+}
+
+.profile-card-diary {
+    grid-column: 1 / -1;
+    background: linear-gradient(90deg, #f4edff 0%, #fff7d8 52%, #e7fff2 100%);
+}
+
+.profile-card-title,
+.profile-list-heading {
+    color: #000080;
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+.profile-contact-grid,
+.profile-two-column,
+.goal-card-grid {
+    display: grid;
+    gap: 8px;
+}
+
+.profile-contact-grid {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    align-items: end;
+}
+
+.profile-contact-grid input,
+.profile-care-note textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.profile-span-2 {
+    grid-column: 1 / -1;
+}
+
+.profile-care-note {
+    margin-top: 8px;
+}
+
+.profile-care-note textarea {
+    resize: vertical;
+    min-height: 54px;
+    background: #fffff2;
+}
+
+.profile-two-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-list-panel {
+    height: 86px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 2px inset #ffffff;
+    margin: 3px 0 5px;
+}
+
+.profile-list-panel-tall {
+    min-height: 86px;
+    max-height: 132px;
+    height: 108px;
+}
+
+.goal-card-grid {
+    grid-template-columns: repeat(4, minmax(170px, 1fr));
+}
+
+.goal-card {
+    min-width: 0;
+    padding: 8px;
+    border: 2px outset #ffffff;
+    background: #ffffff;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #808080;
+}
+
+.goal-card-glucose {
+    background: #e8f4ff;
+}
+
+.goal-card-bp {
+    background: #fff1e6;
+}
+
+.goal-card-hr {
+    background: #ffeaf0;
+}
+
+.goal-card-weight {
+    background: #ecffe8;
+}
+
+.goal-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    color: #000080;
+    font-size: 13px;
+}
+
+.goal-card-header select {
+    max-width: 190px;
+}
+
+.goal-range-row,
+.bp-goal-grid {
+    display: grid;
+    gap: 5px;
+    align-items: end;
+    margin-top: 8px;
+}
+
+.goal-range-row {
+    grid-template-columns: minmax(58px, 1fr) auto minmax(58px, 1fr) auto;
+}
+
+.bp-goal-grid {
+    grid-template-columns: repeat(4, minmax(58px, 1fr));
+}
+
+.goal-card label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.goal-card input,
+.goal-card select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.goal-reference-note {
+    margin-top: 7px;
+    padding: 5px;
+    border: 1px dotted #808080;
+    background: rgba(255, 255, 255, 0.65);
+    color: #303030;
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.profile-diary-layout {
+    display: grid;
+    grid-template-columns: minmax(360px, 0.9fr) minmax(330px, 0.8fr) minmax(360px, 0.9fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.profile-diary-editor,
+.profile-diary-list {
+    min-width: 0;
+}
+
+.profile-diary-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    color: #000080;
+}
+
+.profile-diary-header > strong {
+    font-size: 12px;
+}
+
+.profile-diary-title-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(150px, 0.75fr);
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+#m-progress-note-template,
+#m-progress-note-link-type,
+#m-progress-note-link-id {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.profile-diary-template-row,
+.profile-diary-link-grid,
+.profile-diary-scale-grid {
+    margin-bottom: 5px;
+}
+
+.profile-diary-template-row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) auto;
+    gap: 5px;
+    align-items: end;
+}
+
+.profile-diary-template-row button {
+    white-space: nowrap;
+}
+
+.profile-diary-template-row label,
+.profile-diary-link-grid label,
+.profile-diary-scale-grid label,
+.profile-diary-attachment-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-weight: bold;
+    color: #000080;
+}
+
+.profile-diary-link-grid {
+    display: grid;
+    grid-template-columns: minmax(130px, 0.7fr) minmax(170px, 1fr);
+    gap: 5px;
+}
+
+.profile-diary-flags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 5px;
+    margin-bottom: 5px;
+    border: 2px inset #ffffff;
+    background: #eef6ff;
+}
+
+.profile-diary-flags-title {
+    flex: 1 0 100%;
+    color: #303030;
+    font-weight: bold;
+}
+
+.profile-diary-flag-toggle,
+.profile-diary-include-private {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #202020;
+    font-weight: bold;
+    white-space: nowrap;
+    padding: 3px 7px;
+    border: 2px outset #ffffff;
+    background: #ffffff;
+    cursor: pointer;
+}
+
+.profile-diary-flag-toggle.selected {
+    border: 2px inset #ffffff;
+    background: #dfffe1;
+    color: #006000;
+}
+
+.profile-diary-flag-toggle.selected span::before {
+    content: "✓ ";
+    color: #006000;
+    font-weight: bold;
+}
+
+.profile-diary-flags input[type="checkbox"],
+.profile-diary-include-private input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    flex: 0 0 auto;
+    appearance: auto;
+    opacity: 1;
+    position: static;
+}
+
+.profile-diary-scale-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(54px, 1fr));
+    gap: 5px;
+    padding: 5px;
+    border: 2px inset #ffffff;
+    background: #fff8d7;
+}
+
+.profile-diary-scale-grid input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.profile-diary-tag-suggestions {
+    min-height: 20px;
+    margin: 2px 0 5px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    color: #404040;
+}
+
+.profile-diary-tag-suggestions button {
+    min-height: 20px;
+    padding: 1px 6px;
+    color: #006000;
+    font-weight: bold;
+}
+
+#m-progress-note-title,
+#m-progress-note-tags {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.rich-text-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    border: 2px outset #ffffff;
+    background: #d8d8d8;
+    align-items: center;
+}
+
+.rich-text-toolbar button,
+.rich-color-tool {
+    min-width: 28px;
+    min-height: 24px;
+}
+
+.rich-tool-button,
+.rich-color-tool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+.rich-tool-wide {
+    min-width: 58px;
+}
+
+.rich-tool-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    min-height: 16px;
+    color: #000080;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.rich-tool-italic {
+    font-style: italic;
+}
+
+.rich-tool-underline {
+    text-decoration: underline;
+}
+
+.rich-tool-color {
+    border-bottom: 3px solid currentColor;
+}
+
+.rich-color-tool {
+    position: relative;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+    box-sizing: border-box;
+}
+
+.rich-color-tool input[type="color"] {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px inset #ffffff;
+    background: #ffffff;
+}
+
+.rich-text-editor {
+    min-height: 110px;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #fffff2;
+    line-height: 1.35;
+}
+
+.rich-text-editor:empty::before {
+    content: attr(data-placeholder);
+    color: #707070;
+}
+
+.rich-text-editor ul,
+.rich-text-editor ol,
+.profile-diary-preview-body ul,
+.profile-diary-preview-body ol {
+    margin: 3px 0 3px 20px;
+    padding: 0;
+}
+
+.profile-diary-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.button-plus-sign {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-right: 4px;
+    border: 1px outset #ffffff;
+    background: #e6ffe6;
+    color: #006000;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.profile-diary-list {
+    height: 410px;
+    overflow-y: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 4px;
+}
+
+.profile-diary-filterbar {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(110px, 0.65fr) minmax(110px, 0.65fr);
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+.profile-diary-filterbar input,
+.profile-diary-filterbar select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.profile-diary-exportbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(96px, 1fr));
+    gap: 5px;
+    align-items: end;
+    padding: 5px;
+    margin-bottom: 5px;
+    border: 2px inset #ffffff;
+    background: #e6ffe6;
+}
+
+.profile-diary-exportbar label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-weight: bold;
+    color: #006000;
+}
+
+.profile-diary-exportbar input[type="date"] {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.profile-diary-exportbar .profile-diary-include-private {
+    grid-column: 1 / -1;
+    justify-content: center;
+    color: #006000;
+    background: #f8fff8;
+}
+
+.diary-output-button {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.progress-template-manager {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.55fr) minmax(420px, 1fr);
+    gap: 10px;
+    min-height: 430px;
+}
+
+.template-manager-sidebar,
+.template-manager-editor {
+    min-width: 0;
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #eef6ff;
+}
+
+.template-manager-editor {
+    background: #fffbe8;
+}
+
+.template-manager-sidebar label,
+.template-manager-editor label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 7px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.template-manager-sidebar select,
+.template-manager-editor input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.template-body-label {
+    margin: 7px 0 3px;
+    color: #000080;
+    font-weight: bold;
+    text-align: center;
+}
+
+.template-rich-toolbar {
+    margin-bottom: 4px;
+}
+
+.template-body-editor {
+    min-height: 170px;
+    max-height: 260px;
+    margin-bottom: 8px;
+}
+
+.template-existing-list {
+    height: 260px;
+    overflow-y: auto;
+    margin-top: 8px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 4px;
+}
+
+.template-existing-list button {
+    display: block;
+    width: 100%;
+    margin-bottom: 4px;
+    text-align: left;
+}
+
+.template-existing-list button small {
+    display: block;
+    margin-top: 2px;
+    color: #405060;
+}
+
+.template-danger-zone {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #fff0f0;
+}
+
+.danger-button {
+    color: #b00000;
+    font-weight: bold;
+}
+
+.danger-button:disabled {
+    color: #808080;
+}
+
+.guided-help-toggle {
+    color: #000080;
+    font-weight: bold;
+}
+
+.guided-help-toggle.guided-help-off {
+    color: #404040;
+}
+
+.guide-tip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    margin-left: 4px;
+    border: 1px outset #ffffff;
+    background: #fff6a5;
+    color: #000080;
+    font-weight: bold;
+    font-size: 10px;
+    line-height: 1;
+    cursor: help;
+    vertical-align: middle;
+    z-index: 30;
+}
+
+.guide-tip::after {
+    content: attr(data-tip);
+    display: none;
+    position: absolute;
+    top: 18px;
+    left: 0;
+    width: 260px;
+    max-width: min(260px, 70vw);
+    padding: 6px 7px;
+    border: 2px outset #ffffff;
+    background: #fffde0;
+    color: #000000;
+    box-shadow: 2px 2px 0 #808080;
+    font-size: 11px;
+    font-weight: normal;
+    line-height: 1.3;
+    white-space: normal;
+    pointer-events: none;
+}
+
+.guide-tip:hover::after,
+.guide-tip:focus::after {
+    display: block;
+}
+
+.setup-guide-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 8px;
+    max-width: 860px;
+}
+
+.setup-guide-card {
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #eef6ff;
+    min-height: 92px;
+}
+
+.setup-guide-card.ready {
+    background: #e5ffe5;
+}
+
+.setup-guide-card strong {
+    display: block;
+    color: #000080;
+    margin-bottom: 4px;
+}
+
+.setup-guide-card small {
+    display: block;
+    min-height: 28px;
+}
+
+.setup-guide-card button {
+    margin-top: 6px;
+}
+
+.audit-detail-list {
+    max-height: 360px;
+    overflow: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.calibration-label-mark {
+    margin-top: 4px;
+    padding-top: 3px;
+    border-top: 1px solid #000000;
+    font-size: 10px;
+}
+
+.profile-diary-day {
+    margin-bottom: 7px;
+    border: 2px inset #ffffff;
+    background: #f5f5f5;
+}
+
+.profile-diary-day-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 6px;
+    border-bottom: 1px solid #808080;
+    background: linear-gradient(90deg, #dcecff 0%, #fff4c4 100%);
+    color: #000080;
+}
+
+.profile-diary-day-header span {
+    color: #404040;
+    font-size: 10px;
+}
+
+.profile-diary-entry {
+    padding: 4px 5px;
+    margin: 0;
+    border: 0;
+    border-bottom: 1px dotted #a0a0a0;
+    background: #f7fbff;
+    cursor: pointer;
+}
+
+.profile-diary-entry:nth-child(2n) {
+    background: #fffbee;
+}
+
+.profile-diary-entry:last-child {
+    border-bottom: 0;
+}
+
+.profile-diary-entry.preview-open {
+    background: #dfffe1;
+    outline: 2px solid #008000;
+    outline-offset: -2px;
+}
+
+.profile-diary-pinned {
+    margin-bottom: 8px;
+    border: 2px outset #fff7a8;
+    background: #fffbd1;
+}
+
+.profile-diary-entry.pinned-note {
+    background: #fff6a8;
+}
+
+.profile-diary-entry-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.profile-diary-entry-heading strong {
+    color: #000080;
+    font-size: 12px;
+}
+
+.profile-diary-entry-heading small {
+    display: block;
+    margin-top: 2px;
+    color: #405060;
+}
+
+.profile-diary-entry-link {
+    color: #006000 !important;
+}
+
+.profile-diary-entry-actions {
+    display: inline-flex;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.profile-diary-entry-actions button {
+    min-width: 48px;
+}
+
+.profile-diary-tag {
+    display: inline-block;
+    margin: 3px 3px 0 0;
+    padding: 1px 5px;
+    border: 1px solid #008000;
+    background: #e6ffe6;
+    color: #006000;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.profile-diary-badge {
+    display: inline-block;
+    margin: 3px 3px 0 0;
+    padding: 1px 5px;
+    border: 1px solid #808080;
+    background: #eeeeee;
+    color: #202020;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.profile-diary-badge.pinned {
+    border-color: #b08000;
+    background: #fff0a6;
+    color: #704800;
+}
+
+.profile-diary-badge.important {
+    border-color: #b00000;
+    background: #ffe0e0;
+    color: #b00000;
+}
+
+.profile-diary-badge.followup,
+.profile-diary-badge.provider {
+    border-color: #000080;
+    background: #e0ecff;
+    color: #000080;
+}
+
+.profile-diary-badge.private {
+    border-color: #703090;
+    background: #f0e0ff;
+    color: #703090;
+}
+
+.profile-diary-badge.resolved {
+    border-color: #008000;
+    background: #e0ffe0;
+    color: #006000;
+}
+
+.profile-diary-linked-context,
+.profile-diary-scale-chips,
+.profile-diary-attachment-preview {
+    margin: 6px 0;
+    padding: 5px;
+    border: 1px dotted #808080;
+    background: #f7fbff;
+}
+
+.profile-diary-linked-context {
+    color: #006000;
+    font-weight: bold;
+}
+
+.profile-diary-scale-chip {
+    display: inline-block;
+    margin: 2px 4px 2px 0;
+    padding: 2px 6px;
+    border: 1px solid #808080;
+    background: #ffffff;
+}
+
+.profile-diary-attachment-row {
+    margin-top: 5px;
+    padding: 5px;
+    border: 2px inset #ffffff;
+    background: #eef6ff;
+}
+
+.profile-diary-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 5px;
+}
+
+.profile-diary-attachment-pill,
+.profile-diary-file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.profile-diary-attachment-pill {
+    padding: 2px 4px;
+    border: 1px solid #808080;
+    background: #ffffff;
+}
+
+.profile-diary-attachment-pill strong,
+.profile-diary-file-chip {
+    padding: 1px 3px;
+    background: #000080;
+    color: #ffffff;
+    font-size: 9px;
+}
+
+.profile-diary-attachment-pill button {
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0 3px;
+    color: #b00000;
+    font-weight: bold;
+}
+
+.profile-diary-attachment-preview button {
+    margin: 3px 4px 0 0;
+}
+
+.progress-note-image-preview {
+    text-align: center;
+    background: #ffffff;
+    border: 2px inset #ffffff;
+    padding: 8px;
+}
+
+.progress-note-image-preview img {
+    max-width: 100%;
+    max-height: 70vh;
+}
+
+.profile-diary-timeline {
+    max-height: 170px;
+    overflow-y: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 5px;
+}
+
+.profile-diary-timeline-item {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 5px;
+    width: 100%;
+    margin-bottom: 4px;
+    padding: 4px;
+    text-align: left;
+    background: #f7fbff;
+}
+
+.profile-diary-timeline-item.important {
+    background: #ffecec;
+}
+
+.profile-diary-timeline-dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 3px;
+    border: 1px solid #000080;
+    background: #008000;
+}
+
+.profile-diary-timeline-item strong {
+    display: block;
+    color: #000080;
+}
+
+.profile-diary-preview-pane {
+    min-width: 0;
+}
+
+.profile-diary-preview-content {
+    height: 450px;
+    overflow-y: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    padding: 8px;
+}
+
+.profile-diary-preview-heading {
+    border-bottom: 1px dotted #808080;
+    padding-bottom: 6px;
+    margin-bottom: 8px;
+    background: linear-gradient(90deg, #eef6ff 0%, #fff8d7 100%);
+    padding: 6px;
+}
+
+.profile-diary-preview-heading strong {
+    display: block;
+    color: #000080;
+    font-size: 13px;
+}
+
+.profile-diary-preview-heading small {
+    display: block;
+    color: #405060;
+    margin-top: 2px;
+}
+
+.profile-diary-preview-body {
+    min-height: 260px;
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #fffff2;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.profile-diary-preview-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 5px;
+    margin-top: 8px;
+}
+
 .lab-pdf-preview-frame {
     width: 100%;
     height: min(70vh, 720px);
@@ -875,7 +1952,29 @@ button {
     .current-meds-builder-row,
     .member-lab-upload,
     .lab-upload-grid,
-    .member-lab-document-card {
+    .member-lab-document-card,
+    .profile-demographics-strip,
+    .profile-name-grid,
+    .profile-demo-grid,
+    .profile-main-grid,
+    .profile-two-column,
+    .goal-card-grid,
+    .profile-diary-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-card-goals,
+    .profile-card-diary {
+        grid-column: auto;
+    }
+
+    .bp-goal-grid {
+        grid-template-columns: repeat(2, minmax(58px, 1fr));
+    }
+
+    .profile-diary-scale-grid,
+    .profile-diary-exportbar,
+    .profile-diary-link-grid {
         grid-template-columns: 1fr;
     }
 
@@ -3513,7 +4612,7 @@ button {
 }
 
 .member-profile-window {
-    width: min(1340px, calc(100vw - 24px));
+    width: min(1500px, calc(100vw - 24px));
     max-height: calc(100vh - 32px);
     display: flex;
     flex-direction: column;

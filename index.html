@@ -86,6 +86,8 @@
                             <button type="button" onclick="repairDataHealthIssues()">Repair Safe Issues</button>
                             <button type="button" onclick="viewAuditTrail()">Audit Trail</button>
                             <button type="button" onclick="openFirstRunSetupGuide()">Setup Guide</button>
+                            <button type="button" onclick="openPrinterCalibration()">Printer Calibration</button>
+                            <button id="guided-help-toggle-button" type="button" class="guided-help-toggle" onclick="toggleGuidedHelp()">Hover help</button>
                         </div>
                         <div id="data-health-summary" class="maintenance-summary"></div>
                     </fieldset>
@@ -365,6 +367,10 @@
                         <div class="field-row" style="margin-top:8px;">
                             <label>Prescriber:</label>
                             <select id="med-prescriber" style="width:220px;"></select>
+                        </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Pharmacy:</label>
+                            <select id="med-pharmacy" style="width:220px;"></select>
                         </div>
                         <div class="field-row" style="margin-top:8px;">
                             <label for="med-assignment-mode">Assign to:</label>
@@ -724,7 +730,7 @@
                             <legend>1. Recommended Setup</legend>
                             <ol>
                                 <li>Add each person in the <strong>Members</strong> tab.</li>
-                                <li>Add providers, diagnoses, allergies, intolerance notes, monitoring goals, and contact information in each member profile.</li>
+                                <li>Add providers, pharmacies, diagnoses, allergies, intolerance notes, monitoring goals, height/weight/BMI details, and contact information in each member profile.</li>
                                 <li>Add inventory items before scheduling them. Use formulation, stock unit, give/apply unit, expiration date, storage, barcode, and assignment fields.</li>
                                 <li>Create regimens for grouped routines such as supplements, rescue plans, or condition-specific medication groups.</li>
                                 <li>Make a backup before heavy editing or before testing a major workflow.</li>
@@ -754,7 +760,21 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>4. Inventory Basics</legend>
+                            <legend>4. Progress Notes / Diary</legend>
+                            <ul>
+                                <li>Use each member profile's <strong>Progress Notes / Diary</strong> tab for daily observations, care handoffs, symptoms, side effects, provider calls, and lab follow-up.</li>
+                                <li>Templates can start common note types, and custom diary templates can be created or edited for your own workflows.</li>
+                                <li>Rich text tools support bold, italics, underline, lists, and text color.</li>
+                                <li>Notes can be pinned, marked important, flagged for follow-up, marked private for caregiver-only context, or marked resolved.</li>
+                                <li>Smart tag suggestions help organize notes. Search and tag/flag filters narrow the list quickly.</li>
+                                <li>Notes can link back to medications, administrations, monitoring readings, lab PDFs, regimens, or inventory items.</li>
+                                <li>Pain, mood, sleep, nausea, and energy scales can be saved with each entry for trend context.</li>
+                                <li>Images and PDFs can be attached. Diary reports can be printed or saved as PDFs by date range, with private notes excluded unless selected.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>5. Inventory Basics</legend>
                             <ul>
                                 <li>Inventory tracks name, strength, formulation, quantity, expiration, storage, control level, notes, photos, barcode aliases, prescriber, and member assignment.</li>
                                 <li>For tablets, capsules, mL, sprays, drops, and similar items, administered doses reduce stock.</li>
@@ -765,7 +785,7 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>5. Recipes &amp; Compounding</legend>
+                            <legend>6. Recipes &amp; Compounding</legend>
                             <ul>
                                 <li>Use <strong>Recipes</strong> to create reusable compounding formulas with ingredients, yield, storage, beyond-use dating, instructions, and prep notes.</li>
                                 <li>The prep panel shows ingredient requirements, barcode/QR scan checks, bottle label preview, lot details, and completed batch history.</li>
@@ -774,7 +794,7 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>6. Med Kits</legend>
+                            <legend>7. Med Kits</legend>
                             <ul>
                                 <li>Use <strong>Inventory &gt; Med Kits</strong> to create named kits such as Travel Kit, Emergency Kit, School Kit, Work Kit, or First Aid Kit.</li>
                                 <li>Search inventory items, enter a quantity, and add them into the selected kit.</li>
@@ -785,7 +805,7 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>7. Formulary & Orders</legend>
+                            <legend>8. Formulary & Orders</legend>
                             <ul>
                                 <li>The formulary is a master reorder list. It can include inventory items and non-inventory items.</li>
                                 <li>Create Orders can add low/expired items, formulary items, current inventory, or new non-inventory items.</li>
@@ -796,7 +816,7 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>8. Prepackaging & Labels</legend>
+                            <legend>9. Prepackaging & Labels</legend>
                             <ul>
                                 <li>Prepack queues can be created for date ranges and later printed when it is time to prepare doses.</li>
                                 <li>Use scanning when available, or use manual completion when a scanner is not available.</li>
@@ -807,27 +827,30 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>9. Monitoring & Reports</legend>
+                            <legend>10. Monitoring & Reports</legend>
                             <ul>
                                 <li>Monitoring supports BP/HR, blood glucose, weight, temperature, INR, drug levels, and custom lab goals.</li>
                                 <li>Member profiles display monitoring graphs, adherence, calendars, active orders, PRN orders, completed schedules, and administration logs.</li>
                                 <li>Medication/Supplement summaries show active scheduled and PRN items, inventory forecasts, and last documented doses.</li>
-                                <li>PDFs are available for inventory, schedules, monitoring, formulary, and inventory orders.</li>
+                                <li>PDFs are available for inventory, schedules, monitoring, progress notes/diary, formulary, and inventory orders.</li>
                                 <li>Schedule PDFs can be used as paper check-off sheets for trips, caregivers, or periods away from the app.</li>
                             </ul>
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>10. Today, Audit & Health</legend>
+                            <legend>11. Today, Audit & Health</legend>
                             <ul>
                                 <li>Today View shows overdue, due-soon, later, completed, and PRN items for quick daily work.</li>
+                                <li>Setup Guide walks through a first-use checklist and can jump directly to the needed tab.</li>
+                                <li>Hover help adds small question-mark tips near common controls and can be disabled from the Dashboard.</li>
                                 <li>Data Health Check looks for broken schedule links, orphaned records, duplicate barcodes, missing times, and impossible stock counts.</li>
-                                <li>Audit Trail records safety-relevant changes such as scheduling, discontinuing, administration, restocking, profile edits, and overrides.</li>
+                                <li>Audit Trail records safety-relevant changes such as scheduling, discontinuing, administration, restocking, profile edits, and overrides. Medication rows also have an Audit button for order-specific history.</li>
+                                <li>Printer Calibration previews a test label so label borders, font size, and scanner text can be checked before a large print run.</li>
                             </ul>
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>11. Local Sync & Privacy</legend>
+                            <legend>12. Local Sync & Privacy</legend>
                             <ul>
                                 <li>Desktop Sync Folder can place PharmAtlas data inside OneDrive, Google Drive Desktop, Dropbox, or another user-controlled synced folder.</li>
                                 <li>Avoid editing from two computers at the same time. Let the sync app finish before opening PharmAtlas elsewhere.</li>
@@ -932,6 +955,10 @@
                     <div class="field-row">
                         <label>Prescriber:</label>
                         <select id="modal-prescriber" style="width:150px;"></select>
+                    </div>
+                    <div class="field-row">
+                        <label>Pharmacy:</label>
+                        <select id="modal-pharmacy" style="width:150px;"></select>
                     </div>
                     <div class="field-row">
                         <label for="modal-assignment-mode">Assign to:</label>
@@ -1051,21 +1078,27 @@
             </div>
         </div>
         <div class="window-body member-profile-body">
-            <div style="display:flex; gap:10px;">
-                <div class="field-row-stacked"><label>First Name</label><input id="m-first" type="text"></div>
-                <div class="field-row-stacked"><label>Middle</label><input id="m-middle" type="text" style="width:50px;"></div>
-                <div class="field-row-stacked"><label>Last Name</label><input id="m-last" type="text"></div>
-            </div>
+            <div class="profile-demographics-strip">
+                <div class="profile-name-grid">
+                    <label class="field-row-stacked">First Name<input id="m-first" type="text"></label>
+                    <label class="field-row-stacked profile-middle-name">Middle<input id="m-middle" type="text"></label>
+                    <label class="field-row-stacked">Last Name<input id="m-last" type="text"></label>
+                </div>
 
-            <div class="field-row" style="margin-top:10px;">
-                <label>Sex:</label>
-                <select id="m-sex">
-                    <option value="Male">Male (Blue)</option>
-                    <option value="Female">Female (Pink)</option>
-                </select>
-                <label>Age:</label><input id="m-age" type="number" style="width:50px;">
-                <label>DOB:</label><input id="m-dob" type="date">
-                <label>Calendar color:</label><input id="m-calendar-color" type="color" value="#000080" title="Color used for this member on the calendar">
+                <div class="profile-demo-grid">
+                    <label>Sex<select id="m-sex">
+                        <option value="Male">Male (Blue)</option>
+                        <option value="Female">Female (Pink)</option>
+                    </select></label>
+                    <label>Age<input id="m-age" type="number"></label>
+                    <label>DOB<input id="m-dob" type="date"></label>
+                    <label>Height<input id="m-height" type="number" step="0.1" oninput="updateMemberBmiPreview()"></label>
+                    <label>Units<select id="m-height-unit" onchange="updateMemberBmiPreview()"><option value="in">in</option><option value="cm">cm</option></select></label>
+                    <label>Weight<input id="m-current-weight" type="number" step="0.1" oninput="updateMemberBmiPreview()"></label>
+                    <label>Units<select id="m-current-weight-unit" onchange="updateMemberBmiPreview()"><option value="lb">lb</option><option value="kg">kg</option></select></label>
+                    <label>BMI<input id="m-bmi" type="text" readonly></label>
+                    <label>Calendar color<input id="m-calendar-color" type="color" value="#000080" title="Color used for this member on the calendar"></label>
+                </div>
             </div>
 
             <div class="member-profile-tabbar">
@@ -1073,88 +1106,263 @@
                 <button type="button" class="member-profile-tab" data-member-profile-tab="orders" onclick="switchMemberProfileTab('orders')">Medication Orders</button>
                 <button type="button" class="member-profile-tab" data-member-profile-tab="summary" onclick="switchMemberProfileTab('summary')">Current List / Summary</button>
                 <button type="button" class="member-profile-tab" data-member-profile-tab="monitoring" onclick="switchMemberProfileTab('monitoring')">Monitoring</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="diary" onclick="switchMemberProfileTab('diary')">Progress Notes / Diary</button>
             </div>
 
             <input id="m-current-med-list-data" type="hidden">
             <input id="m-lab-documents-data" type="hidden">
+            <input id="m-progress-notes-data" type="hidden">
 
-            <fieldset data-member-section="main" style="margin-top:10px;">
-                <legend>Contact & Medical</legend>
+            <section data-member-section="main" class="profile-main-grid">
                 <input id="m-providers" type="hidden">
                 <input id="m-diag" type="hidden">
-                <div class="field-row"><label>Address:</label><input id="m-addr" type="text" style="width:100%;"></div>
-                <div style="display:flex; gap:5px; margin-top:5px;">
-                    <div class="field-row-stacked"><label>Phone</label><input id="m-phone" type="text"></div>
-                    <div class="field-row-stacked"><label>Email</label><input id="m-email" type="text"></div>
-                </div>
-                <fieldset class="profile-notification-options">
-                    <legend>Notifications</legend>
-                    <div class="notification-toggle-list">
-                        <div class="notification-toggle">
-                            <input id="m-notify-enabled" type="checkbox" checked>
-                            <label for="m-notify-enabled">Medication reminders</label>
+                <input id="m-prescriber-ids-data" type="hidden">
+                <input id="m-pharmacy-ids-data" type="hidden">
+                <input id="m-diagnoses-data" type="hidden">
+                <input id="m-allergies-data" type="hidden">
+
+                <fieldset class="profile-card profile-card-contact">
+                    <legend>Contact &amp; Reminders</legend>
+                    <div class="profile-card-title">Home Base</div>
+                    <div class="profile-contact-grid">
+                        <label class="field-row-stacked profile-span-2">Address<input id="m-addr" type="text"></label>
+                        <label class="field-row-stacked">Phone<input id="m-phone" type="text"></label>
+                        <label class="field-row-stacked">Email<input id="m-email" type="text"></label>
+                    </div>
+                    <fieldset class="profile-notification-options">
+                        <legend>Notifications</legend>
+                        <div class="notification-toggle-list">
+                            <div class="notification-toggle">
+                                <input id="m-notify-enabled" type="checkbox" checked>
+                                <label for="m-notify-enabled">Medication reminders</label>
+                            </div>
+                            <div class="notification-toggle">
+                                <input id="m-email-reminders" type="checkbox">
+                                <label for="m-email-reminders">Email reminders (opt in)</label>
+                            </div>
                         </div>
-                        <div class="notification-toggle">
-                            <input id="m-email-reminders" type="checkbox">
-                            <label for="m-email-reminders">Email reminders (opt in)</label>
+                    </fieldset>
+                    <label class="field-row-stacked profile-care-note">Care Notes / Handoff
+                        <textarea id="m-care-notes" rows="3" placeholder="Optional notes for routines, preferences, emergency context, or caregiver handoff."></textarea>
+                    </label>
+                </fieldset>
+
+                <fieldset class="profile-card profile-card-care">
+                    <legend>Care Team</legend>
+                    <div class="profile-two-column">
+                        <div>
+                            <div class="profile-list-heading">Provider Profiles</div>
+                            <div id="m-prescriber-list" class="profile-list-panel"></div>
+                            <button type="button" onclick="addMemberPrescriber()">Add Provider</button>
+                        </div>
+                        <div>
+                            <div class="profile-list-heading">Preferred Pharmacy Profiles</div>
+                            <div id="m-pharmacy-list" class="profile-list-panel"></div>
+                            <button type="button" onclick="addMemberPharmacy()">Add Pharmacy</button>
                         </div>
                     </div>
                 </fieldset>
-                <input id="m-prescriber-ids-data" type="hidden">
-                <input id="m-diagnoses-data" type="hidden">
-                <input id="m-allergies-data" type="hidden">
-                <div class="field-row" style="align-items:flex-start; margin-top:8px;">
-                    <div style="flex:1;">
-                        <strong>Provider Profiles</strong>
-                        <div id="m-prescriber-list" class="sunken-panel" style="height:72px; overflow-y:auto; background:white; margin-top:3px;"></div>
-                        <button type="button" onclick="addMemberPrescriber()">Add Provider</button>
-                    </div>
-                    <div style="flex:1;">
-                        <strong>Diagnoses</strong>
-                        <div id="m-diagnosis-list" class="sunken-panel" style="height:72px; overflow-y:auto; background:white; margin-top:3px;"></div>
-                        <button type="button" onclick="addMemberDiagnosis()">Add Diagnosis</button>
-                    </div>
-                </div>
-                <div style="margin-top:8px;">
-                    <strong>Allergies &amp; Intolerances</strong>
-                    <div id="m-allergy-list" class="sunken-panel" style="min-height:72px; max-height:150px; overflow-y:auto; background:white; margin-top:3px;"></div>
-                    <button type="button" onclick="addMemberAllergy()">Add Allergy / Intolerance</button>
-                </div>
-            </fieldset>
 
-            <fieldset data-member-section="main" style="margin-top:10px;">
-                <legend>Vitals Goals</legend>
-                <div class="field-row">
-                    <label>Glucose Goals:</label>
-                    <select id="m-glucose-preset" onchange="applyGlucosePreset()">
-                        <option value="diabetic">ADA Diabetes</option>
-                        <option value="nondiabetic">Non-Diabetic</option>
-                        <option value="custom">Custom</option>
-                    </select>
-                    <label>Low:</label><input id="m-glucose-low" type="number" style="width:55px;">
-                    <label>High:</label><input id="m-glucose-high" type="number" style="width:55px;">
-                    <span>mg/dL</span>
-                </div>
-                <div class="field-row" style="margin-top:6px;">
-                    <label>BP Goals:</label>
-                    <label>Sys Min:</label><input id="m-bp-sys-low" type="number" style="width:55px;">
-                    <label>Sys Max:</label><input id="m-bp-sys-high" type="number" style="width:55px;">
-                    <label>Dia Min:</label><input id="m-bp-dia-low" type="number" style="width:55px;">
-                    <label>Dia Max:</label><input id="m-bp-dia-high" type="number" style="width:55px;">
-                </div>
-                <div class="field-row" style="margin-top:6px;">
-                    <label>Heart Rate Goals:</label>
-                    <label>Min:</label><input id="m-hr-low" type="number" style="width:55px;">
-                    <label>Max:</label><input id="m-hr-high" type="number" style="width:55px;">
-                    <span>bpm</span>
-                </div>
-                <div class="field-row" style="margin-top:6px;">
-                    <label>Weight Goals:</label>
-                    <label>Low:</label><input id="m-weight-low" type="number" step="0.1" style="width:60px;">
-                    <label>High:</label><input id="m-weight-high" type="number" step="0.1" style="width:60px;">
-                    <select id="m-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select>
-                </div>
-            </fieldset>
+                <fieldset class="profile-card profile-card-safety">
+                    <legend>Safety Snapshot</legend>
+                    <div class="profile-two-column">
+                        <div>
+                            <div class="profile-list-heading">Diagnoses</div>
+                            <div id="m-diagnosis-list" class="profile-list-panel"></div>
+                            <button type="button" onclick="addMemberDiagnosis()">Add Diagnosis</button>
+                        </div>
+                        <div>
+                            <div class="profile-list-heading">Allergies &amp; Intolerances</div>
+                            <div id="m-allergy-list" class="profile-list-panel profile-list-panel-tall"></div>
+                            <button type="button" onclick="addMemberAllergy()">Add Allergy / Intolerance</button>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="profile-card profile-card-goals">
+                    <legend>Monitoring Goals</legend>
+                    <div class="goal-card-grid">
+                        <section class="goal-card goal-card-glucose">
+                            <div class="goal-card-header">
+                                <strong>Blood Glucose</strong>
+                                <select id="m-glucose-preset" onchange="applyGlucosePreset()">
+                                    <option value="diabetic">ADA adult diabetes range</option>
+                                    <option value="diabetic_fasting">ADA before meals</option>
+                                    <option value="nondiabetic">General non-diabetic tracking</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="goal-range-row">
+                                <label>Low<input id="m-glucose-low" type="number" oninput="markGoalPresetCustom('m-glucose-preset')"></label>
+                                <span>to</span>
+                                <label>High<input id="m-glucose-high" type="number" oninput="markGoalPresetCustom('m-glucose-preset')"></label>
+                                <strong>mg/dL</strong>
+                            </div>
+                            <div id="m-glucose-goal-note" class="goal-reference-note"></div>
+                        </section>
+
+                        <section class="goal-card goal-card-bp">
+                            <div class="goal-card-header">
+                                <strong>Blood Pressure</strong>
+                                <select id="m-bp-preset" onchange="applyBpPreset()">
+                                    <option value="treated">Common treated goal</option>
+                                    <option value="normal">Normal range category</option>
+                                    <option value="stage2_alert">High alert threshold</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="bp-goal-grid">
+                                <label>Sys low<input id="m-bp-sys-low" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                                <label>Sys high<input id="m-bp-sys-high" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                                <label>Dia low<input id="m-bp-dia-low" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                                <label>Dia high<input id="m-bp-dia-high" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                            </div>
+                            <div id="m-bp-goal-note" class="goal-reference-note"></div>
+                        </section>
+
+                        <section class="goal-card goal-card-hr">
+                            <div class="goal-card-header"><strong>Heart Rate</strong><span>bpm</span></div>
+                            <div class="goal-range-row">
+                                <label>Low<input id="m-hr-low" type="number"></label>
+                                <span>to</span>
+                                <label>High<input id="m-hr-high" type="number"></label>
+                            </div>
+                        </section>
+
+                        <section class="goal-card goal-card-weight">
+                            <div class="goal-card-header">
+                                <strong>Weight Watch Range</strong>
+                                <select id="m-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select>
+                            </div>
+                            <div class="goal-range-row">
+                                <label>Low<input id="m-weight-low" type="number" step="0.1"></label>
+                                <span>to</span>
+                                <label>High<input id="m-weight-high" type="number" step="0.1"></label>
+                            </div>
+                        </section>
+                    </div>
+                </fieldset>
+
+            </section>
+
+            <fieldset data-member-section="diary" class="profile-card profile-card-diary" style="margin-top:10px;">
+                    <legend>Progress Notes / Diary</legend>
+                    <div class="profile-diary-layout">
+                        <div class="profile-diary-editor">
+                            <div class="profile-diary-header">
+                                <strong>New Entry</strong>
+                                <div class="field-row">
+                                    <label>Date:</label><input id="m-progress-note-date" type="date">
+                                    <label>Time:</label><input id="m-progress-note-time" type="time">
+                                </div>
+                            </div>
+                            <div class="profile-diary-template-row">
+                                <label>Template:
+                                    <select id="m-progress-note-template" onchange="applyProgressNoteTemplate(this.value)">
+                                        <option value="">Blank note</option>
+                                    </select>
+                                </label>
+                                <button type="button" onclick="openProgressNoteTemplateManager()">Create / Edit Templates</button>
+                            </div>
+                            <div class="profile-diary-title-grid">
+                                <input id="m-progress-note-title" type="text" placeholder="Title or quick summary" oninput="refreshProgressNoteTagSuggestions()">
+                                <input id="m-progress-note-tags" type="text" placeholder="Tags, comma separated" oninput="refreshProgressNoteTagSuggestions()">
+                            </div>
+                            <div id="m-progress-note-tag-suggestions" class="profile-diary-tag-suggestions"></div>
+                            <div class="profile-diary-link-grid">
+                                <label>Link to:
+                                    <select id="m-progress-note-link-type" onchange="renderProgressNoteLinkOptions()">
+                                        <option value="">No linked event</option>
+                                        <option value="medication">Medication / supplement</option>
+                                        <option value="administration">Administration entry</option>
+                                        <option value="vital">Monitoring reading</option>
+                                        <option value="lab">Lab PDF</option>
+                                        <option value="regimen">Regimen</option>
+                                        <option value="inventory">Inventory item</option>
+                                    </select>
+                                </label>
+                                <label>Item:
+                                    <select id="m-progress-note-link-id">
+                                        <option value="">Choose after selecting a link type</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="profile-diary-flags">
+                                <span class="profile-diary-flags-title">Note flags:</span>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-pinned" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Pinned</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-important" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Important</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-followup" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Follow-up</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-provider" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Discuss with provider</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-private" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Private caregiver note</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-resolved" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Resolved</span></label>
+                            </div>
+                            <div class="profile-diary-scale-grid">
+                                <label>Pain 0-10<input id="m-progress-note-pain" type="number" min="0" max="10" step="1" placeholder="-"></label>
+                                <label>Mood 1-5<input id="m-progress-note-mood" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                <label>Sleep 1-5<input id="m-progress-note-sleep" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                <label>Nausea 0-10<input id="m-progress-note-nausea" type="number" min="0" max="10" step="1" placeholder="-"></label>
+                                <label>Energy 1-5<input id="m-progress-note-energy" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                            </div>
+                            <input id="m-progress-note-edit-id" type="hidden">
+                            <div class="rich-text-toolbar" aria-label="Progress note formatting">
+                                <button type="button" class="rich-tool-button" onclick="formatProgressNote('bold')" title="Bold"><span class="rich-tool-icon rich-tool-bold">B</span></button>
+                                <button type="button" class="rich-tool-button" onclick="formatProgressNote('italic')" title="Italic"><span class="rich-tool-icon rich-tool-italic">I</span></button>
+                                <button type="button" class="rich-tool-button" onclick="formatProgressNote('underline')" title="Underline"><span class="rich-tool-icon rich-tool-underline">U</span></button>
+                                <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressNote('insertUnorderedList')" title="Bulleted list"><span class="rich-tool-icon">&bull;</span> List</button>
+                                <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressNote('insertOrderedList')" title="Numbered list"><span class="rich-tool-icon">1.</span> List</button>
+                                <label class="rich-color-tool" title="Text color">
+                                    <span class="rich-tool-icon rich-tool-color">A</span>
+                                    <input id="m-progress-note-color" type="color" value="#000000" onchange="applyProgressNoteColor(this.value)">
+                                </label>
+                                <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressNote('removeFormat')" title="Clear formatting">Clear Format</button>
+                            </div>
+                            <div id="m-progress-note-editor" class="rich-text-editor" contenteditable="true" data-placeholder="Type a progress note, symptom diary entry, care update, or observation..." oninput="refreshProgressNoteTagSuggestions()"></div>
+                            <div class="profile-diary-attachment-row">
+                                <label>Attachments:
+                                    <input id="m-progress-note-attachment" type="file" multiple accept="image/*,application/pdf" onchange="addProgressNoteAttachments(this)">
+                                </label>
+                                <div id="m-progress-note-attachment-list" class="profile-diary-attachments"></div>
+                            </div>
+                            <div class="profile-diary-actions">
+                                <button id="m-progress-note-save-button" type="button" data-icon-enhanced="true" onclick="saveMemberProgressNote()"><span class="button-plus-sign">+</span>Add Entry</button>
+                                <button type="button" onclick="clearMemberProgressNoteEditor()">Clear</button>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="profile-list-heading">Entries by Day</div>
+                            <div class="profile-diary-filterbar">
+                                <input id="m-progress-note-search" type="text" placeholder="Search notes..." oninput="renderMemberProgressNotes()">
+                                <select id="m-progress-note-tag-filter" onchange="renderMemberProgressNotes()">
+                                    <option value="">All tags</option>
+                                </select>
+                                <select id="m-progress-note-flag-filter" onchange="renderMemberProgressNotes()">
+                                    <option value="">All flags</option>
+                                    <option value="pinned">Pinned</option>
+                                    <option value="important">Important</option>
+                                    <option value="followup">Follow-up</option>
+                                    <option value="provider">Discuss with provider</option>
+                                    <option value="private">Private</option>
+                                </select>
+                            </div>
+                            <div class="profile-diary-exportbar">
+                                <label>From<input id="m-progress-note-report-from" type="date"></label>
+                                <label>To<input id="m-progress-note-report-to" type="date"></label>
+                                <label class="profile-diary-include-private"><input id="m-progress-note-report-private" type="checkbox"> Include private</label>
+                                <button type="button" class="diary-output-button" onclick="printMemberProgressNotesReport()">Print</button>
+                                <button type="button" class="diary-output-button" onclick="generateMemberProgressNotesPdfReport()">Diary PDF</button>
+                            </div>
+                            <div id="m-progress-note-list" class="profile-diary-list"></div>
+                            <div class="profile-list-heading" style="margin-top:8px;">Timeline View</div>
+                            <div id="m-progress-note-timeline" class="profile-diary-timeline"></div>
+                        </div>
+                        <div class="profile-diary-preview-pane">
+                            <div class="profile-list-heading">Note Preview</div>
+                            <div id="m-progress-note-preview" class="profile-diary-preview-content">
+                                <div class="empty-state">Click a note to preview it here.</div>
+                            </div>
+                        </div>
+                    </div>
+                </fieldset>
 
             <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Medication &amp; Lab Monitoring</legend>
