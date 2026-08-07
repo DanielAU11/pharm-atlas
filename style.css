@@ -1246,6 +1246,17 @@ button {
     box-sizing: border-box;
 }
 
+.profile-diary-scale-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+}
+
+.profile-diary-scale-panel {
+    margin-bottom: 5px;
+}
+
 .profile-diary-tag-suggestions {
     min-height: 20px;
     margin: 2px 0 5px;
@@ -1560,12 +1571,17 @@ button {
     z-index: 30;
 }
 
+.guide-tip:hover,
+.guide-tip:focus {
+    z-index: 2147483000;
+}
+
 .guide-tip::after {
-    content: attr(data-tip);
-    display: none;
-    position: absolute;
-    top: 18px;
-    left: 0;
+    display: none !important;
+}
+
+.guide-tip-popup {
+    position: fixed;
     width: 260px;
     max-width: min(260px, 70vw);
     padding: 6px 7px;
@@ -1578,11 +1594,20 @@ button {
     line-height: 1.3;
     white-space: normal;
     pointer-events: none;
+    z-index: 2147483000;
 }
 
-.guide-tip:hover::after,
-.guide-tip:focus::after {
-    display: block;
+.guide-tip-popup::before {
+    content: "";
+    position: absolute;
+    top: -5px;
+    left: 9px;
+    width: 7px;
+    height: 7px;
+    border-left: 2px outset #ffffff;
+    border-top: 2px outset #ffffff;
+    background: #fffde0;
+    transform: rotate(45deg);
 }
 
 .setup-guide-panel {
@@ -2404,6 +2429,7 @@ button {
 
 #label-preview-content .compound-bottle-label .label-title,
 .compound-label-preview-card .compound-bottle-label .label-title,
+.bulk-container-preview-card .compound-bottle-label .label-title,
 #print-area .compound-bottle-label .label-title {
     font-size: 11pt;
     font-weight: bold;
@@ -2412,12 +2438,14 @@ button {
 
 #label-preview-content .label-compact.compound-bottle-label .label-title,
 .compound-label-preview-card .label-compact.compound-bottle-label .label-title,
+.bulk-container-preview-card .label-compact.compound-bottle-label .label-title,
 #print-area .label-compact.compound-bottle-label .label-title {
     font-size: 10.4pt;
 }
 
 #label-preview-content .label-dense.compound-bottle-label .label-title,
 .compound-label-preview-card .label-dense.compound-bottle-label .label-title,
+.bulk-container-preview-card .label-dense.compound-bottle-label .label-title,
 #print-area .label-dense.compound-bottle-label .label-title {
     font-size: 9.8pt;
 }
@@ -4458,6 +4486,11 @@ button {
     color: #a00000;
 }
 
+.prepack-item-returned {
+    background: #fff1cc;
+    color: #804000;
+}
+
 .prepack-item-added .prepack-item-copy strong {
     color: #b85a00;
 }
@@ -4490,6 +4523,51 @@ button {
 
 .unit-dose-preview strong {
     color: #000080;
+}
+
+.bulk-container-preview-shell {
+    display: grid;
+    grid-template-columns: minmax(360px, 1fr) minmax(250px, 0.7fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.bulk-container-preview-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 150px;
+    padding: 12px;
+    border: 2px inset #ffffff;
+    background: #8f8f8f;
+}
+
+.bulk-container-preview-card .label-page {
+    width: 2.25in;
+    height: 1.25in;
+    transform: none;
+    transform-origin: center;
+    background: #ffffff;
+    color: #000000;
+    padding: 0.05in;
+    overflow: hidden;
+    border: 1px solid #000000;
+    box-sizing: border-box;
+}
+
+.bulk-container-preview-card .label-page,
+.bulk-container-preview-card .label-page * {
+    font-family: "Pixelated MS Sans Serif", "MS Sans Serif", Tahoma, sans-serif !important;
+    letter-spacing: 0 !important;
+}
+
+.bulk-inventory-row {
+    color: #c06000;
+    font-weight: bold;
+}
+
+.bulk-bottle-label .label-title {
+    font-weight: bold;
 }
 
 .prepack-date-choices {

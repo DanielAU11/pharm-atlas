@@ -937,9 +937,21 @@ function formatFrequency(schedule) {
     }
     if (schedule.freq === 'QXH') {
         const interval = parseInt(schedule.intervalHours, 10);
-        return Number.isInteger(interval) && interval > 0 ? `Q${interval}H${selectedDates}` : `Every X Hours${selectedDates}`;
+        return Number.isInteger(interval) && interval > 0 ? `Every ${interval} hours${selectedDates}` : `Every X hours${selectedDates}`;
     }
-    return `${schedule.freq || ''}${selectedDates}`;
+    const friendly = {
+        ONCE: 'One time',
+        QD: 'Daily',
+        BID: 'Twice daily',
+        TID: '3 times daily',
+        QID: '4 times daily',
+        Nightly: 'Nightly',
+        QOD: 'Every other day',
+        QW: 'Weekly',
+        Monthly: 'Monthly',
+        PRN: 'As needed'
+    };
+    return `${friendly[schedule.freq] || schedule.freq || ''}${selectedDates}`;
 }
 
 function scheduleExceptionText(schedule) {
@@ -1200,8 +1212,42 @@ function updateGuidedHelpToggleControl() {
         : 'Click to show small question-mark helper tips throughout the app.';
 }
 
+function hideGuideTipPopup() {
+    document.querySelector('.guide-tip-popup')?.remove();
+}
+
+function showGuideTipPopup(bubble) {
+    hideGuideTipPopup();
+    const text = bubble?.dataset?.tip || '';
+    if (!text) return;
+    const popup = document.createElement('div');
+    popup.className = 'guide-tip-popup';
+    popup.textContent = text;
+    document.body.appendChild(popup);
+
+    const bubbleRect = bubble.getBoundingClientRect();
+    const popupRect = popup.getBoundingClientRect();
+    const margin = 8;
+    let left = bubbleRect.left;
+    let top = bubbleRect.bottom + 6;
+
+    if (left + popupRect.width > window.innerWidth - margin) {
+        left = window.innerWidth - popupRect.width - margin;
+    }
+    if (left < margin) left = margin;
+    if (top + popupRect.height > window.innerHeight - margin) {
+        top = bubbleRect.top - popupRect.height - 8;
+        popup.classList.add('guide-tip-popup-above');
+    }
+    if (top < margin) top = margin;
+
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+}
+
 function renderGuidedHelpTips(root = document) {
     if (!root?.querySelectorAll) return;
+    hideGuideTipPopup();
     root.querySelectorAll('.guide-tip').forEach(tip => tip.remove());
     root.querySelectorAll('[data-guide-tip-attached="true"]').forEach(target => {
         delete target.dataset.guideTipAttached;
@@ -1218,6 +1264,10 @@ function renderGuidedHelpTips(root = document) {
         bubble.textContent = '?';
         bubble.dataset.tip = tip.text;
         bubble.setAttribute('aria-label', tip.text);
+        bubble.addEventListener('mouseenter', () => showGuideTipPopup(bubble));
+        bubble.addEventListener('focus', () => showGuideTipPopup(bubble));
+        bubble.addEventListener('mouseleave', hideGuideTipPopup);
+        bubble.addEventListener('blur', hideGuideTipPopup);
         const wrapper = target.closest('label') || target;
         wrapper.insertAdjacentElement('afterend', bubble);
         target.dataset.guideTipAttached = 'true';
@@ -1987,7 +2037,8 @@ function doseStatusLabel(status) {
         late: 'Given late',
         early: 'Given early',
         skipped: 'Skipped',
-        missed: 'Missed / forgotten'
+        missed: 'Missed / forgotten',
+        refused: 'Refused'
     }[status] || 'Given as scheduled';
 }
 
@@ -2584,6 +2635,7 @@ async function requestScheduledDoseDocumentation(schedule, title) {
                 <option value="early">Given early</option>
                 <option value="skipped">Skipped</option>
                 <option value="missed">Missed / forgotten</option>
+                <option value="refused">Refused</option>
             </select>
         </div>
         <div class="field-row" style="margin-top:8px;">
@@ -2618,7 +2670,7 @@ async function requestScheduledDoseDocumentation(schedule, title) {
 
 function normalizeScheduledDoseActualTime(actual) {
     const status = actual?.doseStatus || 'given';
-    if (['given', 'skipped', 'missed'].includes(status) && actual.scheduledDate && actual.scheduledTime) {
+    if (['given', 'skipped', 'missed', 'refused'].includes(status) && actual.scheduledDate && actual.scheduledTime) {
         actual.actualDate = actual.scheduledDate;
         actual.actualTime = actual.scheduledTime;
     }
@@ -3184,6 +3236,7 @@ function resetProgressNoteEditor() {
         const input = document.getElementById(`m-progress-note-${suffix}`);
         if (input) input.value = '';
     });
+    toggleProgressNoteScales(false);
     const fileInput = document.getElementById('m-progress-note-attachment');
     if (fileInput) fileInput.value = '';
     pendingProgressNoteAttachments = [];
@@ -3274,6 +3327,15 @@ window.updateProgressNoteFlagVisuals = function() {
         const input = label.querySelector('input[type="checkbox"]');
         label.classList.toggle('selected', !!input?.checked);
     });
+};
+
+window.toggleProgressNoteScales = function(forceOpen = null) {
+    const panel = document.getElementById('m-progress-note-scales-panel');
+    const button = document.querySelector('.profile-diary-scale-toggle-row button');
+    if (!panel) return;
+    const open = forceOpen === null ? panel.style.display === 'none' : !!forceOpen;
+    panel.style.display = open ? '' : 'none';
+    if (button) button.textContent = open ? 'Hide ratings' : 'Add ratings';
 };
 
 function progressNoteFlagBadgesHtml(note = {}) {
@@ -3998,6 +4060,7 @@ window.editMemberProgressNote = function(noteId) {
             if (input) input.value = '';
         }
     });
+    toggleProgressNoteScales(Object.values(note.scales || {}).some(value => value !== '' && value !== undefined && value !== null));
     pendingProgressNoteAttachments = Array.isArray(note.attachments) ? note.attachments.slice() : [];
     renderProgressNoteAttachmentList();
     if (editor) {
@@ -5777,6 +5840,7 @@ window.saveOrderModification = async function() {
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
         openMemberModal(sched.memberId); // Refresh member profile
+        switchMemberProfileTab('orders');
     }
 };
 
@@ -6689,18 +6753,18 @@ window.closeMedModal = () => {
 // --- ORDER SETS ---
 function frequencyOptionsHtml(selected = 'QD') {
     const options = [
-        ['ONCE', 'One Time'],
-        ['QD', 'QD'],
-        ['BID', 'BID'],
-        ['TID', 'TID'],
-        ['QID', 'QID'],
+        ['ONCE', 'One time'],
+        ['QD', 'Daily'],
+        ['BID', 'Twice daily'],
+        ['TID', '3 times daily'],
+        ['QID', '4 times daily'],
         ['Nightly', 'Nightly'],
-        ['QOD', 'QOD'],
+        ['QOD', 'Every other day'],
         ['QW', 'Once Weekly'],
         ['QXW', 'Every X Weeks'],
         ['XPW', 'X Times Per Week'],
         ['QXH', 'Every X Hours'],
-        ['PRN', 'PRN'],
+        ['PRN', 'As needed'],
         ['Monthly', 'Once Monthly']
     ];
     return options.map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`).join('');
@@ -7679,6 +7743,99 @@ function reverseInventoryUnitDoseItemStock(queue, item) {
     });
 }
 
+function prepackItemDoseQty(queue, item) {
+    const schedule = db.schedules.find(candidate => candidate.id === item?.scheduleId);
+    if (String(item?.instanceKey || '').startsWith('range|')) return parseAmount(item.quantity, 0);
+    return parseAmount(schedule?.doseQty ?? item?.quantity, 0);
+}
+
+function applyPrepackItemStock(queue, item, method = 'scan') {
+    if (isInventoryUnitDoseQueue(queue)) return applyInventoryUnitDoseItemStock(queue, item, method);
+    if (!queue || !item || item.inventoryDeducted === true || item.inventoryReturned === true) return true;
+    const med = db.inventory.find(candidate => candidate.id === item.medId);
+    if (!med) return false;
+    if (usesContainerTracking(med)) {
+        item.inventoryDeducted = true;
+        item.stockDelta = 0;
+        item.stockLogDetail = `${inventoryUnitFor(med)} inventory will be reduced only when the container is marked finished.`;
+        return true;
+    }
+    const qty = prepackItemDoseQty(queue, item);
+    if (!Number.isFinite(qty) || qty <= 0) return false;
+    if (parseAmount(med.stock, 0) < qty) return false;
+    med.stock = Math.max(0, parseAmount(med.stock, 0) - qty);
+    item.inventoryDeducted = true;
+    item.stockDelta = qty;
+    item.stockLogDetail = `Prepacked ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from inventory.`;
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        memberId: queue.memberId || '',
+        memberName: queue.memberName || '',
+        medId: med.id,
+        medName: med.name,
+        scheduleId: item.scheduleId || '',
+        prepackQueueId: queue.id,
+        prepackItemId: item.id,
+        details: `${item.time} prepacked by ${method}; -${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} source stock.`
+    });
+    addAudit('Prepack stock deducted', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | -${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}.`);
+    return true;
+}
+
+function reversePrepackItemStock(queue, item, reason = 'returned') {
+    if (isInventoryUnitDoseQueue(queue)) {
+        reverseInventoryUnitDoseItemStock(queue, item);
+        item.inventoryReturned = true;
+        item.returnReason = reason;
+        return;
+    }
+    if (!queue || !item?.inventoryDeducted || item.inventoryReturned === true) return;
+    const med = db.inventory.find(candidate => candidate.id === item.medId);
+    const qty = parseAmount(item.stockDelta, 0);
+    if (med && qty > 0) med.stock = parseAmount(med.stock, 0) + qty;
+    item.inventoryReturned = true;
+    item.returnReason = reason;
+    item.returnedAt = new Date().toISOString();
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        memberId: queue.memberId || '',
+        memberName: queue.memberName || '',
+        medId: med?.id || item.medId,
+        medName: med?.name || item.medName,
+        scheduleId: item.scheduleId || '',
+        prepackQueueId: queue.id,
+        prepackItemId: item.id,
+        details: `Prepacked dose returned to inventory (${reason}); +${formatAmount(qty)} ${med?.administrationUnit || (med ? inventoryUnitFor(med) : 'units')}.`
+    });
+    if (med) addAudit('Prepack stock returned', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | ${reason} | +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}.`);
+}
+
+function prepackedDoseCovers(scheduleId, date, time) {
+    if (!scheduleId || !date || !time) return null;
+    const exactKey = scheduleInstanceKey(scheduleId, date, time);
+    for (const queue of db.prepackQueues || []) {
+        if (isInventoryUnitDoseQueue(queue)) continue;
+        for (const day of queue.days || []) {
+            for (const item of day.items || []) {
+                if (!item.inventoryDeducted || item.inventoryReturned || item.scheduleId !== scheduleId) continue;
+                if (item.instanceKey === exactKey) return { queue, day, item };
+                const range = String(item.instanceKey || '').split('|');
+                if (range[0] === 'range' && range[1] === scheduleId) {
+                    const start = range[2] || '';
+                    const end = range[3] || '';
+                    const specificTime = range[4] || 'all';
+                    if ((!start || date >= start) && (!end || date <= end) && (specificTime === 'all' || specificTime === time)) {
+                        return { queue, day, item };
+                    }
+                }
+            }
+        }
+    }
+    return null;
+}
+
 function selectedInventoryUnitDoseMedication(body = document.getElementById('action-modal-body')) {
     const query = String(body?.querySelector('[name="medSearch"]')?.value || '').trim();
     if (!query) return null;
@@ -7779,6 +7936,222 @@ function inventoryUnitDoseLabelHtml(queue, item, index = 0) {
         ${qrDataUrl ? `<img class="compound-label-qr" src="${qrDataUrl}" alt="Medication QR code">` : ''}
     </div>`;
 }
+
+function labelDosageFormText(med) {
+    const formulation = String(med?.formulation || '').trim();
+    if (!formulation) return '';
+    if (formulation === 'mL') return 'Liquid';
+    const defLabel = dosageFormDefinition(formulation)?.label || formulation;
+    const cleaned = defLabel.replace(/\s*\([^)]*\)/g, '').trim();
+    const stockUnit = String(inventoryUnitFor(med) || '').trim().toLowerCase();
+    const adminUnit = String(med?.administrationUnit || '').trim().toLowerCase();
+    const normalized = cleaned.toLowerCase();
+    if (!cleaned || normalized === stockUnit || normalized === adminUnit) return '';
+    return cleaned;
+}
+
+function bulkContainerLabelHtml(med) {
+    const code = normalizeMedicationCode(med?.barcodeCode) || medicationCodes(med)[0] || '';
+    const qrDataUrl = medicationQrDataUrl(code);
+    const title = [med?.name, formatLabelMedStrength(med), labelDosageFormText(med)].filter(Boolean).join(' ').trim();
+    const lines = [
+        title,
+        `${formatAmount(parseAmount(med?.stock))} ${inventoryUnitFor(med)}`,
+        med?.expiry || '',
+        med?.storage || '',
+        med?.instructions || ''
+    ];
+    return `<div class="${getLabelClass(lines, med?.instructions ? 6 : 5)} compound-bottle-label bulk-bottle-label">
+        <div class="compound-label-copy">
+            <div class="label-title">${escapeHtml(title)}</div>
+            <div class="label-small"><strong>Qty:</strong> ${escapeHtml(formatAmount(parseAmount(med?.stock)))} ${escapeHtml(inventoryUnitFor(med))}</div>
+            ${med?.expiry ? `<div class="label-small"><strong>Exp:</strong> ${escapeHtml(med.expiry)}</div>` : ''}
+            ${med?.preparedDate ? `<div class="label-small"><strong>Prepped:</strong> ${escapeHtml(med.preparedDate)}</div>` : ''}
+            <div class="label-small"><strong>Storage:</strong> ${escapeHtml(med?.storage || 'N/A')}</div>
+            ${med?.instructions ? `<div class="label-small"><strong>Instructions:</strong> ${escapeHtml(med.instructions)}</div>` : ''}
+        </div>
+        ${qrDataUrl ? `<img class="compound-label-qr" src="${qrDataUrl}" alt="Medication QR code">` : ''}
+    </div>`;
+}
+
+function bulkContainerPreviewMed(sourceMed, values = {}) {
+    if (!sourceMed) return null;
+    const qtyPrepared = parseAmount(values.qtyPrepared, 0);
+    const barcodeCode = normalizeMedicationCode(values.barcodeCode) || createMedicationCode();
+    return {
+        ...sourceMed,
+        id: 'bulk_preview',
+        name: String(values.labelName || '').trim() || sourceMed.name,
+        stock: qtyPrepared,
+        maxCapacity: qtyPrepared,
+        expiry: values.expiry || sourceMed.expiry || '',
+        storage: values.storage || sourceMed.storage || 'Room Temp',
+        barcodeCode,
+        barcodeCodes: [barcodeCode],
+        instructions: String(values.instructions || '').trim(),
+        preparedDate: values.prepDate || localDateKey(),
+        isBulkPrepack: true
+    };
+}
+
+window.updateBulkContainerPreview = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const sourceMed = selectedInventoryUnitDoseMedication(body);
+    const qtyPrepared = parseAmount(body.querySelector('[name="qtyPrepared"]')?.value, NaN);
+    const labelNameInput = body.querySelector('[name="labelName"]');
+    const expiryInput = body.querySelector('[name="expiry"]');
+    const storageInput = body.querySelector('[name="storage"]');
+    const barcodeInput = body.querySelector('[name="barcodeCode"]');
+    if (sourceMed) {
+        if (labelNameInput && !labelNameInput.value) labelNameInput.placeholder = sourceMed.name;
+        if (expiryInput && !expiryInput.value && sourceMed.expiry) expiryInput.value = sourceMed.expiry;
+        if (storageInput && !storageInput.value) storageInput.value = sourceMed.storage || 'Room Temp';
+        if (barcodeInput && !barcodeInput.value) barcodeInput.value = createMedicationCode();
+    }
+    const info = body.querySelector('#bulk-container-stock-preview');
+    const label = body.querySelector('#bulk-container-label-preview');
+    if (!sourceMed) {
+        if (info) info.innerHTML = 'Select an inventory item to package into a bulk bottle/container.';
+        if (label) label.innerHTML = '<div class="empty-state">Label preview will appear here.</div>';
+        return;
+    }
+    const values = collectNamedInputs(body);
+    const previewMed = bulkContainerPreviewMed(sourceMed, values);
+    const stockUnit = inventoryUnitFor(sourceMed);
+    const enoughStock = Number.isFinite(qtyPrepared) && qtyPrepared > 0 && parseAmount(sourceMed.stock, 0) >= qtyPrepared;
+    if (info) {
+        info.innerHTML = `
+            <strong>${escapeHtml(sourceMed.name)} ${escapeHtml(formatLabelMedStrength(sourceMed))}</strong><br>
+            Source stock: ${escapeHtml(formatAmount(parseAmount(sourceMed.stock)))} ${escapeHtml(stockUnit)}<br>
+            New bulk container qty: ${Number.isFinite(qtyPrepared) && qtyPrepared > 0 ? `${escapeHtml(formatAmount(qtyPrepared))} ${escapeHtml(stockUnit)}` : 'Enter quantity'}<br>
+            ${enoughStock ? '<span style="color:green; font-weight:bold;">Stock is available.</span>' : '<span style="color:#b00000; font-weight:bold;">Enter a quantity that is available in inventory.</span>'}
+        `;
+    }
+    if (label && previewMed) label.innerHTML = bulkContainerLabelHtml(previewMed);
+};
+
+window.generateBulkContainerCode = function() {
+    const input = document.querySelector('#action-modal-body [name="barcodeCode"]');
+    if (input) {
+        input.value = createMedicationCode();
+        updateBulkContainerPreview();
+    }
+};
+
+function resolveInventorySearchValue(query) {
+    const inventory = sortByName(db.inventory, inventoryDisplayName);
+    const value = String(query || '').trim();
+    const lowered = value.toLowerCase();
+    const partialMatches = inventory.filter(item => inventoryDisplayName(item).toLowerCase().includes(lowered) || String(item.name || '').toLowerCase().includes(lowered));
+    return inventory.find(item => inventoryDisplayName(item) === value)
+        || inventory.find(item => item.name.toLowerCase() === lowered)
+        || (partialMatches.length === 1 ? partialMatches[0] : null)
+        || null;
+}
+
+window.createBulkInventoryContainer = async function() {
+    if (!db.inventory.length) {
+        await appAlert('Add inventory items before creating a bulk bottle/container.');
+        return;
+    }
+    const inventory = sortByName(db.inventory, inventoryDisplayName);
+    const medOptions = inventory.map(med =>
+        `<option value="${escapeHtml(inventoryDisplayName(med))}">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</option>`
+    ).join('');
+    const defaults = defaultActualDateTime();
+    const result = await showActionModal('Bulk Bottle/Container From Inventory', `
+        <div data-action-modal-size="wide" class="bulk-container-preview-shell">
+            <div>
+                <div class="field-row-stacked">
+                    <label>Medication or supplement:</label>
+                    <input name="medSearch" list="bulk-container-inventory-options" placeholder="Search inventory..." style="width:100%;" oninput="updateBulkContainerPreview()">
+                    <datalist id="bulk-container-inventory-options">${medOptions}</datalist>
+                </div>
+                <div class="field-row" style="margin-top:8px;">
+                    <label>Qty:</label><input name="qtyPrepared" type="number" min="0.001" step="any" placeholder="Amount placed in bottle" style="width:120px;" oninput="updateBulkContainerPreview()">
+                    <label>Prepared:</label><input name="prepDate" type="date" value="${escapeHtml(defaults.date)}" onchange="updateBulkContainerPreview()">
+                    <label>Time:</label><input name="prepTime" type="time" value="${escapeHtml(defaults.time)}">
+                </div>
+                <div class="field-row" style="margin-top:8px;">
+                    <label>Expiration:</label><input name="expiry" type="date" onchange="updateBulkContainerPreview()">
+                    <label>Storage:</label>
+                    <select name="storage" onchange="updateBulkContainerPreview()">
+                        <option value="Room Temp">Room Temp</option>
+                        <option value="Refrigerate">Refrigerate</option>
+                        <option value="Freeze">Freeze</option>
+                        <option value="Protect from light">Protect from light</option>
+                        <option value="Unknown">Unknown</option>
+                    </select>
+                </div>
+                <div class="field-row" style="margin-top:8px;">
+                    <label>Label name:</label><input name="labelName" type="text" placeholder="Leave blank to use medication name" style="width:260px;" oninput="updateBulkContainerPreview()">
+                </div>
+                <div class="field-row" style="margin-top:8px;">
+                    <label>QR code:</label><input name="barcodeCode" type="text" value="${escapeHtml(createMedicationCode())}" style="width:230px;" oninput="updateBulkContainerPreview()">
+                    <button type="button" onclick="generateBulkContainerCode()">Generate</button>
+                </div>
+                <div class="field-row-stacked" style="margin-top:8px;">
+                    <label>Instructions:</label><textarea name="instructions" rows="3" style="width:100%; resize:none;" oninput="updateBulkContainerPreview()"></textarea>
+                </div>
+                <div id="bulk-container-stock-preview" class="unit-dose-preview">Select an inventory item to package into a bulk bottle/container.</div>
+                <div class="form-help" style="margin-top:8px;">This creates a new orange inventory item from stock you already have. Stock is removed from the source item immediately because the bulk bottle/container becomes its own inventory supply.</div>
+            </div>
+            <div>
+                <strong>Live label preview</strong>
+                <div id="bulk-container-label-preview" class="bulk-container-preview-card"><div class="empty-state">Label preview will appear here.</div></div>
+            </div>
+        </div>
+    `, 'Create Bulk Container');
+    if (!result) return;
+    const sourceMed = resolveInventorySearchValue(result.medSearch);
+    const qtyPrepared = parseAmount(result.qtyPrepared, NaN);
+    if (!sourceMed || !Number.isFinite(qtyPrepared) || qtyPrepared <= 0) {
+        await appAlert('Select an inventory item and enter the quantity going into the bulk bottle/container.');
+        return;
+    }
+    if (parseAmount(sourceMed.stock, 0) < qtyPrepared) {
+        await appAlert(`${sourceMed.name} has ${formatAmount(parseAmount(sourceMed.stock))} ${inventoryUnitFor(sourceMed)} on hand, but this bulk container needs ${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)}.`);
+        return;
+    }
+    const barcodeCode = normalizeMedicationCode(result.barcodeCode) || createMedicationCode();
+    if (await warnBarcodeConflict(barcodeCode)) return;
+    const bulkMed = {
+        ...sourceMed,
+        id: `bulk_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        name: String(result.labelName || '').trim() || sourceMed.name,
+        stock: qtyPrepared,
+        maxCapacity: qtyPrepared,
+        expiry: result.expiry || sourceMed.expiry || '',
+        storage: result.storage || sourceMed.storage || 'Room Temp',
+        barcodeCode,
+        barcodeCodes: [barcodeCode],
+        notes: [
+            sourceMed.notes || '',
+            `Bulk bottle/container prepared from ${sourceMed.name} ${formatLabelMedStrength(sourceMed)} on ${result.prepDate || defaults.date}${result.prepTime ? ` ${result.prepTime}` : ''}.`,
+            `Source inventory used: ${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)}.`
+        ].filter(Boolean).join('\n'),
+        instructions: String(result.instructions || '').trim(),
+        preparedDate: result.prepDate || defaults.date,
+        preparedTime: result.prepTime || defaults.time,
+        isBulkPrepack: true,
+        bulkSourceInventoryId: sourceMed.id,
+        sourceInventoryId: sourceMed.id,
+        sourceInventoryName: sourceMed.name
+    };
+    sourceMed.stock = Math.max(0, parseAmount(sourceMed.stock, 0) - qtyPrepared);
+    db.inventory.push(bulkMed);
+    db.history.unshift({
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        medId: sourceMed.id,
+        medName: sourceMed.name,
+        details: `Bulk bottle/container created: ${bulkMed.name}; -${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)} source stock; new QR ${barcodeCode}.`
+    });
+    addAudit('Bulk inventory container created', sourceMed.name, `${bulkMed.name} | -${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)}.`);
+    await sync();
+    previewLabelHtml(bulkContainerLabelHtml(bulkMed));
+};
 
 function prepackShiftForTime(time) {
     const minutes = timeToMinutes(time);
@@ -8095,6 +8468,7 @@ function isPrepackDayComplete(day) {
 }
 
 function prepackStatusMark(item) {
+    if (item.inventoryReturned) return '<span class="prepack-mark">R</span>';
     if (item.status === 'correct') return '<span class="prepack-mark">&#10003;</span>';
     if (item.status === 'wrong') return '<span class="prepack-mark">&#10007;</span>';
     return '<span class="prepack-mark">[ ]</span>';
@@ -8127,16 +8501,17 @@ function prepackWorkspaceHtml(queue) {
         const statusClass = item.status === 'correct'
             ? 'prepack-item-correct'
             : (item.status === 'wrong' ? 'prepack-item-wrong' : '');
+        const returnedClass = item.inventoryReturned ? 'prepack-item-returned' : '';
         const addedClass = item.isPrepackAdded ? 'prepack-item-added' : '';
         const orderSetText = item.orderSetName ? ` | ${item.orderSetName}` : '';
         const removeButton = queue.selection?.singleMedication
             ? ''
             : `<button type="button" onclick="removePrepackItem('${escapeHtml(queue.id)}','${escapeHtml(day.date)}','${escapeHtml(item.id)}')">Remove</button>`;
-        return `<div class="prepack-item ${statusClass} ${addedClass}">
+        return `<div class="prepack-item ${statusClass} ${returnedClass} ${addedClass}">
             ${prepackStatusMark(item)}
             <div class="prepack-item-copy">
                 <strong>${escapeHtml(item.time)} - ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')}</strong>${item.isPrepackAdded ? ' <span class="prepack-added-badge">Added</span>' : ''}<br>
-                <small>Qty: ${escapeHtml(item.quantity)} | Dose: ${escapeHtml(item.dose)}${item.expirationDate ? ` | Exp: ${escapeHtml(item.expirationDate)}` : ''}${escapeHtml(orderSetText)}</small>
+                <small>Qty: ${escapeHtml(item.quantity)} | Dose: ${escapeHtml(item.dose)}${item.expirationDate ? ` | Exp: ${escapeHtml(item.expirationDate)}` : ''}${item.inventoryReturned ? ` | Returned: ${escapeHtml(item.returnReason || 'returned')}` : ''}${escapeHtml(orderSetText)}</small>
                 ${item.status === 'wrong' ? `<div class="prepack-scan-error">Wrong scan: ${escapeHtml(item.scannedCode || 'Unknown code')}</div>` : ''}
             </div>
             ${removeButton}
@@ -8259,6 +8634,73 @@ window.selectPrepackDay = function(queueId, dayIndex) {
     renderPrepackageQueues();
 };
 
+function returnablePrepackItems() {
+    const rows = [];
+    (db.prepackQueues || []).forEach(queue => {
+        if (isInventoryUnitDoseQueue(queue)) return;
+        (queue.days || []).forEach(day => {
+            (day.items || []).forEach(item => {
+                if (!item.inventoryDeducted || item.inventoryReturned) return;
+                const med = db.inventory.find(candidate => candidate.id === item.medId);
+                rows.push({ queue, day, item, med });
+            });
+        });
+    });
+    return rows.sort((a, b) =>
+        String(a.day.date || '').localeCompare(String(b.day.date || '')) ||
+        timeToMinutes(a.item.time) - timeToMinutes(b.item.time) ||
+        String(a.item.medName || '').localeCompare(String(b.item.medName || ''), undefined, { sensitivity: 'base' })
+    );
+}
+
+window.returnPrepackedDispense = async function() {
+    const rows = returnablePrepackItems();
+    if (rows.length === 0) {
+        await appAlert('No prepared prepack doses are available to return.');
+        return;
+    }
+    const choices = rows.map((row, index) => {
+        const inputId = `return-prepack-${index}`;
+        const qty = row.item.stockDelta ? `${formatAmount(parseAmount(row.item.stockDelta))} ${row.med?.administrationUnit || (row.med ? inventoryUnitFor(row.med) : 'units')}` : row.item.quantity;
+        return `<label class="label-selection-item" for="${inputId}">
+            <input id="${inputId}" name="returnRows" type="checkbox" value="${index}">
+            <strong>${escapeHtml(row.day.date)} ${escapeHtml(row.item.time)} - ${escapeHtml(row.item.medName)} ${escapeHtml(row.item.strength || '')}</strong><br>
+            <small>${escapeHtml(row.queue.memberName || row.queue.title || 'Prepack')} | Return: ${escapeHtml(qty)} | ${escapeHtml(row.queue.sourceLabel || '')}</small>
+        </label>`;
+    }).join('');
+    const result = await showActionModal('Return Prepacked Dose(s)', `
+        <div class="form-help" style="margin-bottom:8px;">Use this when a prepacked dose was missed, refused, held, discarded back into stock, or otherwise not used. Returned quantities are added back to the source inventory item.</div>
+        <div class="field-row">
+            <label>Reason:</label>
+            <select name="reason">
+                <option value="missed dose">Missed dose</option>
+                <option value="refused dose">Refused dose</option>
+                <option value="held dose">Held dose</option>
+                <option value="packing error">Packing error</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Note:</label><textarea name="note" rows="2" style="width:100%; resize:none;" placeholder="Optional return note"></textarea>
+        </div>
+        <div class="sunken-panel label-selection-list" style="margin-top:8px; max-height:330px;">${choices}</div>
+    `, 'Return Selected');
+    if (!result) return;
+    const selected = Array.isArray(result.returnRows) ? result.returnRows : [result.returnRows].filter(value => value !== undefined);
+    if (selected.length === 0) {
+        await appAlert('Select at least one prepacked dose to return.');
+        return;
+    }
+    selected.forEach(value => {
+        const row = rows[parseInt(value, 10)];
+        if (!row) return;
+        reversePrepackItemStock(row.queue, row.item, result.reason || 'returned');
+        if (result.note) row.item.returnNote = result.note;
+    });
+    await sync();
+    await appAlert(`${selected.length} prepacked dose${selected.length === 1 ? '' : 's'} returned to inventory.`, 'Prepack Return Complete');
+};
+
 window.schedulePrepackScan = function(queueId) {
     clearTimeout(prepackScanTimer);
     prepackScanTimer = setTimeout(() => {
@@ -8289,7 +8731,7 @@ window.scanPrepackCode = async function(queueId) {
     item.scannedAt = new Date().toISOString();
     const correctScan = expectedCodes.includes(scannedCode);
     if (correctScan) {
-        if (!applyInventoryUnitDoseItemStock(queue, item, 'scan')) {
+        if (!applyPrepackItemStock(queue, item, 'scan')) {
             input.value = '';
             await appAlert(`${med?.name || item.medName} does not have enough stock to prepack ${item.time}.`);
             return;
@@ -8504,17 +8946,8 @@ window.markPrepackDayManual = async function(queueId) {
     const day = queue?.days[queue.currentDayIndex || 0];
     if (!queue || !day) return;
     if (!await appConfirm(`Confirm that every medication for ${day.date} was prepacked manually?`, 'Prepacked Manually')) return;
-    if (isInventoryUnitDoseQueue(queue)) {
-        const sourceMed = db.inventory.find(candidate => candidate.id === queue.selection.medId);
-        const pendingCount = day.items.filter(item => item.status !== 'correct' || item.inventoryDeducted !== true).length;
-        const required = parseAmount(queue.selection.qtyPerContainer, 0) * pendingCount;
-        if (!sourceMed || parseAmount(sourceMed.stock, 0) < required) {
-            await appAlert(`${sourceMed?.name || 'The source inventory item'} does not have enough stock to manually prepack the remaining ${pendingCount} item${pendingCount === 1 ? '' : 's'}.`);
-            return;
-        }
-    }
     for (const item of day.items) {
-        if (isInventoryUnitDoseQueue(queue) && !applyInventoryUnitDoseItemStock(queue, item, 'manual')) {
+        if (!applyPrepackItemStock(queue, item, 'manual')) {
             await appAlert(`${item.medName} does not have enough stock to prepack ${item.time}.`);
             return;
         }
@@ -8542,7 +8975,7 @@ window.removePrepackItem = async function(queueId, date, itemId) {
     const schedule = db.schedules.find(candidate => candidate.id === item.scheduleId);
     if (!schedule || !queue.selection) {
         if (!await appConfirm(`Remove ${item.medName} from this prepack only?`, 'Change Prepack')) return;
-        reverseInventoryUnitDoseItemStock(queue, item);
+        reversePrepackItemStock(queue, item, 'removed from prepack');
         day.items = day.items.filter(candidate => candidate.id !== itemId);
         day.needsReprint = queue.labelsPrinted;
         updatePrepackQueueStatus(queue);
@@ -8569,6 +9002,16 @@ window.removePrepackItem = async function(queueId, date, itemId) {
         ${discontinueOption}
     `, 'Continue');
     if (!result?.removeAction) return;
+
+    if (result.removeAction === 'prepack-all' || result.removeAction === 'discontinue-order') {
+        (queue.days || []).forEach(prepackDay => {
+            (prepackDay.items || [])
+                .filter(candidate => candidate.scheduleId === schedule.id)
+                .forEach(candidate => reversePrepackItemStock(queue, candidate, 'removed from prepack'));
+        });
+    } else {
+        reversePrepackItemStock(queue, item, 'removed from prepack');
+    }
 
     if (result.removeAction === 'discontinue-order' && schedule.prepackAdded) {
         db.schedules = db.schedules.filter(candidate => candidate.id !== schedule.id);
@@ -9433,7 +9876,7 @@ function memberAdherenceRows(memberId, days = 14) {
                 due++;
                 const entry = findHistoryForScheduleInstance(schedule, instance);
                 if (entry && isGivenStatus(entry.doseStatus || 'given')) given++;
-                else if (entry && ['skipped', 'missed'].includes(entry.doseStatus)) exceptions++;
+                else if (entry && ['skipped', 'missed', 'refused'].includes(entry.doseStatus)) exceptions++;
             });
         });
 
@@ -9601,7 +10044,7 @@ function timelineDoseState(schedule, instance) {
         const actual = historyEntryDateTime(entry);
         const wasOffSchedule = ['late', 'early'].includes(status) ||
             (isGivenStatus(status) && (actual.date !== instance.date || actual.time !== instance.time));
-        if (['skipped', 'missed'].includes(status)) {
+        if (['skipped', 'missed', 'refused'].includes(status)) {
             return {
                 className: 'timeline-not-given',
                 label: instance.time,
@@ -9662,6 +10105,7 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
                 <option value="early">Given early</option>
                 <option value="skipped">Skipped</option>
                 <option value="missed">Missed / forgotten</option>
+                <option value="refused">Refused</option>
             </select>
         </div>
         <div class="field-row" style="margin-top:8px;">
@@ -9856,9 +10300,15 @@ function dataHealthIssues() {
     const barcodeMap = new Map();
 
     db.schedules.forEach(schedule => {
+        const scheduleMed = db.inventory.find(item => item.id === schedule.medId);
         if (!memberIds.has(schedule.memberId)) issues.push({ severity: 'high', repairable: true, type: 'orphan-schedule-member', scheduleId: schedule.id, message: `Schedule ${schedule.id} has no matching member.` });
         if (!inventoryIds.has(schedule.medId)) issues.push({ severity: 'high', repairable: true, type: 'orphan-schedule-med', scheduleId: schedule.id, message: `Schedule ${schedule.id} has no matching inventory medication.` });
         if (schedule.freq !== 'PRN' && getScheduleTimes(schedule).length === 0) issues.push({ severity: 'medium', repairable: false, type: 'missing-times', message: `Scheduled medication ${schedule.id} has no administration time.` });
+        const doseQty = parseAmount(schedule.doseQty, NaN);
+        if (!usesContainerTracking(scheduleMed) && (!Number.isFinite(doseQty) || doseQty <= 0)) issues.push({ severity: 'medium', repairable: false, type: 'invalid-dose-quantity', message: `Scheduled medication ${schedule.id} has a dose quantity of 0 or less.` });
+        const intervalHours = parseInt(schedule.intervalHours, 10);
+        if (schedule.freq === 'QXH' && (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24)) issues.push({ severity: 'medium', repairable: false, type: 'invalid-interval', message: `Every-X-hours schedule ${schedule.id} has an invalid hour interval.` });
+        if (schedule.freq === 'QOD' && !(schedule.qodStart || schedule.startDate)) issues.push({ severity: 'medium', repairable: false, type: 'missing-qod-anchor', message: `Every-other-day schedule ${schedule.id} needs an anchor/start date.` });
         linkedSchedulesFor(schedule, db.schedules.filter(item => item.memberId === schedule.memberId)).forEach(linked => {
             if (scheduleLinkModeBetween(schedule, linked) === 'together' && !schedulesHaveAlignedTiming(schedule, linked)) {
                 const med = db.inventory.find(item => item.id === schedule.medId);
@@ -9877,9 +10327,21 @@ function dataHealthIssues() {
             barcodeMap.get(code).push(med.name || med.id);
         });
         if (parseAmount(med.stock, 0) < 0) issues.push({ severity: 'medium', repairable: true, type: 'negative-stock', medId: med.id, message: `${med.name} has negative stock.` });
+        if (med.isCombination && (!Array.isArray(med.components) || med.components.length === 0)) {
+            issues.push({ severity: 'medium', repairable: false, type: 'missing-combination-components', medId: med.id, message: `${med.name} is marked as a combination product but has no active ingredient components.` });
+        }
     });
     barcodeMap.forEach((names, code) => {
         if (names.length > 1) issues.push({ severity: 'high', repairable: false, type: 'duplicate-barcode', message: `Barcode ${code} is assigned to multiple items: ${names.join(', ')}.` });
+    });
+    (db.prepackQueues || []).forEach(queue => {
+        (queue.days || []).forEach(day => {
+            (day.items || []).forEach(item => {
+                if (item.medId && !inventoryIds.has(item.medId)) issues.push({ severity: 'medium', repairable: false, type: 'orphan-prepack-med', message: `Prepack ${queue.title || queue.sourceLabel || queue.id} includes a medication no longer in inventory.` });
+                if (item.scheduleId && !db.schedules.some(schedule => schedule.id === item.scheduleId) && queue.status !== 'completed') issues.push({ severity: 'low', repairable: false, type: 'orphan-prepack-schedule', message: `Active prepack ${queue.title || queue.sourceLabel || queue.id} references a medication schedule that is no longer active.` });
+                if (item.inventoryReturned && !item.inventoryDeducted) issues.push({ severity: 'low', repairable: false, type: 'prepack-return-without-deduction', message: `Prepack item ${item.medName || item.id} is marked returned but was not marked deducted.` });
+            });
+        });
     });
 
     return issues;
@@ -11405,6 +11867,15 @@ async function getAdministrationStockPlan(med, sched, actual = {}) {
     }
 
     const qtyToSubtract = parseAmount(sched.doseQty, 0);
+    const scheduledDate = actual.scheduledDate || actual.actualDate || '';
+    const scheduledTime = actual.scheduledTime || actual.actualTime || '';
+    const prepacked = prepackedDoseCovers(sched.id, scheduledDate, scheduledTime);
+    if (prepacked) {
+        return {
+            qtyToSubtract: 0,
+            logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from prepared prepack (${prepacked.day.date})`
+        };
+    }
     if (actual.inventorySource && actual.inventorySource !== 'main') {
         const kitResult = consumeFromKitSource(actual.inventorySource, med, qtyToSubtract);
         if (kitResult.error) {
@@ -11488,7 +11959,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
     const med = db.inventory.find(m => m.id === sched.medId);
     if (!med || !sched) return false;
     const status = actual.doseStatus || 'given';
-    const isGivenDose = !['skipped', 'missed'].includes(status);
+    const isGivenDose = !['skipped', 'missed', 'refused'].includes(status);
     const instanceDate = actual.scheduledDate || (sched.freq === 'PRN' ? actual.actualDate : '');
     const instanceTime = actual.scheduledTime || (sched.freq === 'PRN' ? actual.actualTime : '');
     const instanceKey = instanceDate && instanceTime
@@ -11686,7 +12157,7 @@ function historyEntryDateTime(entry) {
 }
 
 function isGivenStatus(status) {
-    return !['skipped', 'missed'].includes(status);
+    return !['skipped', 'missed', 'refused'].includes(status);
 }
 
 function administrationStockDelta(entry, med, schedule) {
@@ -11723,6 +12194,7 @@ window.editAdministration = async function(entryId) {
                 <option value="early" ${entry.doseStatus === 'early' ? 'selected' : ''}>Given early</option>
                 <option value="skipped" ${entry.doseStatus === 'skipped' ? 'selected' : ''}>Skipped</option>
                 <option value="missed" ${entry.doseStatus === 'missed' ? 'selected' : ''}>Missed / forgotten</option>
+                <option value="refused" ${entry.doseStatus === 'refused' ? 'selected' : ''}>Refused</option>
             </select>
         </div>
         <div class="field-row-stacked" style="margin-top:8px;">
@@ -11779,6 +12251,18 @@ window.editAdministration = async function(entryId) {
         med.stock = parseAmount(med.stock) + (willBeGiven ? -stockDelta : stockDelta);
     }
 
+    if (wasGiven && !willBeGiven && schedule && entry.scheduledDate && entry.scheduledTime) {
+        const prepared = prepackedDoseCovers(schedule.id, entry.scheduledDate, entry.scheduledTime);
+        if (prepared) {
+            const reason = nextStatus === 'refused'
+                ? 'refused dose'
+                : (nextStatus === 'missed' ? 'missed dose' : 'not given');
+            if (await appConfirm('This dose was already prepared in a prepack. Return the prepared quantity to inventory?', 'Return Prepacked Dose')) {
+                reversePrepackItemStock(prepared.queue, prepared.item, reason);
+            }
+        }
+    }
+
     const noteText = result.doseNote ? `; Note: ${result.doseNote}` : '';
     entry.timestamp = `${result.actualDate} ${result.actualTime}`;
     if (schedule?.freq === 'PRN') {
@@ -11821,6 +12305,7 @@ window.administerDose = async function(medId, scheduleId) {
                     <option value="early">Given early</option>
                     <option value="skipped">Skipped</option>
                     <option value="missed">Missed / forgotten</option>
+                    <option value="refused">Refused</option>
                 </select>
             </div>
             ${kitSourceSelectHtml(med.id)}
@@ -11999,6 +12484,7 @@ window.administerOrderSet = async function(orderSetId) {
                         <option value="early">Given early</option>
                         <option value="skipped">Skipped</option>
                         <option value="missed">Missed / forgotten</option>
+                        <option value="refused">Refused</option>
                     </select>
                 </div>
                 <div class="field-row-stacked" style="margin-top:8px;">
@@ -12803,11 +13289,11 @@ function formatCalendarRange(startDate) {
 function calendarMedicationColor(schedule, dateStr, time) {
     const instances = getScheduleInstancesForDate(schedule, dateStr);
     const documented = instances.map(instance => db.history.find(entry => entry.scheduleInstanceKey === instance.key));
-    const allGiven = instances.length > 0 && documented.every(entry => entry && !['skipped', 'missed'].includes(entry.doseStatus));
+    const allGiven = instances.length > 0 && documented.every(entry => entry && !['skipped', 'missed', 'refused'].includes(entry.doseStatus));
     if (allGiven) return '#008000';
 
     const currentEntry = db.history.find(entry => entry.scheduleInstanceKey === scheduleInstanceKey(schedule.id, dateStr, time));
-    if (currentEntry && ['skipped', 'missed'].includes(currentEntry.doseStatus)) return '#b00000';
+    if (currentEntry && ['skipped', 'missed', 'refused'].includes(currentEntry.doseStatus)) return '#b00000';
     if (currentEntry) return '#000000';
 
     const due = new Date(`${dateStr}T${time}`);
@@ -14688,6 +15174,7 @@ filteredInventory.forEach(med => {
     let displayStrength = formatMedStrength(med);
     if (tableBody) {
         const row = document.createElement('tr');
+        if (med.isBulkPrepack) row.classList.add('bulk-inventory-row');
 
         // --- EXPIRATION LOGIC ---
         const today = new Date();
@@ -14714,6 +15201,7 @@ filteredInventory.forEach(med => {
             <td style="display:flex; align-items:center; gap:5px;">
                 ${med.imagePath ? `<img src="${imageSrc(med.imagePath)}" style="width:20px; height:20px; object-fit:cover;">` : '💊'}
                 <span style="cursor:pointer; text-decoration:underline;" onclick="openMedProfile('${med.id}')">${med.name}</span>
+                ${med.isBulkPrepack ? '<span class="prepack-added-badge">Bulk</span>' : ''}
             </td>
             <td>${displayStrength}</td>
             <td>${escapeHtml(formatInventoryUnits(med))}</td>

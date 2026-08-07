@@ -148,17 +148,17 @@
                             <label>Frequency:</label>
                             <select id="sched-freq" onchange="renderFrequencyControls('sched')">
                                 <option value="ONCE">One Time Dose</option>
-                                <option value="QD">QD (Daily)</option>
-                                <option value="BID">BID (Twice Daily)</option>
-                                <option value="TID">TID (Thrice Daily)</option>
-                                <option value="QID">QID (Four Times)</option>
+                                <option value="QD">Daily</option>
+                                <option value="BID">Twice daily</option>
+                                <option value="TID">3 times daily</option>
+                                <option value="QID">4 times daily</option>
                                 <option value="Nightly">Nightly</option>
-                                <option value="QOD">QOD (Every Other Day)</option>
+                                <option value="QOD">Every other day</option>
                                 <option value="QW">Once Weekly</option>
                                 <option value="QXW">Every X Weeks</option>
                                 <option value="XPW">X Times Per Week</option>
                                 <option value="QXH">Every X Hours</option>
-                                <option value="PRN">PRN (As Needed)</option>
+                                <option value="PRN">As needed</option>
                                 <option value="Monthly">Once Monthly</option>
                             </select>
                             <div id="qod-start-container" style="display:none;">
@@ -251,6 +251,7 @@
                             <option value="">All members</option>
                         </select>
                         <button type="button" onclick="createInventoryUnitDosePrepack()"><span class="win98-icon icon-box"></span>Inventory Unit-Dose Prepack</button>
+                        <button type="button" onclick="createBulkInventoryContainer()"><span class="win98-icon icon-box"></span>Bulk Bottle/Container</button>
                     </div>
                     <div class="prepack-layout">
                         <fieldset>
@@ -533,6 +534,7 @@
                             <button type="button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive Order</button>
                             <button type="button" onclick="viewInventoryOrderLog()"><span class="win98-icon icon-view"></span>Order Log</button>
                             <button type="button" onclick="printInventoryOrderPdf()"><span class="win98-icon icon-order"></span>Order PDF</button>
+                            <button type="button" onclick="returnPrepackedDispense()"><span class="win98-icon icon-box"></span>Return Prepack</button>
                             <button type="button" onclick="openMedKits()"><span class="win98-icon icon-box"></span>Med Kits</button>
                         </div>
                         <div id="inventory-workflow-summary" class="inventory-workflow-summary"></div>
@@ -1296,12 +1298,18 @@
                                 <label class="profile-diary-flag-toggle"><input id="m-progress-note-private" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Private caregiver note</span></label>
                                 <label class="profile-diary-flag-toggle"><input id="m-progress-note-resolved" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Resolved</span></label>
                             </div>
-                            <div class="profile-diary-scale-grid">
-                                <label>Pain 0-10<input id="m-progress-note-pain" type="number" min="0" max="10" step="1" placeholder="-"></label>
-                                <label>Mood 1-5<input id="m-progress-note-mood" type="number" min="1" max="5" step="1" placeholder="-"></label>
-                                <label>Sleep 1-5<input id="m-progress-note-sleep" type="number" min="1" max="5" step="1" placeholder="-"></label>
-                                <label>Nausea 0-10<input id="m-progress-note-nausea" type="number" min="0" max="10" step="1" placeholder="-"></label>
-                                <label>Energy 1-5<input id="m-progress-note-energy" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                            <div class="profile-diary-scale-toggle-row">
+                                <button type="button" onclick="toggleProgressNoteScales()">Add ratings</button>
+                                <span class="form-help">Optional subjective diary ratings: pain/nausea 0 none to 10 worst; mood/sleep/energy 1 low to 5 best.</span>
+                            </div>
+                            <div id="m-progress-note-scales-panel" class="profile-diary-scale-panel" style="display:none;">
+                                <div class="profile-diary-scale-grid">
+                                    <label>Pain 0-10<input id="m-progress-note-pain" type="number" min="0" max="10" step="1" placeholder="-"></label>
+                                    <label>Mood 1-5<input id="m-progress-note-mood" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                    <label>Sleep 1-5<input id="m-progress-note-sleep" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                    <label>Nausea 0-10<input id="m-progress-note-nausea" type="number" min="0" max="10" step="1" placeholder="-"></label>
+                                    <label>Energy 1-5<input id="m-progress-note-energy" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                </div>
                             </div>
                             <input id="m-progress-note-edit-id" type="hidden">
                             <div class="rich-text-toolbar" aria-label="Progress note formatting">
@@ -1471,17 +1479,17 @@
             <div class="field-row-stacked"><label>Frequency</label>
                 <select id="mod-freq" onchange="renderFrequencyControls('mod')">
                     <option value="ONCE">One Time Dose</option>
-                    <option value="QD">QD</option>
-                    <option value="BID">BID</option>
-                    <option value="TID">TID</option>
-                    <option value="QID">QID</option>
+                    <option value="QD">Daily</option>
+                    <option value="BID">Twice daily</option>
+                    <option value="TID">3 times daily</option>
+                    <option value="QID">4 times daily</option>
                     <option value="Nightly">Nightly</option>
-                    <option value="QOD">QOD</option>
+                    <option value="QOD">Every other day</option>
                     <option value="QW">Once Weekly</option>
                     <option value="QXW">Every X Weeks</option>
                     <option value="XPW">X Times Per Week</option>
                     <option value="QXH">Every X Hours</option>
-                    <option value="PRN">PRN</option>
+                    <option value="PRN">As needed</option>
                     <option value="Monthly">Once Monthly</option>
                 </select>
             </div>
