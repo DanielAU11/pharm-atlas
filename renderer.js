@@ -1855,6 +1855,12 @@ function formatQtyForSchedule(schedule, med) {
     return `${qty} ${unit}`;
 }
 
+function formatStrengthWithPerDoseQty(schedule, med) {
+    const strength = formatPrescribedDose(med, schedule.doseQty);
+    const perDoseQty = formatQtyForSchedule(schedule, med);
+    return `${strength}${perDoseQty ? ` (${perDoseQty})` : ''}`;
+}
+
 function formatCurrency(value) {
     const amount = typeof value === 'number' ? value : parseMoney(value, NaN);
     if (!Number.isFinite(amount)) return '$0.00';
@@ -2329,7 +2335,7 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
     const cancel = modal.querySelector('#action-modal-cancel');
     const close = modal.querySelector('#action-modal-x');
     const minimize = modal.querySelector('#action-modal-min');
-    const isTaskbarWindow = bodyHtml.includes('data-action-modal-size="wide"');
+    const isTaskbarWindow = bodyHtml.includes('data-action-modal-size="wide"') || bodyHtml.includes('bulk-container-preview-shell');
     const taskId = 'action-modal';
 
     modal.querySelector('#action-modal-title').innerText = title;
@@ -5246,7 +5252,7 @@ window.removeCompletedSchedule = async function(scheduleId) {
     removeScheduleLinkReferences(scheduleId);
     db.schedules = db.schedules.filter(item => item.id !== scheduleId);
     await sync();
-    if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
+    if (currentEditingMemberId) await openMemberModal(currentEditingMemberId, 'orders');
 };
 
 window.removeCompletedLinkedSchedules = async function(scheduleId) {
@@ -5260,7 +5266,7 @@ window.removeCompletedLinkedSchedules = async function(scheduleId) {
     removeScheduleLinkReferences([...removeIds]);
     db.schedules = db.schedules.filter(item => !removeIds.has(item.id));
     await sync();
-    if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
+    if (currentEditingMemberId) await openMemberModal(currentEditingMemberId, 'orders');
 };
 
 window.removeCompletedOrderSet = async function(orderSetId) {
@@ -5272,7 +5278,7 @@ window.removeCompletedOrderSet = async function(orderSetId) {
     removeScheduleLinkReferences(removeIds);
     db.schedules = db.schedules.filter(item => item.orderSetId !== orderSetId);
     await sync();
-    if (currentEditingMemberId) openMemberModal(currentEditingMemberId);
+    if (currentEditingMemberId) await openMemberModal(currentEditingMemberId, 'orders');
 };
 
 function memberTaskIdFor(memberId) {
@@ -5428,7 +5434,7 @@ async function autosaveVisibleMemberBeforeSwitch(nextTaskId) {
     return saved;
 }
 
-window.openMemberModal = async function(id = null) {
+window.openMemberModal = async function(id = null, initialTab = 'main') {
     const modal = document.getElementById('member-modal');
     const title = document.getElementById('member-modal-title');
     const requestedTaskId = memberTaskIdFor(id);
@@ -5689,7 +5695,7 @@ window.openMemberModal = async function(id = null) {
         });
         activeMemberTaskId = requestedTaskId;
         enhanceButtonIcons(modal);
-        switchMemberProfileTab('main');
+        switchMemberProfileTab(initialTab || 'main');
     }
 };
 
@@ -5839,8 +5845,7 @@ window.saveOrderModification = async function() {
         });
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
-        openMemberModal(sched.memberId); // Refresh member profile
-        switchMemberProfileTab('orders');
+        await openMemberModal(sched.memberId, 'orders'); // Refresh member profile and return to Scheduled Medications
     }
 };
 
@@ -7342,7 +7347,7 @@ window.deleteOrderSet = async function(id) {
     await sync();
     const memberModal = document.getElementById('member-modal');
     if (currentEditingMemberId && memberModal?.style.display === 'flex') {
-        openMemberModal(currentEditingMemberId);
+        await openMemberModal(currentEditingMemberId, 'orders');
     }
 };
 
@@ -8062,33 +8067,42 @@ window.createBulkInventoryContainer = async function() {
     const defaults = defaultActualDateTime();
     const result = await showActionModal('Bulk Bottle/Container From Inventory', `
         <div data-action-modal-size="wide" class="bulk-container-preview-shell">
-            <div>
+            <div class="bulk-container-form-panel">
                 <div class="field-row-stacked">
                     <label>Medication or supplement:</label>
                     <input name="medSearch" list="bulk-container-inventory-options" placeholder="Search inventory..." style="width:100%;" oninput="updateBulkContainerPreview()">
                     <datalist id="bulk-container-inventory-options">${medOptions}</datalist>
                 </div>
-                <div class="field-row" style="margin-top:8px;">
-                    <label>Qty:</label><input name="qtyPrepared" type="number" min="0.001" step="any" placeholder="Amount placed in bottle" style="width:120px;" oninput="updateBulkContainerPreview()">
-                    <label>Prepared:</label><input name="prepDate" type="date" value="${escapeHtml(defaults.date)}" onchange="updateBulkContainerPreview()">
-                    <label>Time:</label><input name="prepTime" type="time" value="${escapeHtml(defaults.time)}">
+                <div class="bulk-container-field-grid">
+                    <label>Qty
+                        <input name="qtyPrepared" type="number" min="0.001" step="any" placeholder="Amount placed in bottle" oninput="updateBulkContainerPreview()">
+                    </label>
+                    <label>Prepared date
+                        <input name="prepDate" type="date" value="${escapeHtml(defaults.date)}" onchange="updateBulkContainerPreview()">
+                    </label>
+                    <label>Time
+                        <input name="prepTime" type="time" value="${escapeHtml(defaults.time)}">
+                    </label>
+                    <label>Expiration
+                        <input name="expiry" type="date" onchange="updateBulkContainerPreview()">
+                    </label>
+                    <label>Storage
+                        <select name="storage" onchange="updateBulkContainerPreview()">
+                            <option value="Room Temp">Room Temp</option>
+                            <option value="Refrigerate">Refrigerate</option>
+                            <option value="Freeze">Freeze</option>
+                            <option value="Protect from light">Protect from light</option>
+                            <option value="Unknown">Unknown</option>
+                        </select>
+                    </label>
+                    <label>Label name
+                        <input name="labelName" type="text" placeholder="Leave blank to use medication name" oninput="updateBulkContainerPreview()">
+                    </label>
                 </div>
-                <div class="field-row" style="margin-top:8px;">
-                    <label>Expiration:</label><input name="expiry" type="date" onchange="updateBulkContainerPreview()">
-                    <label>Storage:</label>
-                    <select name="storage" onchange="updateBulkContainerPreview()">
-                        <option value="Room Temp">Room Temp</option>
-                        <option value="Refrigerate">Refrigerate</option>
-                        <option value="Freeze">Freeze</option>
-                        <option value="Protect from light">Protect from light</option>
-                        <option value="Unknown">Unknown</option>
-                    </select>
-                </div>
-                <div class="field-row" style="margin-top:8px;">
-                    <label>Label name:</label><input name="labelName" type="text" placeholder="Leave blank to use medication name" style="width:260px;" oninput="updateBulkContainerPreview()">
-                </div>
-                <div class="field-row" style="margin-top:8px;">
-                    <label>QR code:</label><input name="barcodeCode" type="text" value="${escapeHtml(createMedicationCode())}" style="width:230px;" oninput="updateBulkContainerPreview()">
+                <div class="bulk-container-qr-row">
+                    <label>QR code
+                        <input name="barcodeCode" type="text" value="${escapeHtml(createMedicationCode())}" oninput="updateBulkContainerPreview()">
+                    </label>
                     <button type="button" onclick="generateBulkContainerCode()">Generate</button>
                 </div>
                 <div class="field-row-stacked" style="margin-top:8px;">
@@ -8097,7 +8111,7 @@ window.createBulkInventoryContainer = async function() {
                 <div id="bulk-container-stock-preview" class="unit-dose-preview">Select an inventory item to package into a bulk bottle/container.</div>
                 <div class="form-help" style="margin-top:8px;">This creates a new orange inventory item from stock you already have. Stock is removed from the source item immediately because the bulk bottle/container becomes its own inventory supply.</div>
             </div>
-            <div>
+            <div class="bulk-container-preview-panel">
                 <strong>Live label preview</strong>
                 <div id="bulk-container-label-preview" class="bulk-container-preview-card"><div class="empty-state">Label preview will appear here.</div></div>
             </div>
@@ -12400,7 +12414,7 @@ window.finishTopicalContainer = async function(scheduleId) {
     await sync();
     const memberModal = document.getElementById('member-modal');
     if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
-        openMemberModal(schedule.memberId);
+        await openMemberModal(schedule.memberId, 'orders');
     }
 };
 
@@ -12553,7 +12567,7 @@ window.deleteSchedule = async function(id) {
 
     const memberModal = document.getElementById('member-modal');
     if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
-        openMemberModal(schedule.memberId);
+        await openMemberModal(schedule.memberId, 'orders');
     }
 };
 
@@ -15405,7 +15419,7 @@ function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, ins
     return `<div class="${labelClass}">
         <div class="label-date label-date-with-icon">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}${labelShiftIconHtml(prepackShift)}</div>
         <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
-        <div class="label-small">Dose each time: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
+        <div class="label-small">Strength: ${escapeHtml(formatStrengthWithPerDoseQty(schedule, med))}</div>
         <div class="label-small"><b>Total Qty: ${escapeHtml(totalQtyText)}</b></div>
         <div class="label-small">${escapeHtml(scheduleText)}</div>
         <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>

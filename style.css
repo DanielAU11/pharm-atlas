@@ -2627,6 +2627,10 @@ button {
     width: min(1120px, calc(100vw - 36px));
 }
 
+.action-modal-window-wide:has(.bulk-container-preview-shell) {
+    width: min(920px, calc(100vw - 24px));
+}
+
 .inventory-workflow-summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -4527,9 +4531,44 @@ button {
 
 .bulk-container-preview-shell {
     display: grid;
-    grid-template-columns: minmax(360px, 1fr) minmax(250px, 0.7fr);
-    gap: 10px;
+    grid-template-columns: minmax(460px, 1fr) 300px;
+    gap: 12px;
     align-items: start;
+    min-width: min(820px, calc(100vw - 72px));
+}
+
+.bulk-container-form-panel,
+.bulk-container-preview-panel {
+    min-width: 0;
+}
+
+.bulk-container-field-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 7px 10px;
+    margin-top: 8px;
+}
+
+.bulk-container-field-grid label,
+.bulk-container-qr-row label {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.bulk-container-field-grid input,
+.bulk-container-field-grid select,
+.bulk-container-qr-row input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.bulk-container-qr-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+    margin-top: 8px;
 }
 
 .bulk-container-preview-card {
@@ -4540,6 +4579,18 @@ button {
     padding: 12px;
     border: 2px inset #ffffff;
     background: #8f8f8f;
+}
+
+@media (max-width: 760px) {
+    .bulk-container-preview-shell {
+        grid-template-columns: 1fr;
+        min-width: 0;
+    }
+
+    .bulk-container-field-grid,
+    .bulk-container-qr-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 .bulk-container-preview-card .label-page {
