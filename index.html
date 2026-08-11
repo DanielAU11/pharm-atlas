@@ -1223,7 +1223,7 @@
                         <div class="notification-toggle-list">
                             <div class="notification-toggle">
                                 <input id="m-notify-enabled" type="checkbox" checked>
-                                <label for="m-notify-enabled">Medication reminders</label>
+                                <label for="m-notify-enabled">Medication &amp; monitoring reminders</label>
                             </div>
                             <div class="notification-toggle">
                                 <input id="m-email-reminders" type="checkbox">
@@ -1468,6 +1468,7 @@
                         </label>
                         <label>Frequency:
                             <select id="m-care-reminder-freq" onchange="renderCareReminderFrequencyControls('m')">
+                                <option value="ONCE">Once</option>
                                 <option value="QD">Daily</option>
                                 <option value="BID">Twice daily</option>
                                 <option value="TID">3 times daily</option>
@@ -1492,7 +1493,7 @@
                     <div class="field-row" style="justify-content:flex-end; margin-top:6px;">
                         <input id="m-care-reminder-edit-id" type="hidden">
                         <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Types</button>
-                        <button type="button" onclick="saveMemberCareReminder()">Add Reminder</button>
+                        <button id="m-care-reminder-save-button" type="button" onclick="saveMemberCareReminder()">Add Reminder</button>
                         <button type="button" onclick="clearMemberCareReminderForm()">Clear</button>
                     </div>
                     <div id="member-care-reminder-list" class="sunken-panel member-care-reminder-list"></div>
@@ -1597,12 +1598,12 @@
 </div>
 <!--Order Modifier Modal-->
 <div id="order-modifier-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:20000; align-items:center; justify-content:center;">
-    <div class="window" style="width:420px;">
+    <div class="window order-modifier-window">
         <div class="title-bar"><div class="title-bar-text" id="mod-title">Modify Order</div></div>
         <div class="window-body">
             <input type="hidden" id="mod-sched-id">
-            <div id="mod-start-date-wrap" class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date"></div>
-            <div class="field-row-stacked"><label>End Date</label><input id="mod-end" type="date"></div>
+            <div id="mod-start-date-wrap" class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date" onchange="syncMonitoringParameterScheduleUi('mod');"></div>
+            <div class="field-row-stacked"><label>End Date</label><input id="mod-end" type="date" onchange="syncMonitoringParameterScheduleUi('mod');"></div>
             <div class="field-row-stacked"><label>Dose Quantity</label><input id="mod-dose-qty" type="number" step="0.1"></div>
             <div class="field-row-stacked"><label>Prescriber</label><select id="mod-prescriber"></select></div>
             <div class="field-row-stacked"><label>Frequency</label>
@@ -1642,6 +1643,25 @@
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
             <div class="field-row-stacked"><label>Used for / Indication</label><input id="mod-indication" type="text" placeholder="Reason this medication/supplement is used"></div>
             <div class="field-row-stacked"><label>Instructions</label><textarea id="mod-instr" rows="3"></textarea></div>
+            <fieldset class="monitoring-reminder-panel" style="margin-top:8px;">
+                <legend>Monitoring Parameters</legend>
+                <div class="monitoring-reminder-layout">
+                    <div class="monitoring-select-wrap">Parameters:
+                        <div id="mod-monitoring-parameter-options" class="monitoring-parameter-toggle-list"></div>
+                    </div>
+                    <div class="monitoring-reminder-schedule">
+                        <div id="mod-monitor-schedule-list" class="monitoring-parameter-schedule-list"></div>
+                    </div>
+                </div>
+                <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                    <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Parameter Types</button>
+                </div>
+                <div id="mod-monitor-hold-rules" class="monitoring-hold-rule-list"></div>
+                <div class="field-row-stacked" style="margin-top:6px;">
+                    <label>Monitoring note:</label>
+                    <input id="mod-reminder-note" type="text" placeholder="Optional note shown with the monitoring reminder">
+                </div>
+            </fieldset>
             <div style="text-align:right; margin-top:10px;">
                 <button onclick="saveOrderModification()">Update Order</button>
                 <button onclick="document.getElementById('order-modifier-modal').style.display='none'">Cancel</button>

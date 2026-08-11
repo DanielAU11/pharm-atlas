@@ -3959,6 +3959,18 @@ button {
     color: #001a70;
 }
 
+.reorder-pending-icon,
+.monitoring-linked-symbol {
+    display: inline-block;
+    margin-right: 4px;
+    color: #008000;
+    font-weight: bold;
+}
+
+.reorder-med-button {
+    font-weight: bold;
+}
+
 .pending-order-title em {
     font-style: normal;
     color: #404040;
@@ -4160,7 +4172,18 @@ button {
     width: 68px;
 }
 
-.monitoring-hold-rule > input[type="checkbox"] {
+.monitoring-hold-rule-main {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 5px;
+    width: auto !important;
+    min-width: 0;
+    color: inherit !important;
+    cursor: pointer;
+}
+
+.monitoring-hold-rule-main input[type="checkbox"] {
     display: inline-block !important;
     position: static !important;
     opacity: 1 !important;
@@ -4174,11 +4197,9 @@ button {
     flex: 0 0 auto !important;
 }
 
-.monitoring-hold-rule > label {
-    display: inline !important;
-    flex-direction: initial !important;
-    width: auto !important;
-    color: inherit !important;
+.monitoring-hold-rule-main span {
+    min-width: 0;
+    line-height: 1.1;
 }
 
 .monitoring-auto-hold-toggle {
@@ -4242,6 +4263,23 @@ button {
 .hold-med-button {
     color: #800000;
     font-weight: bold;
+}
+
+.order-modifier-window {
+    width: min(880px, calc(100vw - 48px));
+    max-height: calc(100vh - 48px);
+}
+
+.order-modifier-window > .window-body {
+    max-height: calc(100vh - 92px);
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.order-modifier-window .field-row-stacked input,
+.order-modifier-window .field-row-stacked select,
+.order-modifier-window .field-row-stacked textarea {
+    max-width: 100%;
 }
 
 .monitoring-parameter-chip,
@@ -4367,12 +4405,12 @@ button {
 
 .regimen-reminder-panel .monitoring-hold-rule {
     display: grid;
-    grid-template-columns: 16px minmax(0, 1fr) 60px auto minmax(82px, auto);
+    grid-template-columns: minmax(0, 1fr) 60px auto minmax(82px, auto);
     gap: 5px;
     align-items: center;
 }
 
-.regimen-reminder-panel .monitoring-hold-rule > label {
+.regimen-reminder-panel .monitoring-hold-rule-main {
     line-height: 1.1;
 }
 

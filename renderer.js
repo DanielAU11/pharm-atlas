@@ -173,6 +173,7 @@ let activeMedKitId = null;
 let activeCompoundRecipeId = null;
 let prepackScanTimer = null;
 let pendingScheduleOrders = [];
+let scheduleReorderSourceId = '';
 let pendingNewMedImage = null;
 let pendingModalMedImage = null;
 let modalBarcodeCodes = [];
@@ -1645,6 +1646,7 @@ function monitoringUiPrefix(prefix) {
 
 function monitoringSourceDateIds(prefix) {
     if (prefix === 'order-set') return { start: 'order-set-start', end: 'order-set-end' };
+    if (prefix === 'mod') return { start: 'mod-start', end: 'mod-end' };
     return { start: 'sched-start', end: 'sched-end' };
 }
 
@@ -1674,6 +1676,7 @@ function monitoringScheduleForType(config, typeId) {
 
 function monitoringFrequencyOptionsHtml(selected = 'QD') {
     const options = [
+        ['ONCE', 'Once'],
         ['QD', 'Daily'],
         ['BID', 'Twice daily'],
         ['TID', 'Three times daily'],
@@ -1684,8 +1687,7 @@ function monitoringFrequencyOptionsHtml(selected = 'QD') {
         ['QXW', 'Every X weeks'],
         ['XPW', 'X times per week'],
         ['QXH', 'Every X hours'],
-        ['Monthly', 'Monthly'],
-        ['ONCE', 'One time']
+        ['Monthly', 'Monthly']
     ];
     return options.map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`).join('');
 }
@@ -1701,6 +1703,13 @@ function setMonitoringReminderSelection(prefix, types = [], note = '', memberId 
 function monitoringReminderSummaryHtml(types = [], memberId = '') {
     if (!Array.isArray(types) || types.length === 0) return '';
     return `<span class="pending-monitoring-chip">${types.map(type => careReminderTypeLabel(type, memberId)).map(escapeHtml).join(' + ')}</span>`;
+}
+
+function monitoringLinkedSymbolHtml(typeId, memberId = '') {
+    const type = monitoringParameterTypeById(typeId, memberId);
+    return type?.memberSpecific && type.medId
+        ? '<span class="monitoring-linked-symbol" title="Linked to inventory medication administrations">&#128279;</span>'
+        : '';
 }
 
 window.monitoringParameterSelectionChanged = function(input) {
@@ -1811,17 +1820,19 @@ function renderMonitoringHoldRuleEditor(prefix, holdRule = null, memberId = '') 
                 const inputId = `${monitoringUiPrefix(prefix)}-hold-${monitoringParameterDomToken(option.parameterType)}-${monitoringParameterDomToken(option.metric)}-${operator === '<' ? 'lt' : 'gt'}`;
                 const autoId = `${inputId}-auto`;
                 return `<div class="monitoring-hold-rule">
-                    <input id="${escapeHtml(inputId)}" class="${escapeHtml(monitoringUiPrefix(prefix))}-hold-rule" type="checkbox"
-                        data-parameter-type="${escapeHtml(option.parameterType)}"
-                        data-metric="${escapeHtml(option.metric)}"
-                        data-label="${escapeHtml(option.label)}"
-                        data-unit="${escapeHtml(option.unit || '')}"
-                        data-vital-type="${escapeHtml(option.vitalType || '')}"
-                        data-value-key="${escapeHtml(option.valueKey || '')}"
-                        data-monitoring-id="${escapeHtml(option.monitoringId || '')}"
-                        data-custom-reminder-type="${escapeHtml(option.customReminderType || '')}"
-                        data-operator="${escapeHtml(operator)}" ${checked ? 'checked' : ''} onchange="renderOrderSetPdfPreview()">
-                    <label for="${escapeHtml(inputId)}">Prompt if ${escapeHtml(option.label)} is ${operator === '<' ? 'below' : 'above'}</label>
+                    <label class="monitoring-hold-rule-main" for="${escapeHtml(inputId)}">
+                        <input id="${escapeHtml(inputId)}" class="${escapeHtml(monitoringUiPrefix(prefix))}-hold-rule" type="checkbox"
+                            data-parameter-type="${escapeHtml(option.parameterType)}"
+                            data-metric="${escapeHtml(option.metric)}"
+                            data-label="${escapeHtml(option.label)}"
+                            data-unit="${escapeHtml(option.unit || '')}"
+                            data-vital-type="${escapeHtml(option.vitalType || '')}"
+                            data-value-key="${escapeHtml(option.valueKey || '')}"
+                            data-monitoring-id="${escapeHtml(option.monitoringId || '')}"
+                            data-custom-reminder-type="${escapeHtml(option.customReminderType || '')}"
+                            data-operator="${escapeHtml(operator)}" ${checked ? 'checked' : ''} onchange="renderOrderSetPdfPreview()">
+                        <span>Prompt if ${escapeHtml(option.label)} is ${operator === '<' ? 'below' : 'above'}</span>
+                    </label>
                     <input class="monitoring-hold-threshold" type="number" step="any" value="${checked ? escapeHtml(rule.value) : ''}" placeholder="value" oninput="renderOrderSetPdfPreview()">
                     <span>${escapeHtml(option.unit || '')}</span>
                     <label class="monitoring-auto-hold-toggle" for="${escapeHtml(autoId)}">
@@ -1914,7 +1925,7 @@ function renderMonitoringParameterScheduleCards(prefix, scheduleConfig = null, m
         return `<div class="monitoring-parameter-schedule-card" data-type-id="${escapeHtml(typeId)}" data-schedule-prefix="${escapeHtml(uiPrefix)}">
             <div class="monitoring-parameter-schedule-title">
                 <span class="monitoring-parameter-icon">${escapeHtml(type.icon || 'MP')}</span>
-                <strong>${escapeHtml(type.label)}</strong>
+                <strong>${monitoringLinkedSymbolHtml(typeId, effectiveMemberId)}${escapeHtml(type.label)}</strong>
             </div>
             <div class="field-row">
                 <label>From:<input id="${escapeHtml(uiPrefix)}-care-reminder-start" type="date" value="${escapeHtml(startDate)}"></label>
@@ -1934,6 +1945,10 @@ function renderMonitoringParameterScheduleCards(prefix, scheduleConfig = null, m
 function monitoringParameterMemberIdForPrefix(prefix) {
     if (prefix === 'sched') return document.getElementById('select-member')?.value || '';
     if (prefix === 'order-set') return document.getElementById('order-set-member')?.value || '';
+    if (prefix === 'mod') {
+        const schedule = db.schedules.find(item => item.id === document.getElementById('mod-sched-id')?.value);
+        return schedule?.memberId || currentEditingMemberId || '';
+    }
     return currentEditingMemberId || '';
 }
 
@@ -1964,7 +1979,7 @@ function renderMonitoringParameterOptions(prefix, selectedTypes = null, memberId
         return `<label class="monitoring-parameter-toggle-row ${checked ? 'selected' : ''} ${type.memberSpecific ? 'member-monitoring-chip' : ''}" style="--parameter-color:${escapeHtml(type.color)};" for="${escapeHtml(inputId)}">
             <input id="${escapeHtml(inputId)}" class="monitoring-parameter-toggle-input" data-prefix="${escapeHtml(prefix)}" name="${escapeHtml(prefix)}-monitoring-parameter" type="checkbox" value="${escapeHtml(type.id)}" ${checked ? 'checked' : ''} onchange="monitoringParameterSelectionChanged(this)">
             <span class="monitoring-parameter-icon">${escapeHtml(type.icon || 'MP')}</span>
-            <span class="monitoring-parameter-toggle-text">${escapeHtml(type.label)}${type.memberSpecific ? '<small>profile lab</small>' : ''}</span>
+            <span class="monitoring-parameter-toggle-text">${monitoringLinkedSymbolHtml(type.id, effectiveMemberId)}${escapeHtml(type.label)}${type.memberSpecific ? '<small>profile lab</small>' : ''}</span>
         </label>`;
     }).join('');
     renderMonitoringParameterScheduleCards(prefix, null, effectiveMemberId);
@@ -1974,7 +1989,7 @@ function renderMonitoringParameterOptions(prefix, selectedTypes = null, memberId
 function monitoringDateRange(prefix) {
     const sourceIds = monitoringSourceDateIds(prefix);
     const start = document.getElementById(sourceIds.start)?.value || localDateKey();
-    const end = document.getElementById(sourceIds.end)?.value || start;
+    const end = document.getElementById(sourceIds.end)?.value || '';
     return { start, end: end === 'Ongoing' ? '' : end };
 }
 
@@ -2118,7 +2133,9 @@ window.openMonitoringParameterTypeManager = async function() {
     if (!result) return;
     db.reminderTypes = result;
     await sync();
+    const modSchedule = db.schedules.find(schedule => schedule.id === document.getElementById('mod-sched-id')?.value);
     renderMonitoringParameterOptions('sched', null, document.getElementById('select-member')?.value || '');
+    renderMonitoringParameterOptions('mod', null, modSchedule?.memberId || currentEditingMemberId || '');
     renderMonitoringParameterOptions('order-set', null, document.getElementById('order-set-member')?.value || '');
     renderMonitoringParameterTypeSelect('m', undefined, currentEditingMemberId);
 };
@@ -2400,6 +2417,8 @@ window.clearMemberCareReminderForm = function() {
     safeSet(ids.end, '');
     safeSet(ids.note, '');
     renderCareReminderFrequencyControls('m');
+    const saveButton = document.getElementById('m-care-reminder-save-button');
+    if (saveButton) saveButton.textContent = 'Add Reminder';
 };
 
 function careReminderNextInstances(reminder, days = 14, fromDate = new Date()) {
@@ -2456,14 +2475,14 @@ function careReminderDashboardRow(reminder) {
     return `<div class="care-reminder-row care-reminder-dashboard-row" style="--reminder-color:${escapeHtml(type.color || '#eef8ff')};">
         <span class="care-reminder-icon">${escapeHtml(type.icon || 'MP')}</span>
         <span class="care-reminder-copy">
-            <strong>${escapeHtml(careReminderTypeLabel(reminder.type, reminder.memberId))}</strong>
+            <strong>${monitoringLinkedSymbolHtml(reminder.type, reminder.memberId)}${escapeHtml(careReminderTypeLabel(reminder.type, reminder.memberId))}</strong>
             <small><b>${escapeHtml(formatFrequency(reminder))}</b> ${escapeHtml(getScheduleTimes(reminder).join(', ') || 'No time set')}</small>
             <small>Next: ${escapeHtml(nextText)}</small>
             <small>${escapeHtml(careReminderSourceText(reminder))}${reminder.note ? ` | ${escapeHtml(reminder.note)}` : ''}</small>
         </span>
         <span class="care-reminder-actions">
             <span class="care-reminder-status ${loggedToday ? 'logged' : ''}">${escapeHtml(statusText)}</span>
-            <button type="button" onclick="logCareReminderReading('${escapeHtml(reminder.id)}')">Log</button>
+            <button type="button" onclick="logCareReminderReading('${escapeHtml(reminder.id)}', '${escapeHtml(next?.date || '')}', '${escapeHtml(next?.time || '')}')">Log</button>
             <button type="button" onclick="editMemberCareReminder('${escapeHtml(reminder.id)}')">Edit</button>
             <button type="button" onclick="deleteMemberCareReminder('${escapeHtml(reminder.id)}')">Delete</button>
         </span>
@@ -2529,7 +2548,7 @@ window.saveMemberCareReminder = async function() {
     addAudit(existingIndex >= 0 ? 'Reminder updated' : 'Reminder added', memberDisplayName(member), `${careReminderTypeLabel(reminder.type, member.id)} | ${formatFrequency(reminder)} ${getScheduleTimes(reminder).join(', ')}`);
     await sync();
     clearMemberCareReminderForm();
-    renderMemberCareReminders(member.id);
+    refreshMonitoringAfterLog(member.id);
 };
 
 window.editMemberCareReminder = function(id) {
@@ -2548,6 +2567,10 @@ window.editMemberCareReminder = function(id) {
     safeSet(ids.end, reminder.endDate === 'Ongoing' ? '' : (reminder.endDate || ''));
     safeSet(ids.note, reminder.note || '');
     renderCareReminderFrequencyControls('m', reminder);
+    const saveButton = document.getElementById('m-care-reminder-save-button');
+    if (saveButton) saveButton.textContent = 'Update Reminder';
+    document.getElementById(ids.type)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setTimeout(() => document.getElementById(ids.type)?.focus(), 80);
 };
 
 window.deleteMemberCareReminder = async function(id) {
@@ -2555,10 +2578,131 @@ window.deleteMemberCareReminder = async function(id) {
     ensureCareReminderStore();
     db.careReminders = db.careReminders.filter(item => item.id !== id);
     await sync();
-    renderMemberCareReminders(currentEditingMemberId);
+    refreshMonitoringAfterLog(currentEditingMemberId);
 };
 
-window.logCareReminderReading = async function(id) {
+function currentTimeInputValue(date = new Date()) {
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+}
+
+function refreshMonitoringAfterLog(memberId) {
+    window.renderVitals?.();
+    window.renderVitalDashboard?.();
+    if (memberId || currentEditingMemberId) renderMemberCareReminders(memberId || currentEditingMemberId);
+    if (currentEditingMemberId) {
+        const trends = document.getElementById('member-vitals-trends');
+        if (trends) renderMemberVitalCharts(currentEditingMemberId, trends);
+        const reminders = document.getElementById('member-care-reminder-list');
+        if (reminders && currentEditingMemberId !== memberId) renderMemberCareReminders(currentEditingMemberId);
+    }
+    window.renderCalendar?.();
+}
+
+function careReminderLogFieldsHtml(reminder, targetType, now = new Date()) {
+    const member = db.family.find(item => item.id === reminder.memberId);
+    const dateTimeHtml = `
+        <div class="field-row">
+            <label>Date:</label><input name="date" type="date" value="${escapeHtml(localDateKey(now))}">
+            <label>Time:</label><input name="time" type="time" value="${escapeHtml(currentTimeInputValue(now))}">
+        </div>`;
+    let fields = '';
+    if (targetType === 'bp') {
+        fields = reminder.type === 'hr'
+            ? `<div class="field-row" style="margin-top:8px;">
+                    <label>Heart rate / pulse:</label><input name="hr" type="number" step="1" style="width:80px;"> <span>bpm</span>
+                </div>`
+            : `<div class="field-row" style="margin-top:8px;">
+                    <label>Systolic:</label><input name="systolic" type="number" step="1" style="width:70px;">
+                    <label>Diastolic:</label><input name="diastolic" type="number" step="1" style="width:70px;">
+                    <label>HR / pulse:</label><input name="hr" type="number" step="1" style="width:70px;"> <span>bpm optional</span>
+                </div>`;
+    } else if (targetType === 'weight') {
+        fields = `<div class="field-row" style="margin-top:8px;">
+            <label>Weight:</label><input name="weight" type="number" step="0.1" style="width:90px;">
+            <select name="weightUnit"><option value="lb">lb</option><option value="kg">kg</option></select>
+        </div>`;
+    } else if (targetType === 'glucose') {
+        fields = `<div class="field-row" style="margin-top:8px;">
+            <label>Blood glucose:</label><input name="glucose" type="number" step="1" style="width:90px;"> <span>mg/dL</span>
+        </div>`;
+    } else if (targetType === 'temperature') {
+        fields = `<div class="field-row" style="margin-top:8px;">
+            <label>Temperature:</label><input name="temperature" type="number" step="0.1" style="width:90px;">
+            <select name="temperatureUnit"><option value="F">Fahrenheit (F)</option><option value="C">Celsius (C)</option></select>
+        </div>`;
+    } else if (targetType === 'med-monitor') {
+        const profile = monitoringProfileById(member, String(reminder.type || '').slice('monitor:'.length));
+        fields = profile
+            ? `<div class="field-row" style="margin-top:8px;">
+                    <label>${escapeHtml(profile.labName)}:</label><input name="monitorValue" type="number" step="any" style="width:90px;">
+                    <span>${escapeHtml(profile.unit || 'value')}</span>
+                    <span class="form-help">${escapeHtml(monitoringGoalText(profile))}</span>
+                </div>`
+            : '<div class="form-help">This monitoring profile could not be found.</div>';
+    }
+    return `
+        ${dateTimeHtml}
+        ${fields}
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Note:</label>
+            <textarea name="notes" rows="3" style="width:100%; resize:vertical;" placeholder="Optional note, result, symptoms, or follow-up">${escapeHtml(reminder.note || '')}</textarea>
+        </div>`;
+}
+
+function buildCareReminderReading(reminder, targetType, result) {
+    const reading = {
+        id: `vital_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        memberId: reminder.memberId,
+        type: targetType,
+        date: result.date || localDateKey(),
+        time: result.time || currentTimeInputValue(),
+        notes: result.notes || '',
+        sourceReminderId: reminder.id,
+        sourceReminderType: reminder.type
+    };
+    if (targetType === 'bp') {
+        if (reminder.type === 'hr') {
+            reading.hr = parseAmount(result.hr, NaN);
+            if (!Number.isFinite(reading.hr)) return { error: 'Heart rate / pulse is required.' };
+            reading.systolic = '';
+            reading.diastolic = '';
+        } else {
+            reading.systolic = parseAmount(result.systolic, NaN);
+            reading.diastolic = parseAmount(result.diastolic, NaN);
+            reading.hr = parseAmount(result.hr, NaN);
+            if (!Number.isFinite(reading.systolic) || !Number.isFinite(reading.diastolic)) return { error: 'Systolic and diastolic BP are required.' };
+            if (!Number.isFinite(reading.hr)) reading.hr = '';
+        }
+    } else if (targetType === 'weight') {
+        reading.weight = parseAmount(result.weight, NaN);
+        reading.weightUnit = result.weightUnit || 'lb';
+        if (!Number.isFinite(reading.weight)) return { error: 'Weight is required.' };
+    } else if (targetType === 'glucose') {
+        reading.glucose = parseAmount(result.glucose, NaN);
+        if (!Number.isFinite(reading.glucose)) return { error: 'Blood glucose is required.' };
+    } else if (targetType === 'temperature') {
+        reading.temperature = parseAmount(result.temperature, NaN);
+        reading.temperatureUnit = result.temperatureUnit || 'F';
+        if (!Number.isFinite(reading.temperature)) return { error: 'Temperature is required.' };
+    } else if (targetType === 'med-monitor') {
+        const member = db.family.find(item => item.id === reminder.memberId);
+        const profile = monitoringProfileById(member, String(reminder.type || '').slice('monitor:'.length));
+        const monitorValue = parseAmount(result.monitorValue, NaN);
+        if (!profile || !Number.isFinite(monitorValue)) return { error: 'A valid monitored lab or level value is required.' };
+        reading.type = 'med-monitor';
+        reading.monitoringId = profile.id;
+        reading.monitorValue = monitorValue;
+        reading.monitorName = profile.labName;
+        reading.medicationName = profile.medicationName;
+        reading.monitorUnit = profile.unit;
+        reading.goalLow = profile.goalLow;
+        reading.goalHigh = profile.goalHigh;
+        reading.medId = profile.medId || '';
+    }
+    return { reading };
+}
+
+window.logCareReminderReading = async function(id, scheduledDate = '', scheduledTime = '') {
     const reminder = ensureCareReminderStore().find(item => item.id === id);
     if (!reminder) return;
     const targetType = careReminderVitalType(reminder.type, reminder.memberId);
@@ -2594,6 +2738,10 @@ window.logCareReminderReading = async function(id) {
             customReminderType: reminder.type,
             date: result.date || localDateKey(now),
             time: result.time || '08:00',
+            sourceReminderId: reminder.id,
+            sourceReminderType: reminder.type,
+            sourceReminderScheduledDate: scheduledDate || '',
+            sourceReminderScheduledTime: scheduledTime || '',
             value: customValue,
             valueLabel: holdCap?.metricLabel || '',
             valueUnit: holdCap?.unit || '',
@@ -2601,31 +2749,38 @@ window.logCareReminderReading = async function(id) {
         });
         addAudit('Monitoring parameter documented', careReminderTypeLabel(reminder.type, reminder.memberId), `${result.date || localDateKey(now)} ${result.time || ''}`);
         await sync();
+        refreshMonitoringAfterLog(reminder.memberId);
         return;
     }
-    switchTab('vitals');
-    const memberSelect = document.getElementById('vital-member-select');
-    if (memberSelect) memberSelect.value = reminder.memberId;
-    renderVitalTypeOptions();
-    const vitalType = document.getElementById('vital-type');
-    if (vitalType) vitalType.value = careReminderVitalSelectValue(reminder);
-    renderVitalInputs();
     const now = new Date();
-    const dateInput = document.getElementById('vital-date');
-    const timeInput = document.getElementById('vital-time');
-    const notesInput = document.getElementById('vital-notes');
-    if (dateInput) dateInput.value = localDateKey(now);
-    if (timeInput) timeInput.value = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    if (notesInput && reminder.note) notesInput.value = reminder.note;
+    const result = await showActionModal(`Log ${careReminderTypeLabel(reminder.type, reminder.memberId)}`, careReminderLogFieldsHtml(reminder, targetType, now), 'Save Log');
+    if (!result) return;
+    const built = buildCareReminderReading(reminder, targetType, result);
+    if (built.error) {
+        await appAlert(built.error);
+        return;
+    }
+    built.reading.sourceReminderScheduledDate = scheduledDate || '';
+    built.reading.sourceReminderScheduledTime = scheduledTime || '';
+    db.vitals.unshift(built.reading);
+    addAudit('Monitoring parameter documented', careReminderTypeLabel(reminder.type, reminder.memberId), `${built.reading.date} ${built.reading.time}`);
+    await sync();
+    refreshMonitoringAfterLog(reminder.memberId);
 };
 
 function careReminderReadingLoggedForInstance(reminder, date, time) {
     const targetType = careReminderVitalType(reminder?.type, reminder?.memberId);
     const targetMinutes = timeToMinutes(time);
     return db.vitals.some(reading => {
-        if (reading.memberId !== reminder.memberId || reading.date !== date || reading.type !== targetType) return false;
+        if (reading.memberId !== reminder.memberId || reading.type !== targetType) return false;
         if (targetType === 'med-monitor' && reading.monitoringId !== String(reminder.type || '').slice('monitor:'.length)) return false;
+        if (targetType === 'bp') {
+            if (reminder.type === 'hr' && !Number.isFinite(parseAmount(reading.hr, NaN))) return false;
+            if (reminder.type === 'bp' && (!Number.isFinite(parseAmount(reading.systolic, NaN)) || !Number.isFinite(parseAmount(reading.diastolic, NaN)))) return false;
+        }
         if (!['bp', 'weight', 'glucose', 'temperature', 'med-monitor'].includes(targetType) && reading.customReminderType !== reminder.type) return false;
+        if (reading.sourceReminderId === reminder.id && reading.sourceReminderScheduledDate === date && reading.sourceReminderScheduledTime === time) return true;
+        if (reading.date !== date) return false;
         const readingMinutes = timeToMinutes(reading.time || '00:00');
         if (targetMinutes === null || readingMinutes === null) return true;
         return readingMinutes >= targetMinutes - 60 && readingMinutes <= targetMinutes + 180;
@@ -5585,8 +5740,8 @@ function renderMemberMonitoringProfiles(memberId = currentEditingMemberId) {
         const linkedMed = db.inventory.find(item => item.id === profile.medId);
         return `<div class="med-item-row" style="font-size:11px;">
             <span>
-                <strong>${escapeHtml(profile.labName)}</strong> - ${escapeHtml(profile.medicationName)}
-                <br><small>Goal ${escapeHtml(formatAmount(parseAmount(profile.goalLow)))}-${escapeHtml(formatAmount(parseAmount(profile.goalHigh)))} ${escapeHtml(profile.unit || 'value')}${linkedMed ? ` | Linked to ${escapeHtml(linkedMed.name)} administrations` : ''}</small>
+                <strong>${linkedMed ? '<span class="monitoring-linked-symbol" title="Linked to inventory medication">&#128279;</span>' : ''}${escapeHtml(profile.labName)}</strong> - ${escapeHtml(profile.medicationName)}
+                <br><small>${escapeHtml(monitoringGoalText(profile))}${linkedMed ? ` | Linked to ${escapeHtml(linkedMed.name)} administrations` : ''}</small>
             </span>
             <span>
                 <button type="button" onclick="editMemberMonitoringProfile('${escapeHtml(profile.id)}')">Edit</button>
@@ -5621,8 +5776,8 @@ async function openMemberMonitoringEditor(profile = null) {
             <input name="unit" type="text" style="width:90px;" placeholder="e.g. ng/mL" value="${escapeHtml(profile?.unit || '')}">
         </div>
         <div class="field-row" style="margin-top:6px;">
-            <label>Goal low:</label><input name="goalLow" type="number" step="any" style="width:70px;" value="${escapeHtml(profile?.goalLow ?? '')}">
-            <label>Goal high:</label><input name="goalHigh" type="number" step="any" style="width:70px;" value="${escapeHtml(profile?.goalHigh ?? '')}">
+            <label>Goal low (optional):</label><input name="goalLow" type="number" step="any" style="width:70px;" placeholder="optional" value="${escapeHtml(profile?.goalLow ?? '')}">
+            <label>Goal high (optional):</label><input name="goalHigh" type="number" step="any" style="width:70px;" placeholder="optional" value="${escapeHtml(profile?.goalHigh ?? '')}">
         </div>
         <div class="field-row-stacked" style="margin-top:6px;">
             <label>Monitoring notes:</label>
@@ -5634,14 +5789,18 @@ async function openMemberMonitoringEditor(profile = null) {
     const linkedMed = db.inventory.find(item => item.id === result.medId);
     const medicationName = String(result.medicationName || linkedMed?.name || '').trim();
     const labName = String(result.labName || '').trim();
-    const goalLow = parseAmount(result.goalLow, NaN);
-    const goalHigh = parseAmount(result.goalHigh, NaN);
+    const goalLowRaw = String(result.goalLow ?? '').trim();
+    const goalHighRaw = String(result.goalHigh ?? '').trim();
+    const goalLow = goalLowRaw ? parseAmount(goalLowRaw, NaN) : '';
+    const goalHigh = goalHighRaw ? parseAmount(goalHighRaw, NaN) : '';
     if (!medicationName || !labName) {
         await appAlert('Medication name and lab/level name are required.');
         return null;
     }
-    if (!Number.isFinite(goalLow) || !Number.isFinite(goalHigh) || goalHigh <= goalLow) {
-        await appAlert('Enter a valid goal range with the high value greater than the low value.');
+    const hasLow = goalLow !== '' && Number.isFinite(goalLow);
+    const hasHigh = goalHigh !== '' && Number.isFinite(goalHigh);
+    if ((goalLowRaw && !hasLow) || (goalHighRaw && !hasHigh) || (hasLow && hasHigh && goalHigh <= goalLow)) {
+        await appAlert('Enter valid optional goals. If both are entered, the high value must be greater than the low value.');
         return null;
     }
     return {
@@ -5676,6 +5835,7 @@ window.editMemberMonitoringProfile = async function(profileId) {
     const member = db.family.find(item => item.id === currentEditingMemberId);
     const index = memberMonitoringProfiles(member).findIndex(profile => profile.id === profileId);
     if (!member || index < 0) return;
+    member.monitoringProfiles = memberMonitoringProfiles(member);
     const updated = await openMemberMonitoringEditor(member.monitoringProfiles[index]);
     if (!updated) return;
     member.monitoringProfiles[index] = updated;
@@ -6475,8 +6635,10 @@ function renderMemberPrnMedicationOrders(memberId) {
         const med = db.inventory.find(item => item.id === schedule.medId);
         const set = schedule.orderSetId ? db.orderSets.find(item => item.id === schedule.orderSetId) : null;
         if (!med) return '';
-        return `<div class="sunken-panel" style="padding:5px; margin-bottom:5px; background:white; border:1px inset gray;">
-            <strong>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong>
+        const activeHold = activeMedicationHoldInfo(schedule);
+        const held = !!activeHold?.active;
+        return `<div class="sunken-panel ${held ? 'member-med-held' : ''}" style="padding:5px; margin-bottom:5px; background:white; border:1px inset gray;">
+            <strong>${holdIndicatorHtml(schedule)}${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong>
             ${set ? `<span class="form-help"> | Regimen: ${escapeHtml(set.name)}</span>` : ''}
             <br><small>Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}${escapeHtml(prnLimitText(schedule))}${hasScheduledPrnReminders(schedule) ? ` | Frequency: ${escapeHtml(formatFrequency({ ...schedule, freq: schedule.prnScheduleFreq }))} ${escapeHtml(getScheduleTimes(schedule).join(', '))}` : ''}</small>
             ${linkedDetailsHtml(schedule, candidates)}
@@ -6485,6 +6647,8 @@ function renderMemberPrnMedicationOrders(memberId) {
                 <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
                 <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button onclick="event.stopPropagation(); administerDose('${escapeHtml(schedule.medId)}','${escapeHtml(schedule.id)}')">Administer</button>
+                <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${escapeHtml(schedule.id)}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
+                <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>
                 ${usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${escapeHtml(schedule.id)}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                 ${set
                     ? `<button onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit Regimen</button>`
@@ -6499,9 +6663,7 @@ function completedScheduleSummaryHtml(schedule, candidates = null) {
     const med = db.inventory.find(item => item.id === schedule.medId);
     const statusText = schedule.status === 'discontinued' ? 'Discontinued' : 'Completed';
     const linked = linkedSchedulesFor(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId));
-    const modifyAction = linked.length > 0
-        ? `<button type="button" onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify / Extend Linked</button>`
-        : `<button type="button" onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify / Extend</button>`;
+    const reorderAction = `<button type="button" class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>`;
     const linkedRemoveAction = linked.length > 0
         ? `<button type="button" onclick="event.stopPropagation(); removeCompletedLinkedSchedules('${escapeHtml(schedule.id)}')">Remove All Linked Meds</button>`
         : '';
@@ -6513,7 +6675,7 @@ function completedScheduleSummaryHtml(schedule, candidates = null) {
                 ${linkedDetailsHtml(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId))}
             </div>
             <div class="completed-med-actions">
-                ${modifyAction}
+                ${reorderAction}
                 ${linkedRemoveAction}
                 <button type="button" onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button type="button" onclick="event.stopPropagation(); removeCompletedSchedule('${escapeHtml(schedule.id)}')">Remove</button>
@@ -6923,9 +7085,10 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
             );
             memberOrderSets.forEach(set => {
                 const div = document.createElement('details');
-                div.className = 'sunken-panel member-regimen-card';
                 div.open = true;
                 const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id && !isScheduleArchived(candidate));
+                const regimenHold = orderSetHoldInfo(set.id);
+                div.className = `sunken-panel member-regimen-card ${regimenHold.anyHeld ? 'member-med-held' : ''}`;
                 const itemRows = setSchedules.map(schedule => {
                     if (schedule.freq === 'PRN') return '';
                     const med = db.inventory.find(inv => inv.id === schedule.medId);
@@ -6938,6 +7101,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                             <button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button>
                             <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${schedule.id}')">Audit</button>
                             <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${schedule.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
+                            <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${schedule.id}')">&#8635; Reorder</button>
                             ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${schedule.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         </div>
                     </div>`;
@@ -6955,6 +7119,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                         <button onclick="event.stopPropagation(); printOrderSetLabel('${set.id}')">Regimen Label</button>
                         <button onclick="event.stopPropagation(); printOrderSetMedicationLabel('${set.id}')">Individual Labels</button>
                         <button onclick="event.stopPropagation(); administerOrderSet('${set.id}')">Administer</button>
+                        <button class="hold-med-button" onclick="event.stopPropagation(); toggleOrderSetHold('${set.id}')">&#10074;&#10074; ${regimenHold.anyHeld ? 'Remove Regimen Hold' : 'Hold Regimen'}</button>
                         <button onclick="event.stopPropagation(); editOrderSet('${set.id}')">Edit Regimen</button>
                         <button onclick="event.stopPropagation(); deleteOrderSet('${set.id}')">Delete Regimen</button>
                     </div>
@@ -6981,6 +7146,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                         <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
                         <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${s.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
+                        <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${s.id}')">&#8635; Reorder</button>
                         ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
                     </div>
@@ -7091,6 +7257,7 @@ window.openOrderModifier = function(scheduleId) {
     setWeekdaySelections('mod-weekday-container', sched.weekdays || []);
     document.getElementById('mod-indication').value = sched.indication || "";
     document.getElementById('mod-instr').value = sched.instructions || "";
+    setMonitoringReminderSelection('mod', sched.monitoringReminders || [], sched.monitoringReminderNote || '', sched.memberId || '', sched.monitoringReminderSchedule || null, sched.monitoringHoldRule || null);
 
     document.getElementById('order-modifier-modal').style.display = 'flex';
 };
@@ -7151,6 +7318,21 @@ window.saveOrderModification = async function() {
         if (scheduleTimingFrequency(sched) === 'QXH') recalculateIntervalAnchorFromHistory(sched);
         sched.indication = document.getElementById('mod-indication')?.value.trim() || '';
         sched.instructions = document.getElementById('mod-instr').value;
+        const monitoringConfig = collectMonitoringScheduleConfig('mod', sched.memberId);
+        if (monitoringConfig.error) {
+            await appAlert(monitoringConfig.error);
+            return;
+        }
+        if (frequencyDetails.timingFreq === 'ONCE' && monitoringConfig.schedule) {
+            Object.values(monitoringConfig.schedule.byType || {}).forEach(schedule => {
+                schedule.startDate = sched.startDate;
+                schedule.endDate = sched.startDate;
+            });
+        }
+        sched.monitoringReminders = monitoringConfig.types;
+        sched.monitoringReminderNote = monitoringConfig.note;
+        sched.monitoringReminderSchedule = monitoringConfig.schedule;
+        sched.monitoringHoldRule = monitoringConfig.holdRule;
         const linkTargetIds = selectedOptionValues(document.getElementById('mod-link-target'));
         const linkMode = document.getElementById('mod-link-mode')?.value || '';
         const targetChoice = scheduleLinkChoicesForModifier(sched).find(choice => choice.id === linkTargetIds[0]);
@@ -7172,9 +7354,11 @@ window.saveOrderModification = async function() {
         sched.status = '';
         sched.completedAt = '';
         const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === sched.memberId);
+        const linkedSchedulesUpdated = [];
         linkedSchedulesFor(sched, linkedModificationCandidates).forEach(linkedSchedule => {
             if (linkedSchedule.id !== sched.id) {
                 applyLinkedScheduleTiming(sched, linkedSchedule);
+                linkedSchedulesUpdated.push(linkedSchedule);
             }
         });
         const med = db.inventory.find(item => item.id === sched.medId);
@@ -7184,9 +7368,8 @@ window.saveOrderModification = async function() {
             medId: sched.medId,
             memberId: sched.memberId
         });
-        if (Array.isArray(sched.monitoringReminders) && sched.monitoringReminders.length > 0) {
-            createCareRemindersForSchedule(sched);
-        }
+        createCareRemindersForSchedule(sched);
+        linkedSchedulesUpdated.forEach(linkedSchedule => createCareRemindersForSchedule(linkedSchedule));
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
         await openMemberModal(sched.memberId, 'orders'); // Refresh member profile and return to Scheduled Medications
@@ -9330,6 +9513,7 @@ function renderOrderSets() {
             return med ? med.name : 'Unknown';
         }).join(', ');
         const activeSchedules = db.schedules.filter(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule));
+        const regimenHold = orderSetHoldInfo(set.id);
         const containerActions = activeSchedules.map(schedule => {
             const med = db.inventory.find(item => item.id === schedule.medId);
             if (!med || !usesContainerTracking(med)) return '';
@@ -9339,7 +9523,7 @@ function renderOrderSets() {
             ? `${set.items.length} medication${set.items.length === 1 ? '' : 's'}`
             : `${escapeHtml(memberDisplayName(member))} | ${activeSchedules.length} active medication${activeSchedules.length === 1 ? '' : 's'}`;
         const favoriteStar = isTemplate && set.favorite ? '<span class="win98-star" title="Favorite regimen">&#9733;</span>' : '';
-        return `<div class="med-item-row" style="border-bottom:1px solid #808080;">
+        return `<div class="med-item-row ${regimenHold.anyHeld ? 'member-med-held' : ''}" style="border-bottom:1px solid #808080;">
             <div style="flex-grow:1;">
                 ${favoriteStar}<strong>${escapeHtml(set.name)}</strong> - <small>${statusText}</small><br>
                 <small>${escapeHtml(itemSummary)}</small>
@@ -9349,6 +9533,7 @@ function renderOrderSets() {
             <button onclick="printOrderSetLabel('${escapeHtml(set.id)}')">Regimen Label</button>
             ${!isTemplate && activeSchedules.length ? `<button onclick="printOrderSetMedicationLabel('${escapeHtml(set.id)}')">Individual Labels</button>` : ''}
             ${!isTemplate && activeSchedules.length ? `<button onclick="administerOrderSet('${escapeHtml(set.id)}')">Administer</button>` : ''}
+            ${!isTemplate && activeSchedules.length ? `<button class="hold-med-button" onclick="toggleOrderSetHold('${escapeHtml(set.id)}')">&#10074;&#10074; ${regimenHold.anyHeld ? 'Remove Hold' : 'Hold'}</button>` : ''}
             ${!isTemplate ? containerActions : ''}
             <button onclick="editOrderSet('${escapeHtml(set.id)}')">Edit</button>
             <button onclick="deleteOrderSet('${escapeHtml(set.id)}')">Delete</button>
@@ -11419,18 +11604,37 @@ function monitoringDetailsForReading(reading, member) {
     };
 }
 
+function monitoringGoalText(profile, { prefix = 'Goal' } = {}) {
+    const low = parseAmount(profile?.goalLow, NaN);
+    const high = parseAmount(profile?.goalHigh, NaN);
+    const unit = profile?.unit || 'value';
+    if (Number.isFinite(low) && Number.isFinite(high)) {
+        return `${prefix}: ${formatAmount(low)}-${formatAmount(high)} ${unit}`;
+    }
+    if (Number.isFinite(low)) return `${prefix}: above ${formatAmount(low)} ${unit}`;
+    if (Number.isFinite(high)) return `${prefix}: below ${formatAmount(high)} ${unit}`;
+    return 'No goal range specified';
+}
+
 function vitalTypeLabel(type, reading = null, member = null) {
     if (type === 'med-monitor') {
         const profile = monitoringDetailsForReading(reading, member);
         return `${profile.labName} - ${profile.medicationName}`;
+    }
+    if (type === 'bp' && reading && !Number.isFinite(parseAmount(reading.systolic, NaN)) && Number.isFinite(parseAmount(reading.hr, NaN))) {
+        return 'Heart Rate / Pulse';
     }
     return { bp: 'BP / HR', weight: 'Weight', glucose: 'Blood Glucose', temperature: 'Temperature' }[type] || type;
 }
 
 function formatVitalReading(reading) {
     if (reading.type === 'bp') {
-        const hrText = reading.hr ? `, HR ${reading.hr}` : '';
-        return `${reading.systolic}/${reading.diastolic} mmHg${hrText}`;
+        const sys = parseAmount(reading.systolic, NaN);
+        const dia = parseAmount(reading.diastolic, NaN);
+        const hr = parseAmount(reading.hr, NaN);
+        if (!Number.isFinite(sys) && Number.isFinite(hr)) return `HR ${formatAmount(hr)} bpm`;
+        const hrText = Number.isFinite(hr) ? `, HR ${formatAmount(hr)}` : '';
+        return `${formatAmount(sys)}/${formatAmount(dia)} mmHg${hrText}`;
     }
     if (reading.type === 'weight') return `${reading.weight} ${reading.weightUnit || 'lb'}`;
     if (reading.type === 'glucose') return `${reading.glucose} mg/dL`;
@@ -11472,7 +11676,10 @@ function isVitalOutOfRange(reading, member) {
         const value = parseAmount(reading.monitorValue, NaN);
         const low = parseAmount(profile.goalLow, NaN);
         const high = parseAmount(profile.goalHigh, NaN);
-        return Number.isFinite(value) && Number.isFinite(low) && Number.isFinite(high) && (value < low || value > high);
+        return Number.isFinite(value) && (
+            (Number.isFinite(low) && value < low) ||
+            (Number.isFinite(high) && value > high)
+        );
     }
     return false;
 }
@@ -11508,7 +11715,7 @@ window.renderVitalInputs = function() {
         container.innerHTML = profile
             ? `<label>${escapeHtml(profile.labName)}:</label><input id="vital-monitor-value" type="number" step="any" style="width:90px;">
                 <span>${escapeHtml(profile.unit || 'value')}</span>
-                <span class="form-help">Goal: ${escapeHtml(formatAmount(parseAmount(profile.goalLow)))}-${escapeHtml(formatAmount(parseAmount(profile.goalHigh)))} ${escapeHtml(profile.unit || 'value')}</span>`
+                <span class="form-help">${escapeHtml(monitoringGoalText(profile))}</span>`
             : '<span class="form-help">Select a valid medication monitoring profile.</span>';
     } else if (type === 'bp') {
         container.innerHTML = `
@@ -11575,12 +11782,15 @@ window.saveVitalReading = async function() {
     const notesInput = document.getElementById('vital-notes');
     if (notesInput) notesInput.value = '';
     renderVitalInputs();
+    refreshMonitoringAfterLog(memberId);
 };
 
 window.deleteVitalReading = async function(id) {
     if (!await appConfirm("Delete this vital reading?", 'Delete Vital Reading')) return;
+    const removed = db.vitals.find(v => v.id === id);
     db.vitals = db.vitals.filter(v => v.id !== id);
     await sync();
+    refreshMonitoringAfterLog(removed?.memberId || currentEditingMemberId);
 };
 
 function readingSeriesValue(reading, seriesKey) {
@@ -11626,7 +11836,7 @@ function isChartPointOutOfRange(type, key, value, member, options = {}) {
     if (type === 'med-monitor' && key === 'monitorValue') {
         const low = parseAmount(options.goalLow, NaN);
         const high = parseAmount(options.goalHigh, NaN);
-        return Number.isFinite(low) && Number.isFinite(high) && (value < low || value > high);
+        return (Number.isFinite(low) && value < low) || (Number.isFinite(high) && value > high);
     }
     return false;
 }
@@ -11924,8 +12134,9 @@ function renderMemberVitalCharts(memberId, container) {
         panel.className = 'vital-chart-panel';
         const legend = chart.series.map(s => `<span><span class="legend-swatch" style="background:${s.color};"></span>${escapeHtml(s.label)}</span>`).join(' ');
         const adherenceEntries = adherenceEntriesForChart(member, chart, readings);
+        const hasMonitoringGoal = Number.isFinite(parseAmount(chart.goalLow, NaN)) || Number.isFinite(parseAmount(chart.goalHigh, NaN));
         const monitoringLegend = chart.type === 'med-monitor'
-            ? `<span><span class="legend-swatch goal-swatch"></span>Goal range</span>${chart.medId ? '<span><span class="legend-diamond"></span>Dose taken</span>' : ''}`
+            ? `${hasMonitoringGoal ? '<span><span class="legend-swatch goal-swatch"></span>Goal line</span>' : ''}${chart.medId ? '<span><span class="legend-diamond"></span>Dose taken</span>' : ''}`
             : '';
         panel.innerHTML = `
             <div style="font-size:11px; font-weight:bold;">${escapeHtml(chart.title)}</div>
@@ -12387,7 +12598,7 @@ function renderTodayViewDashboard() {
                 </div>
                 <div>
                     <span class="today-status-pill">${escapeHtml(row.status)}</span>
-                    <button type="button" onclick="logCareReminderReading('${escapeHtml(row.reminder.id)}')">Log</button>
+                    <button type="button" onclick="logCareReminderReading('${escapeHtml(row.reminder.id)}', '${escapeHtml(row.instance.date || '')}', '${escapeHtml(row.instance.time || '')}')">Log</button>
                     <button type="button" onclick="openMemberModal('${escapeHtml(row.member.id)}', 'monitoring')">Profile</button>
                 </div>
             </div>`;
@@ -13371,13 +13582,14 @@ function vitalChartReportHtml(member, chart, readings) {
     const legend = chart.series
         .map(series => `<span><span class="swatch" style="background:${series.color};"></span>${escapeHtml(series.label)}</span>`)
         .join('');
+    const hasMonitoringGoal = Number.isFinite(parseAmount(chart.goalLow, NaN)) || Number.isFinite(parseAmount(chart.goalHigh, NaN));
     const monitoringLegend = chart.type === 'med-monitor'
-        ? `<span><span class="swatch" style="background:#008000;"></span>Goal range</span>${chart.medId ? '<span><span class="swatch" style="background:#000080;"></span>Dose taken</span>' : ''}`
+        ? `${hasMonitoringGoal ? '<span><span class="swatch" style="background:#008000;"></span>Goal line</span>' : ''}${chart.medId ? '<span><span class="swatch" style="background:#000080;"></span>Dose taken</span>' : ''}`
         : '';
     return `
         <h3>${escapeHtml(chart.title)}</h3>
         <div class="legend">${legend}${monitoringLegend}<span><span class="swatch" style="background:#ff0000;"></span>Out of goal</span></div>
-        ${chart.type === 'med-monitor' ? `<div class="muted">Goal: ${escapeHtml(formatAmount(parseAmount(chart.goalLow)))}-${escapeHtml(formatAmount(parseAmount(chart.goalHigh)))} ${escapeHtml(chart.unit)}${chart.medId ? ` | Linked administrations shown: ${adherenceEntries.length}` : ''}</div>` : ''}
+        ${chart.type === 'med-monitor' ? `<div class="muted">${escapeHtml(monitoringGoalText(chart))}${chart.medId ? ` | Linked administrations shown: ${adherenceEntries.length}` : ''}</div>` : ''}
         <img class="chart-img" src="${imageUrl}" alt="${escapeHtml(chart.title)} chart">`;
 }
 
@@ -13554,7 +13766,7 @@ window.updateScheduleMedicationPreview = function() {
         </div>`;
 };
 
-//Scheduler checks every minute to see if any meds are due and sends a notification
+// Scheduler checks every minute to see if medications or monitoring parameters are due.
 function reminderWasSent(key) {
     return notifiedDoseKeys.has(key) || (Array.isArray(db.reminderLog) && db.reminderLog.includes(key));
 }
@@ -13616,7 +13828,8 @@ async function checkSchedules() {
     for (const reminder of ensureCareReminderStore()) {
         if (reminder.enabled === false ||
             !isScheduleDueOnDate(reminder, todayKey) ||
-            !getScheduleTimes(reminder).includes(currentTime)) continue;
+            !getScheduleTimes(reminder).includes(currentTime) ||
+            careReminderReadingLoggedForInstance(reminder, todayKey, currentTime)) continue;
 
         const member = db.family.find(f => f.id === reminder.memberId);
         if (!member) continue;
@@ -13728,6 +13941,7 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
         monitoringReminderNote: monitoringConfig.note,
         monitoringReminderSchedule: monitoringConfig.schedule,
         monitoringHoldRule: monitoringConfig.holdRule,
+        reorderSourceId: scheduleReorderSourceId || '',
         startTime: frequencyDetails.startTime || frequencyDetails.times[0] || "",
         isOneTime: frequencyDetails.timingFreq === 'ONCE' || (startDate === endDate && endDate !== "Ongoing")
     };
@@ -13744,6 +13958,7 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
 }
 
 function clearScheduleEntryFields() {
+    scheduleReorderSourceId = '';
     document.getElementById('med-search-input').value = '';
     document.getElementById('sched-freq').value = 'QD';
     document.getElementById('sched-start').value = '';
@@ -13804,7 +14019,7 @@ function scheduleSummaryLine(schedule) {
     return {
         med,
         member,
-        html: `<span class="pending-order-title">${escapeHtml(med?.name || 'Unknown medication')} <em>${escapeHtml(med ? formatMedStrength(med) : '')}</em></span>
+        html: `<span class="pending-order-title">${schedule.reorderSourceId ? '<span class="reorder-pending-icon" title="Reordered medication">&#8635;</span>' : ''}${escapeHtml(med?.name || 'Unknown medication')} <em>${escapeHtml(med ? formatMedStrength(med) : '')}</em></span>
             <span class="pending-order-chips">
                 <span>${escapeHtml(qty)}</span>
                 ${dose ? `<span>Dose ${escapeHtml(dose)}</span>` : ''}
@@ -13947,13 +14162,12 @@ window.removePendingScheduleOrder = function(index) {
     renderPendingScheduleOrders();
 };
 
-window.editPendingScheduleOrder = function(index) {
-    const order = pendingScheduleOrders[index];
+function loadScheduleIntoScheduleEntry(order, { reorder = false } = {}) {
     if (!order) return;
     const med = db.inventory.find(item => item.id === order.medId);
-    pendingScheduleOrders.splice(index, 1);
     if (document.getElementById('select-member')) document.getElementById('select-member').value = order.memberId;
     renderSchedulePrescriberOptions();
+    scheduleReorderSourceId = reorder ? (order.reorderSourceId || order.id || '') : (order.reorderSourceId || '');
     document.getElementById('med-search-input').value = med?.name || '';
     updateSchedStrength();
     document.getElementById('sched-strength-display').value = order.medId;
@@ -13982,6 +14196,42 @@ window.editPendingScheduleOrder = function(index) {
     calculateLiveDose();
     updateScheduleMedicationPreview();
     renderPendingScheduleOrders();
+}
+
+window.editPendingScheduleOrder = function(index) {
+    const order = pendingScheduleOrders[index];
+    if (!order) return;
+    pendingScheduleOrders.splice(index, 1);
+    loadScheduleIntoScheduleEntry(order, { reorder: !!order.reorderSourceId });
+};
+
+window.reorderMedicationSchedule = async function(scheduleId) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    if (!schedule) return;
+    const archived = isScheduleArchived(schedule);
+    const today = localDateKey();
+    const order = {
+        ...schedule,
+        id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        status: '',
+        completedAt: '',
+        startDate: archived ? today : (schedule.startDate || today),
+        endDate: archived ? '' : (schedule.endDate === 'Ongoing' ? '' : (schedule.endDate || '')),
+        reorderSourceId: schedule.id
+    };
+    const memberModal = document.getElementById('member-modal');
+    if (memberModal?.style.display === 'flex') {
+        if (currentEditingMemberId) {
+            const saved = await saveMemberFromProfile({ closeAfter: false });
+            if (!saved) return;
+        }
+        memberModal.style.display = 'none';
+        if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+    }
+    switchTab('schedules');
+    loadScheduleIntoScheduleEntry(order, { reorder: true });
+    const pendingList = document.getElementById('pending-schedule-list');
+    if (pendingList) pendingList.scrollIntoView({ block: 'nearest' });
 };
 
 window.finalizePendingScheduleOrders = async function() {
@@ -14016,7 +14266,7 @@ window.finalizePendingScheduleOrders = async function() {
         const med = db.inventory.find(item => item.id === order.medId);
         const member = db.family.find(item => item.id === order.memberId);
         addAudit('Medication scheduled', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(order)} ${getScheduleTimes(order).join(', ') || 'PRN'}`, {
-            scheduleId: order.id,
+            scheduleId: newId,
             medId: order.medId,
             memberId: order.memberId
         });
@@ -14223,6 +14473,35 @@ function holdIndicatorHtml(schedule) {
     return `<span class="hold-indicator" title="${escapeHtml(info.text)}">&#10074;&#10074;</span>`;
 }
 
+function activeSchedulesForOrderSet(orderSetId) {
+    return db.schedules.filter(schedule => schedule.orderSetId === orderSetId && !isScheduleArchived(schedule));
+}
+
+function orderSetHoldInfo(orderSetId) {
+    const schedules = activeSchedulesForOrderSet(orderSetId);
+    const holdInfos = schedules.map(schedule => activeMedicationHoldInfo(schedule)).filter(Boolean);
+    return {
+        schedules,
+        anyHeld: holdInfos.some(info => info.active),
+        allHeld: schedules.length > 0 && schedules.every(schedule => !!activeMedicationHoldInfo(schedule)?.active),
+        holdInfos
+    };
+}
+
+function removeActiveHoldFromSchedule(schedule, reason = '') {
+    const activeHold = activeMedicationHoldInfo(schedule);
+    if (schedule.manualHold?.active) {
+        schedule.manualHold = { active: false, endedAt: new Date().toISOString(), reason };
+    } else if (activeHold?.active) {
+        schedule.autoHoldOverride = {
+            active: true,
+            at: new Date().toISOString(),
+            ruleKeys: activeHold.activeRules?.map(item => holdRuleKey(item.rule)) || [],
+            reason
+        };
+    }
+}
+
 async function confirmMedicationHoldOverride(schedule, med, actual) {
     const status = actual?.doseStatus || 'given';
     if (['skipped', 'missed', 'refused', 'held'].includes(status)) return true;
@@ -14334,6 +14613,73 @@ window.toggleMedicationHold = async function(scheduleId) {
             scheduleId: schedule.id,
             medId: schedule.medId,
             memberId: schedule.memberId
+        });
+    }
+    await sync();
+    if (currentEditingMemberId && document.getElementById('member-modal')?.style.display === 'flex') {
+        await openMemberModal(currentEditingMemberId, 'orders');
+    }
+    renderCalendar();
+};
+
+window.toggleOrderSetHold = async function(orderSetId) {
+    const set = db.orderSets.find(item => item.id === orderSetId);
+    if (!set) return;
+    const { schedules, anyHeld } = orderSetHoldInfo(orderSetId);
+    if (!schedules.length) {
+        await appAlert('This regimen does not have any active medications to hold.', 'Hold Regimen');
+        return;
+    }
+    const member = db.family.find(item => item.id === set.memberId);
+    if (anyHeld) {
+        const result = await showActionModal('Remove Regimen Hold', `
+            <div class="hold-warning-box">
+                <strong>${escapeHtml(set.name || 'Regimen')}</strong>
+                <p>This removes active manual holds and current auto-hold markers from every active medication in this regimen.</p>
+            </div>
+            <div class="field-row-stacked">
+                <label>Reason for removing hold:</label>
+                <textarea name="reason" rows="3" placeholder="e.g. provider approved restart, values rechecked, regimen resumed"></textarea>
+            </div>
+        `, 'Remove Hold', body => ({ reason: body.querySelector('[name="reason"]')?.value.trim() || '' }));
+        if (!result) return;
+        if (!result.reason) {
+            await appAlert('Enter a reason before removing the regimen hold.');
+            return;
+        }
+        schedules.forEach(schedule => removeActiveHoldFromSchedule(schedule, result.reason));
+        addAudit('Regimen hold removed', set.name || 'Regimen', `${memberDisplayName(member)} | ${result.reason}`, {
+            orderSetId,
+            memberId: set.memberId,
+            scheduleIds: schedules.map(schedule => schedule.id)
+        });
+    } else {
+        const result = await showActionModal('Place Regimen On Hold', `
+            <div class="hold-warning-box">
+                <strong>${escapeHtml(set.name || 'Regimen')}</strong>
+                <p>This places every active medication in the regimen on hold. The member profile and calendar will show the red pause marker until the hold is removed.</p>
+            </div>
+            <div class="field-row-stacked">
+                <label>Hold reason:</label>
+                <textarea name="reason" rows="3" placeholder="e.g. provider instruction, acute illness, pending lab result"></textarea>
+            </div>
+        `, 'Hold Regimen', body => ({ reason: body.querySelector('[name="reason"]')?.value.trim() || '' }));
+        if (!result) return;
+        if (!result.reason) {
+            await appAlert('Enter a reason before placing the regimen on hold.');
+            return;
+        }
+        schedules.forEach(schedule => {
+            schedule.manualHold = {
+                active: true,
+                startedAt: new Date().toISOString(),
+                reason: result.reason
+            };
+        });
+        addAudit('Regimen placed on hold', set.name || 'Regimen', `${memberDisplayName(member)} | ${result.reason}`, {
+            orderSetId,
+            memberId: set.memberId,
+            scheduleIds: schedules.map(schedule => schedule.id)
         });
     }
     await sync();
