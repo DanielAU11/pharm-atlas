@@ -122,7 +122,7 @@
                         <legend>Prescription Entry</legend>
                         <div class="field-row">
                             <label>Who:</label>
-                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); updateSchedStrength(); renderPendingScheduleOrders(); renderScheduleLinkOptions();"></select>
+                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); updateSchedStrength(); renderPendingScheduleOrders(); renderScheduleLinkOptions(); renderMonitoringParameterOptions('sched'); syncMonitoringParameterScheduleUi('sched');"></select>
                             <label>Medication:</label>
                             <input list="med-options" id="med-search-input" oninput="updateSchedStrength()" style="width:120px;" placeholder="Search...">
                             <datalist id="med-options"></datalist>
@@ -193,11 +193,27 @@
                             <span>doses per</span>
                             <input id="sched-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;">
                             <span>hrs</span>
+                            <label>Frequency:</label>
+                            <select id="sched-prn-schedule-freq" onchange="renderFrequencyControls('sched')">
+                                <option value="">None</option>
+                                <option value="ONCE">One time</option>
+                                <option value="QD">Daily</option>
+                                <option value="BID">BID</option>
+                                <option value="TID">TID</option>
+                                <option value="QID">QID</option>
+                                <option value="Nightly">Nightly</option>
+                                <option value="QOD">Every other day</option>
+                                <option value="QW">Weekly</option>
+                                <option value="QXW">Every X weeks</option>
+                                <option value="XPW">X times per week</option>
+                                <option value="QXH">Every X hours</option>
+                                <option value="Monthly">Monthly</option>
+                            </select>
                             <span style="font-size:11px;">Each administration counts as 1 dose of the Give Qty.</span>
                         </div>
                         <div class="field-row" style="margin-top:8px;">
-                            <span id="sched-start-date-wrap"><label>Start:</label><input id="sched-start" type="date"></span>
-                            <span><label>End:</label><input id="sched-end" type="date"></span>
+                            <span id="sched-start-date-wrap"><label>Start:</label><input id="sched-start" type="date" onchange="syncMonitoringParameterScheduleUi('sched');"></span>
+                            <span><label>End:</label><input id="sched-end" type="date" onchange="syncMonitoringParameterScheduleUi('sched');"></span>
                         </div>
                         <div class="field-row-stacked" style="margin-top:8px;">
                             <label>Administration Time(s):</label>
@@ -211,6 +227,26 @@
                             <label>Additional Instructions:</label>
                             <textarea id="sched-instructions" rows="2" class="schedule-instructions"></textarea>
                         </div>
+                        <fieldset class="monitoring-reminder-panel" style="margin-top:8px;">
+                            <legend>Monitoring Parameters</legend>
+                            <div class="monitoring-reminder-layout">
+                                <div class="monitoring-select-wrap">Parameters:
+                                    <div id="sched-monitoring-parameter-options" class="monitoring-parameter-toggle-list"></div>
+                                </div>
+                                <div class="monitoring-reminder-schedule">
+                                    <div id="sched-monitor-schedule-list" class="monitoring-parameter-schedule-list"></div>
+                                </div>
+                            </div>
+                            <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                                <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Parameter Types</button>
+                            </div>
+                            <div id="sched-monitor-hold-rules" class="monitoring-hold-rule-list"></div>
+                            <div class="field-row-stacked" style="margin-top:6px;">
+                                <label>Monitoring note:</label>
+                                <input id="sched-reminder-note" type="text" placeholder="Optional note shown with the monitoring reminder">
+                            </div>
+                            <div class="form-help">Monitoring dates are limited to the medication schedule. Hold rules show a red pause marker and ask for confirmation before documenting a dose.</div>
+                        </fieldset>
                         <div class="field-row" style="margin-top:8px;">
                             <label>Link to:</label><div id="sched-link-target" class="link-choice-panel"></div>
                             <label>Meaning:</label>
@@ -279,16 +315,63 @@
 
                 <!-- 3. REGIMENS -->
                 <div id="panel-order-sets" style="display: none;">
-                    <fieldset>
+                    <fieldset class="regimen-builder-fieldset">
                         <legend>Regimen Builder</legend>
                         <input type="hidden" id="order-set-edit-id">
-                        <div class="field-row">
-                            <label>Who:</label><select id="order-set-member"></select>
-                            <label>Name:</label><input id="order-set-name" type="text" style="width:180px;" placeholder="e.g. Hypertension">
-                            <label>Start:</label><input id="order-set-start" type="date">
-                            <label>End:</label><input id="order-set-end" type="date">
+                        <div class="regimen-builder-grid">
+                            <div class="regimen-builder-main">
+                                <div class="regimen-header-strip">
+                                    <label>Who:<select id="order-set-member" onchange="renderMonitoringParameterOptions('order-set'); syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></select></label>
+                                    <label>Name:<input id="order-set-name" type="text" placeholder="e.g. Hypertension"></label>
+                                    <label>Start:<input id="order-set-start" type="date" onchange="syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></label>
+                                    <label>End:<input id="order-set-end" type="date" onchange="syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></label>
+                                </div>
+                                <div id="order-set-med-list" class="regimen-med-list"></div>
+                            </div>
+                            <div class="regimen-builder-side">
+                                <fieldset>
+                                    <legend>Selected Medication</legend>
+                                    <div id="order-set-med-preview" class="schedule-med-preview regimen-med-preview">
+                                        <div class="schedule-med-no-photo">Select a medication.</div>
+                                    </div>
+                                </fieldset>
+                                <fieldset>
+                                    <legend>Regimen Summary</legend>
+                                    <div id="order-set-builder-summary" class="sunken-panel regimen-builder-summary">No medications added yet.</div>
+                                </fieldset>
+                                <fieldset class="monitoring-reminder-panel regimen-reminder-panel">
+                                    <legend>Monitoring Parameters</legend>
+                                    <div class="monitoring-reminder-layout">
+                                        <div class="monitoring-select-wrap">Parameters:
+                                            <div id="order-set-monitoring-parameter-options" class="monitoring-parameter-toggle-list"></div>
+                                        </div>
+                                        <div class="monitoring-reminder-schedule">
+                                            <div id="order-set-monitor-schedule-list" class="monitoring-parameter-schedule-list"></div>
+                                        </div>
+                                    </div>
+                                    <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                                        <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Types</button>
+                                    </div>
+                                    <div id="order-set-monitor-hold-rules" class="monitoring-hold-rule-list"></div>
+                                    <div class="field-row-stacked" style="margin-top:6px;">
+                                        <label>Monitoring note:</label>
+                                        <input id="order-set-reminder-note" type="text" placeholder="Optional regimen reminder note" oninput="renderOrderSetPdfPreview()">
+                                    </div>
+                                    <div class="form-help">Monitoring dates are limited to the regimen dates. Assigned regimens create the reminders for that member.</div>
+                                </fieldset>
+                            </div>
+                            <div class="regimen-preview-side">
+                                <fieldset class="regimen-preview-fieldset">
+                                    <legend>Live Regimen PDF Preview</legend>
+                                    <div class="regimen-preview-actions">
+                                        <button type="button" onclick="generateRegimenPreviewPdf()">PDF</button>
+                                        <button type="button" onclick="printRegimenPreview()">Print</button>
+                                        <button type="button" onclick="emailRegimenPreview()">Email</button>
+                                    </div>
+                                    <div id="order-set-pdf-preview" class="regimen-pdf-preview"></div>
+                                </fieldset>
+                            </div>
                         </div>
-                        <div id="order-set-med-list" style="margin-top:8px;"></div>
                         <div class="field-row" style="justify-content:space-between; margin-top:8px;">
                             <button onclick="addOrderSetMedicationRow()">+ Add Medication</button>
                             <span>
@@ -1373,6 +1456,46 @@
                 </fieldset>
 
             <fieldset data-member-section="monitoring" style="margin-top:10px;">
+                <legend>Monitoring Parameters</legend>
+                <div class="care-reminder-panel">
+                    <div class="care-reminder-builder">
+                        <label>Reminder:
+                            <select id="m-care-reminder-type"></select>
+                        </label>
+                        <label>Frequency:
+                            <select id="m-care-reminder-freq" onchange="renderCareReminderFrequencyControls('m')">
+                                <option value="QD">Daily</option>
+                                <option value="BID">Twice daily</option>
+                                <option value="TID">3 times daily</option>
+                                <option value="QID">4 times daily</option>
+                                <option value="Nightly">Nightly</option>
+                                <option value="QOD">Every other day</option>
+                                <option value="QW">Weekly</option>
+                                <option value="QXW">Every X weeks</option>
+                                <option value="XPW">X times per week</option>
+                                <option value="QXH">Every X hours</option>
+                                <option value="Monthly">Monthly</option>
+                            </select>
+                        </label>
+                        <label>Start:<input id="m-care-reminder-start" type="date"></label>
+                        <label>End:<input id="m-care-reminder-end" type="date"></label>
+                    </div>
+                    <div id="m-care-reminder-frequency-controls" class="care-reminder-frequency-controls"></div>
+                    <div class="field-row-stacked" style="margin-top:6px;">
+                        <label>Reminder note:</label>
+                        <input id="m-care-reminder-note" type="text" placeholder="e.g. before breakfast, seated for 5 minutes, fasting if needed">
+                    </div>
+                    <div class="field-row" style="justify-content:flex-end; margin-top:6px;">
+                        <input id="m-care-reminder-edit-id" type="hidden">
+                        <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Types</button>
+                        <button type="button" onclick="saveMemberCareReminder()">Add Reminder</button>
+                        <button type="button" onclick="clearMemberCareReminderForm()">Clear</button>
+                    </div>
+                    <div id="member-care-reminder-list" class="sunken-panel member-care-reminder-list"></div>
+                </div>
+            </fieldset>
+
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Medication &amp; Lab Monitoring</legend>
                 <div id="member-monitoring-list" class="sunken-panel" style="min-height:62px; max-height:180px; overflow-y:auto; background:white;"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
@@ -1394,6 +1517,8 @@
             <fieldset data-member-section="summary" style="margin-top:10px;">
                 <legend>Current Meds / Supplements List</legend>
                 <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
+                    <button type="button" onclick="generateMemberCurrentMedsPdfReport()">PDF</button>
+                    <button type="button" onclick="printMemberCurrentMedsReport()">Print</button>
                     <button type="button" onclick="openMemberCurrentMedsBuilder()">Create/Edit Current List</button>
                 </div>
                 <div id="member-current-med-list"></div>
@@ -1508,7 +1633,7 @@
                 <span class="weekday-option"><input id="mod-weekday-5" type="checkbox" value="5"><label for="mod-weekday-5">Fri</label></span>
                 <span class="weekday-option"><input id="mod-weekday-6" type="checkbox" value="6"><label for="mod-weekday-6">Sat</label></span>
             </div>
-            <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span></div>
+            <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span><label>Frequency:</label><select id="mod-prn-schedule-freq" onchange="renderFrequencyControls('mod')"><option value="">None</option><option value="ONCE">One time</option><option value="QD">Daily</option><option value="BID">BID</option><option value="TID">TID</option><option value="QID">QID</option><option value="Nightly">Nightly</option><option value="QOD">Every other day</option><option value="QW">Weekly</option><option value="QXW">Every X weeks</option><option value="XPW">X times per week</option><option value="QXH">Every X hours</option><option value="Monthly">Monthly</option></select></div>
             <div class="field-row link-rule-row"><label>Link to</label><div id="mod-link-target" class="link-choice-panel"></div><label>Meaning</label><select id="mod-link-mode"><option value="">None</option><option value="together">Must take together</option><option value="choose-one">Choose only one</option></select></div>
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
             <div class="field-row-stacked"><label>Used for / Indication</label><input id="mod-indication" type="text" placeholder="Reason this medication/supplement is used"></div>

@@ -1251,6 +1251,23 @@ button {
     align-items: center;
     gap: 6px;
     margin-bottom: 5px;
+    flex-wrap: wrap;
+    padding: 4px;
+    background: #eef6ff;
+    border: 1px solid #a8b8d0;
+}
+
+.profile-diary-scale-toggle-row button {
+    min-width: 86px;
+    min-height: 26px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.profile-diary-scale-toggle-row .form-help {
+    flex: 1 1 260px;
+    min-width: 220px;
+    line-height: 1.25;
 }
 
 .profile-diary-scale-panel {
@@ -2631,6 +2648,16 @@ button {
     width: min(920px, calc(100vw - 24px));
 }
 
+.action-modal-window-wide:has(.return-prepack-modal) {
+    width: min(1180px, calc(100vw - 24px));
+}
+
+.return-prepack-modal {
+    min-width: min(1060px, calc(100vw - 56px));
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
 .inventory-workflow-summary {
     display: grid;
     grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -3952,6 +3979,13 @@ button {
     color: #000000;
 }
 
+.pending-monitoring-chip {
+    border-color: #008040 !important;
+    background: #e4ffe4 !important;
+    color: #005000 !important;
+    font-weight: bold;
+}
+
 .pending-order-meta {
     color: #004000;
 }
@@ -3977,6 +4011,806 @@ button {
     background: #008000 !important;
     color: #ffffff !important;
     font-weight: bold;
+}
+
+.monitoring-reminder-panel {
+    background: #eef8ff;
+    border-color: #ffffff #808080 #808080 #ffffff;
+}
+
+.monitoring-reminder-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.monitoring-reminder-layout {
+    display: grid;
+    grid-template-columns: minmax(190px, 260px) 1fr;
+    gap: 8px;
+    align-items: start;
+}
+
+.monitoring-select-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-weight: bold;
+    color: #000080;
+}
+
+.monitoring-parameter-select {
+    width: 100%;
+    min-height: 84px;
+    background: #ffffff;
+    border: 2px inset #c0c0c0;
+    font: inherit;
+}
+
+.monitoring-parameter-select option:checked {
+    background: #dff8df;
+    color: #006000;
+    font-weight: bold;
+}
+
+.monitoring-parameter-toggle-list {
+    min-height: 90px;
+    max-height: 170px;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 2px inset #c0c0c0;
+    padding: 3px;
+}
+
+.monitoring-parameter-toggle-row {
+    display: grid;
+    grid-template-columns: 16px 28px 1fr;
+    gap: 4px;
+    align-items: center;
+    padding: 3px;
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+    cursor: pointer;
+}
+
+.monitoring-parameter-toggle-row.selected {
+    background: #dff8df;
+    border-color: #00a000;
+    color: #006000;
+    font-weight: bold;
+}
+
+.monitoring-parameter-toggle-row input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+}
+
+.monitoring-parameter-toggle-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.05;
+}
+
+.monitoring-parameter-schedule-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.monitoring-parameter-schedule-card {
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #fffef0;
+}
+
+.monitoring-parameter-schedule-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+    color: #000080;
+}
+
+.monitoring-reminder-schedule {
+    padding: 6px;
+    background: #f8fbff;
+    border: 1px inset #c0c0c0;
+}
+
+.monitoring-reminder-frequency-controls .care-reminder-times,
+.monitoring-reminder-frequency-controls .care-reminder-extra-row,
+.monitoring-reminder-frequency-controls .weekday-picker {
+    margin-top: 5px;
+}
+
+.monitoring-hold-rule {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 5px;
+    background: #fff7f7;
+    border: 1px dotted #b00000;
+    color: #800000;
+    font-weight: bold;
+}
+
+.monitoring-hold-rule-list {
+    margin-top: 6px;
+    padding: 6px;
+    background: #fff7f7;
+    border: 1px dotted #b00000;
+}
+
+.monitoring-hold-rule-title {
+    color: #800000;
+    font-weight: bold;
+    margin-bottom: 3px;
+}
+
+.monitoring-hold-rule-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+}
+
+.monitoring-hold-rule input[type="number"] {
+    width: 68px;
+}
+
+.monitoring-auto-hold-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 4px;
+    padding-left: 6px;
+    border-left: 1px dotted #b00000;
+    white-space: nowrap;
+}
+
+.monitoring-auto-hold-toggle input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.hold-indicator {
+    display: inline-block;
+    min-width: 16px;
+    margin-right: 3px;
+    padding: 0 2px;
+    border: 1px solid #800000;
+    background: #ffdddd;
+    color: #b00000;
+    font-weight: bold;
+    text-align: center;
+    line-height: 13px;
+}
+
+.hold-warning-box {
+    margin-bottom: 8px;
+    padding: 8px;
+    border: 2px inset #c0c0c0;
+    background: #ffe2e2;
+    color: #800000;
+}
+
+.member-med-held {
+    background: #ffe1e1 !important;
+    border-color: #b00000 !important;
+    color: #700000;
+}
+
+.member-med-inline-row.member-med-held {
+    padding: 5px !important;
+    margin: 3px 0;
+}
+
+.hold-med-button {
+    color: #800000;
+    font-weight: bold;
+}
+
+.monitoring-parameter-chip,
+.monitoring-reminder-options .monitoring-parameter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px 4px 5px;
+    border-top: 2px solid #ffffff;
+    border-left: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+    background: var(--parameter-color, #fffef0);
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.monitoring-reminder-options .monitoring-parameter-chip input {
+    position: static;
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.monitoring-parameter-chip.selected,
+.monitoring-parameter-chip:has(input:checked) {
+    background: #dff8df !important;
+    color: #006000;
+    border-top-color: #808080;
+    border-left-color: #808080;
+    border-right-color: #ffffff;
+    border-bottom-color: #ffffff;
+}
+
+.monitoring-parameter-chip span:last-child {
+    display: inline-flex;
+    flex-direction: column;
+    line-height: 1.05;
+}
+
+.monitoring-parameter-chip small {
+    color: #6b3b00;
+    font-weight: normal;
+    font-size: 9px;
+}
+
+.member-monitoring-chip {
+    border-left: 4px solid #b36b00;
+}
+
+.monitoring-parameter-icon {
+    display: inline-block;
+    min-width: 22px;
+    padding: 1px 3px;
+    border: 1px solid #808080;
+    background: #ffffff;
+    color: #000080;
+    text-align: center;
+    font-size: 10px;
+    line-height: 14px;
+}
+
+.regimen-reminder-panel {
+    background: #f2fff2;
+}
+
+.care-reminder-panel {
+    padding: 6px;
+    background: #eef6ff;
+    border: 2px inset #ffffff;
+}
+
+.care-reminder-builder {
+    display: grid;
+    grid-template-columns: minmax(140px, 0.9fr) minmax(160px, 1.1fr) repeat(2, minmax(120px, 0.7fr));
+    gap: 6px;
+    align-items: end;
+}
+
+.care-reminder-builder label,
+.care-reminder-times label,
+.care-reminder-extra-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.care-reminder-builder input,
+.care-reminder-builder select,
+.care-reminder-times input,
+.care-reminder-extra-row input {
+    width: 100%;
+    box-sizing: border-box;
+    color: #000000;
+    font-weight: normal;
+}
+
+.care-reminder-frequency-controls {
+    margin-top: 6px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #fffff4;
+}
+
+.care-reminder-extra-row,
+.care-reminder-times {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: end;
+    margin-bottom: 5px;
+}
+
+.care-reminder-extra-row.hidden,
+.care-reminder-weekdays.hidden {
+    display: none;
+}
+
+.care-reminder-times label {
+    width: 105px;
+}
+
+.member-care-reminder-list {
+    min-height: 120px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 8px;
+    background: #ffffff;
+}
+
+.monitoring-schedule-dashboard {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(95px, 1fr));
+    gap: 6px;
+    padding: 6px;
+    background: #d7e8ff;
+    border-bottom: 2px ridge #ffffff;
+}
+
+.monitoring-schedule-stat {
+    padding: 6px;
+    border: 2px outset #ffffff;
+    background: #ffffff;
+    color: #000080;
+    text-align: center;
+}
+
+.monitoring-schedule-stat strong {
+    display: block;
+    font-size: 18px;
+    line-height: 20px;
+}
+
+.monitoring-schedule-stat span {
+    display: block;
+    font-size: 10px;
+}
+
+.monitoring-schedule-stat.today {
+    background: #fff3b0;
+    color: #7a3f00;
+}
+
+.monitoring-schedule-stat.logged {
+    background: #dfffdf;
+    color: #006000;
+}
+
+.monitoring-schedule-stat.labs {
+    background: #fff0d6;
+    color: #804000;
+}
+
+.care-reminder-group {
+    margin: 5px;
+    border: 1px solid #b0b0b0;
+    background: #f7fbff;
+}
+
+.care-reminder-group summary {
+    padding: 4px 6px;
+    background: #c8dfff;
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.care-reminder-row {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 7px;
+    align-items: center;
+    padding: 6px;
+    border-bottom: 1px dotted #a0a0a0;
+    background: linear-gradient(90deg, var(--reminder-color, #eef8ff) 0, #ffffff 72%);
+}
+
+.care-reminder-icon {
+    width: 26px;
+    height: 22px;
+    line-height: 22px;
+    text-align: center;
+    border: 2px inset #ffffff;
+    background: #000080;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+.care-reminder-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.care-reminder-copy strong {
+    color: #000080;
+}
+
+.care-reminder-copy small {
+    color: #303030;
+}
+
+.care-reminder-actions {
+    display: flex;
+    gap: 4px;
+    white-space: nowrap;
+    align-items: center;
+}
+
+.care-reminder-status {
+    padding: 2px 5px;
+    border: 1px solid #808080;
+    background: #fff8c8;
+    color: #704000;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.care-reminder-status.logged {
+    background: #dfffdf;
+    color: #006000;
+}
+
+.today-care-reminder {
+    border-left: 7px solid #008040;
+    background: linear-gradient(90deg, var(--reminder-color, #eef8ff), #ffffff 70%) !important;
+}
+
+.regimen-builder-fieldset {
+    background: #d9e7f7;
+}
+
+.regimen-builder-grid {
+    display: grid;
+    grid-template-columns: minmax(680px, 1fr) minmax(330px, 400px);
+    gap: 10px;
+    align-items: start;
+}
+
+.regimen-builder-main,
+.regimen-builder-side,
+.regimen-preview-side,
+.regimen-builder-side fieldset,
+.regimen-preview-side fieldset {
+    min-width: 0;
+}
+
+.regimen-builder-main {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+}
+
+.regimen-builder-side {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.regimen-preview-side {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+.regimen-header-strip {
+    display: grid;
+    grid-template-columns: minmax(130px, 0.75fr) minmax(170px, 0.9fr) repeat(2, minmax(110px, 0.55fr));
+    gap: 6px;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #fffbe6;
+}
+
+.regimen-header-strip label,
+.regimen-med-section label,
+.regimen-notes-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    color: #000080;
+    font-weight: bold;
+}
+
+.regimen-header-strip input,
+.regimen-header-strip select,
+.regimen-med-section input,
+.regimen-med-section select,
+.regimen-notes-grid input,
+.regimen-notes-grid textarea {
+    width: 100%;
+    box-sizing: border-box;
+    color: #000000;
+    font-weight: normal;
+}
+
+.regimen-med-list {
+    margin-top: 8px;
+}
+
+.order-set-med-row {
+    margin-bottom: 8px;
+    padding: 0;
+    background: #ffffff;
+    border-left: 8px solid #0a64ad;
+    border-top: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.order-set-med-row:nth-child(3n + 2) {
+    border-left-color: #008040;
+}
+
+.order-set-med-row:nth-child(3n) {
+    border-left-color: #b56b00;
+}
+
+.order-set-med-row.active {
+    outline: 2px solid #000080;
+    background: #f4fbff;
+}
+
+.regimen-med-row-title {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    gap: 7px;
+    align-items: center;
+    padding: 6px;
+    background: linear-gradient(90deg, #e8f3ff 0, #ffffff 70%);
+    border-bottom: 1px dotted #808080;
+}
+
+.regimen-med-row-title strong {
+    color: #001a70;
+}
+
+.regimen-med-row-title small {
+    display: block;
+    color: #404040;
+}
+
+.regimen-med-row-badge {
+    width: 24px;
+    height: 24px;
+    line-height: 24px;
+    text-align: center;
+    border: 2px inset #ffffff;
+    background: #ffffb8;
+    color: #000080;
+    font-weight: bold;
+}
+
+.regimen-med-grid {
+    display: grid;
+    grid-template-columns: minmax(200px, 0.9fr) minmax(140px, 0.62fr) minmax(260px, 1.1fr);
+    gap: 7px;
+    padding: 7px;
+}
+
+.regimen-med-section {
+    min-width: 0;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #f8f8f8;
+}
+
+.regimen-section-title {
+    margin-bottom: 4px;
+    color: #006000;
+    font-weight: bold;
+}
+
+.regimen-med-section .field-row,
+.os-prn-limit,
+.os-weekdays {
+    margin-top: 5px;
+    flex-wrap: wrap;
+}
+
+.regimen-med-section .field-row input[type="number"] {
+    width: 58px;
+}
+
+.regimen-med-section .os-time-fields .field-row input[type="time"] {
+    width: 92px;
+}
+
+.os-calculated-dose {
+    background: #c0c0c0;
+    font-weight: bold;
+}
+
+.os-units {
+    display: inline-block;
+    min-height: 18px;
+    margin-top: 5px;
+    color: #004000;
+}
+
+.os-link-row {
+    padding: 0 7px 7px;
+    display: grid;
+    grid-template-columns: auto minmax(230px, 0.9fr) auto minmax(150px, 0.45fr);
+    gap: 6px;
+    align-items: center;
+}
+
+.regimen-notes-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1fr);
+    gap: 7px;
+    padding: 0 7px 7px;
+}
+
+.regimen-notes-grid textarea {
+    resize: none;
+}
+
+.regimen-med-preview {
+    min-height: 130px;
+    background: #ffffff;
+}
+
+.regimen-builder-summary {
+    min-height: 150px;
+    max-height: 300px;
+    overflow: auto;
+    background: #fffef0;
+    padding: 5px;
+}
+
+.regimen-summary-line {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 5px;
+    padding: 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px dotted #a0a0a0;
+}
+
+.regimen-summary-index {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    line-height: 18px;
+    text-align: center;
+    border: 1px solid #808080;
+    background: #dff8df;
+    color: #006000;
+    font-weight: bold;
+}
+
+.regimen-preview-fieldset {
+    background: #eef7ff;
+}
+
+.regimen-preview-actions {
+    display: flex;
+    gap: 5px;
+    justify-content: flex-end;
+    margin-bottom: 6px;
+}
+
+.regimen-pdf-preview {
+    max-height: 360px;
+    overflow: auto;
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    color: #000000;
+}
+
+.regimen-pdf-preview h2 {
+    margin: 8px 0 5px;
+    color: #000080;
+    font-size: 18px !important;
+    line-height: 1.1;
+}
+
+.regimen-pdf-preview .regimen-report > div:first-child h2 {
+    font-size: 20px !important;
+}
+
+.regimen-pdf-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.regimen-pdf-preview th {
+    background: #dff0ff;
+    color: #000080;
+}
+
+.regimen-pdf-preview th,
+.regimen-pdf-preview td {
+    border: 1px solid #808080;
+    padding: 4px;
+    vertical-align: top;
+}
+
+@media (max-width: 980px) {
+    .regimen-builder-grid,
+    .regimen-med-grid,
+    .regimen-notes-grid,
+    .regimen-header-strip {
+        grid-template-columns: 1fr;
+    }
+
+    .regimen-builder-main,
+    .regimen-builder-side,
+    .regimen-preview-side {
+        grid-column: auto;
+        grid-row: auto;
+    }
+}
+
+.monitoring-type-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.monitoring-type-defaults {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #eef8ff;
+}
+
+.monitoring-type-manager-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 360px;
+    overflow: auto;
+    padding: 5px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.monitoring-type-manager-row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) 54px minmax(140px, 0.8fr) 52px 105px minmax(150px, 0.8fr) 70px auto;
+    gap: 6px;
+    align-items: center;
+    padding: 5px;
+    border-bottom: 1px dotted #a0a0a0;
+}
+
+.monitoring-type-manager-row input,
+.monitoring-type-manager-row select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.monitoring-type-hold-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    color: #800000;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.monitoring-type-manager-row .monitoring-type-hold-toggle input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    flex: 0 0 auto;
 }
 
 .linked-med-badge {
@@ -4361,17 +5195,22 @@ button {
     min-height: 80px;
     max-height: 180px;
     overflow-y: auto;
+    overflow-x: hidden;
     background: #ffffff;
 }
 
 .prepack-queue-row {
     display: block;
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     min-height: 44px;
     padding: 7px 8px;
     text-align: left;
     font-size: 13px;
     line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .prepack-queue-row small {
@@ -4672,6 +5511,171 @@ button {
     margin-left: 22px;
 }
 
+.return-prepack-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 5px;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+}
+
+.return-prepack-filter-panel {
+    display: grid;
+    grid-template-columns: minmax(190px, 1.35fr) repeat(2, minmax(128px, 0.7fr)) minmax(190px, 1fr) minmax(150px, 0.85fr) minmax(96px, auto);
+    align-items: end;
+    gap: 6px;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #eef6ff;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.return-prepack-filter-panel label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    color: #000080;
+    font-weight: bold;
+}
+
+.return-prepack-filter-panel input,
+.return-prepack-filter-panel select {
+    width: 100%;
+    box-sizing: border-box;
+    font-weight: normal;
+    color: #000000;
+}
+
+#return-prepack-filter-count {
+    align-self: center;
+    white-space: nowrap;
+    padding: 4px 6px;
+    background: #ffffd8;
+    border: 1px solid #808080;
+    color: #006000;
+    font-weight: bold;
+}
+
+.return-prepack-group {
+    background: #eeeeee;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+}
+
+.return-prepack-group[open] {
+    background: #f7f7f7;
+}
+
+.return-prepack-group.selected {
+    background: #e8ffe8;
+}
+
+.return-prepack-package,
+.return-prepack-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+    gap: 6px;
+    padding: 5px 7px;
+    min-height: 42px;
+    background: #f8f8f8;
+    cursor: pointer;
+}
+
+.return-prepack-package {
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    background: #dfefff;
+    border-bottom: 1px dotted #808080;
+    list-style: none;
+}
+
+.return-prepack-package::-webkit-details-marker {
+    display: none;
+}
+
+.return-prepack-caret {
+    align-self: center;
+    justify-self: end;
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 7px solid #008000;
+    margin-right: 4px;
+}
+
+.return-prepack-group[open] .return-prepack-caret {
+    transform: rotate(90deg);
+}
+
+.return-prepack-row {
+    margin: 3px 5px;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+}
+
+.return-prepack-package:hover,
+.return-prepack-row:hover {
+    background: #eef6ff;
+}
+
+.return-prepack-row.selected {
+    background: #dff8df;
+    border-color: #008000;
+}
+
+.return-prepack-children {
+    padding: 2px 0 4px;
+}
+
+.return-prepack-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 2px;
+}
+
+.return-prepack-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.return-prepack-main strong,
+.return-prepack-time,
+.return-prepack-meta {
+    overflow-wrap: anywhere;
+}
+
+.return-prepack-time {
+    color: #000080;
+    font-weight: bold;
+}
+
+.return-prepack-meta {
+    color: #333333;
+    font-size: 10px;
+}
+
+@media (max-width: 920px) {
+    .return-prepack-filter-panel {
+        grid-template-columns: repeat(2, minmax(150px, 1fr));
+    }
+
+    #return-prepack-filter-count {
+        justify-self: start;
+    }
+}
+
 .calendar-controls {
     display: flex;
     align-items: center;
@@ -4697,6 +5701,8 @@ button {
     padding: 2px;
     font-size: 9px;
     overflow-y: auto;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 .calendar-dose {
@@ -4704,18 +5710,22 @@ button {
     padding: 1px 0;
     color: #000000;
     cursor: pointer;
+    overflow-wrap: anywhere;
+    word-break: normal;
 }
 
 .calendar-dose i { color: #0000aa; }
 
+#calendar-grid,
 .member-calendar-grid {
     display: grid;
-    grid-template-columns: repeat(7, minmax(72px, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     gap: 2px;
     background: #808080;
     border: 2px inset #ffffff;
     padding: 2px;
-    overflow-x: auto;
+    min-width: 0;
+    overflow-x: hidden;
 }
 
 .drug-info-frame {
@@ -5127,9 +6137,9 @@ button {
 }
 
 .inventory-label-qr {
-    width: 0.62in;
-    height: 0.62in;
-    flex: 0 0 0.62in;
+    width: 0.54in;
+    height: 0.54in;
+    flex: 0 0 0.54in;
     image-rendering: pixelated;
 }
 
@@ -5161,6 +6171,17 @@ button {
 /* Ensure the red text for low stock stands out */
 .low-stock-text {
     color: #ff0000;
+    font-weight: bold;
+}
+
+.inventory-alert-cell,
+.inventory-expired-cell {
+    color: #b00000;
+    font-weight: bold;
+}
+
+.inventory-expiring-cell {
+    color: #a06000;
     font-weight: bold;
 }
 
