@@ -4621,7 +4621,7 @@ button {
 
 .regimen-builder-grid {
     display: grid;
-    grid-template-columns: minmax(560px, 1fr) minmax(300px, 390px);
+    grid-template-columns: minmax(500px, var(--regimen-main-width, 1fr)) 10px minmax(285px, 390px);
     gap: 10px;
     align-items: start;
     overflow: hidden;
@@ -4640,13 +4640,42 @@ button {
     grid-row: 1 / span 2;
 }
 
-.regimen-builder-side {
+.regimen-grid-resizer {
     grid-column: 2;
+    grid-row: 1 / span 2;
+    min-height: 420px;
+    cursor: col-resize;
+    border-left: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            #d0d0d0 0,
+            #d0d0d0 4px,
+            #808080 4px,
+            #808080 5px
+        );
+}
+
+.regimen-grid-resizer:hover,
+.regimen-builder-grid.resizing .regimen-grid-resizer {
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            #fff6bf 0,
+            #fff6bf 4px,
+            #b56b00 4px,
+            #b56b00 5px
+        );
+}
+
+.regimen-builder-side {
+    grid-column: 3;
     grid-row: 1;
 }
 
 .regimen-preview-side {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 2;
 }
 
@@ -4686,6 +4715,34 @@ button {
     margin-top: 8px;
 }
 
+.regimen-add-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: flex-start;
+    padding: 6px 4px;
+    margin-top: 4px;
+    border-top: 1px dotted #808080;
+    background: #d9e7f7;
+}
+
+.regimen-add-row button {
+    min-width: 132px;
+    font-weight: bold;
+}
+
+.regimen-builder-command-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #fffbe6;
+}
+
 .order-set-med-row {
     margin-bottom: 8px;
     padding: 0;
@@ -4695,7 +4752,9 @@ button {
     border-right: 2px solid #808080;
     border-bottom: 2px solid #808080;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow: auto;
+    resize: vertical;
+    min-height: 172px;
 }
 
 .order-set-med-row:nth-child(3n + 2) {
@@ -4743,7 +4802,7 @@ button {
 
 .regimen-med-grid {
     display: grid;
-    grid-template-columns: minmax(190px, 0.72fr) minmax(140px, 0.42fr) minmax(240px, 0.86fr);
+    grid-template-columns: minmax(170px, 0.58fr) minmax(118px, 0.32fr) minmax(220px, 0.74fr);
     gap: 7px;
     padding: 7px;
 }
@@ -4757,7 +4816,7 @@ button {
 
 .regimen-med-section label {
     display: grid !important;
-    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-columns: 56px minmax(0, 1fr);
     align-items: center;
     gap: 4px;
     margin-top: 4px;
@@ -4768,8 +4827,21 @@ button {
     min-width: 0;
 }
 
+.regimen-med-section .os-med-search,
+.regimen-med-section .os-med-strength {
+    max-width: 300px;
+}
+
+.regimen-med-section .os-dose {
+    max-width: 84px;
+}
+
+.regimen-med-section .os-calculated-dose {
+    max-width: 150px;
+}
+
 .regimen-med-section .os-freq {
-    max-width: 260px;
+    max-width: 230px;
 }
 
 .regimen-med-section .field-row {
@@ -4819,25 +4891,36 @@ button {
 .os-link-row {
     padding: 0 7px 7px;
     display: grid;
-    grid-template-columns: auto minmax(180px, 0.7fr) auto minmax(130px, 0.36fr);
+    grid-template-columns: auto minmax(220px, 290px) auto 170px;
     gap: 6px;
     align-items: center;
+    justify-content: start;
+}
+
+.os-link-row .link-choice-panel {
+    width: 100%;
+}
+
+.os-link-row .os-link-mode {
+    width: 170px;
 }
 
 .regimen-notes-grid {
     display: grid;
-    grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1fr);
+    grid-template-columns: minmax(170px, 0.45fr) minmax(240px, 0.7fr);
     gap: 7px;
     padding: 0 7px 7px;
 }
 
 .regimen-notes-grid textarea {
-    resize: none;
+    resize: vertical;
 }
 
 .regimen-med-preview {
     min-height: 130px;
     background: #ffffff;
+    resize: vertical;
+    overflow: auto;
 }
 
 .regimen-builder-summary {
@@ -4846,6 +4929,7 @@ button {
     overflow: auto;
     background: #fffef0;
     padding: 5px;
+    resize: vertical;
 }
 
 .regimen-summary-line {
@@ -4871,6 +4955,8 @@ button {
 
 .regimen-preview-fieldset {
     background: #eef7ff;
+    resize: vertical;
+    overflow: auto;
 }
 
 .regimen-preview-actions {
@@ -4931,6 +5017,10 @@ button {
     .regimen-preview-side {
         grid-column: auto;
         grid-row: auto;
+    }
+
+    .regimen-grid-resizer {
+        display: none;
     }
 }
 

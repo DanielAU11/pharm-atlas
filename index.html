@@ -327,7 +327,11 @@
                                     <label>End:<input id="order-set-end" type="date" onchange="syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></label>
                                 </div>
                                 <div id="order-set-med-list" class="regimen-med-list"></div>
+                                <div class="regimen-add-row">
+                                    <button type="button" onclick="addOrderSetMedicationRow()">+ Add Medication</button>
+                                </div>
                             </div>
+                            <div class="regimen-grid-resizer" title="Drag to resize regimen panels"></div>
                             <div class="regimen-builder-side">
                                 <fieldset>
                                     <legend>Selected Medication</legend>
@@ -372,11 +376,11 @@
                                 </fieldset>
                             </div>
                         </div>
-                        <div class="field-row" style="justify-content:space-between; margin-top:8px;">
-                            <button onclick="addOrderSetMedicationRow()">+ Add Medication</button>
+                        <div class="field-row regimen-builder-command-row">
+                            <span class="form-help">Drag the divider to resize the regimen workspace.</span>
                             <span>
-                                <button onclick="saveOrderSet()">Save Regimen</button>
-                                <button onclick="clearOrderSetBuilder()">Clear</button>
+                                <button type="button" onclick="saveOrderSet()">Save Regimen</button>
+                                <button type="button" onclick="clearOrderSetBuilder()">Clear</button>
                             </span>
                         </div>
                     </fieldset>

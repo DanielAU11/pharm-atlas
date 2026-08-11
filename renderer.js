@@ -118,6 +118,53 @@ const bpGoalPresets = {
 const defaultBpGoals = { preset: 'treated', ...bpGoalPresets.treated };
 const defaultHrGoals = { low: 60, high: 100 };
 const defaultWeightGoals = { low: '', high: '', unit: 'lb' };
+
+function initializeRegimenBuilderResizer() {
+    const grid = document.querySelector('.regimen-builder-grid');
+    const handle = grid?.querySelector('.regimen-grid-resizer');
+    if (!grid || !handle || handle.dataset.initialized === 'true') return;
+    handle.dataset.initialized = 'true';
+    try {
+        const savedWidth = parseInt(localStorage.getItem('pharmatlas.regimenMainWidth') || '', 10);
+        if (Number.isFinite(savedWidth) && savedWidth > 0) {
+            grid.style.setProperty('--regimen-main-width', `${savedWidth}px`);
+        }
+    } catch (error) {
+        // Local storage can be unavailable in unusual embedded contexts; resizing still works for the session.
+    }
+    handle.addEventListener('mousedown', event => {
+        event.preventDefault();
+        const rect = grid.getBoundingClientRect();
+        const minMain = 500;
+        const minSide = 300;
+        const maxMain = Math.max(minMain, rect.width - minSide - 24);
+        const onMove = moveEvent => {
+            const nextWidth = Math.min(maxMain, Math.max(minMain, moveEvent.clientX - rect.left));
+            grid.style.setProperty('--regimen-main-width', `${Math.round(nextWidth)}px`);
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            grid.classList.remove('resizing');
+            try {
+                const width = parseInt(getComputedStyle(grid).getPropertyValue('--regimen-main-width'), 10);
+                if (Number.isFinite(width)) localStorage.setItem('pharmatlas.regimenMainWidth', String(width));
+            } catch (error) {
+                // Best-effort preference only.
+            }
+        };
+        grid.classList.add('resizing');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        onMove(event);
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeRegimenBuilderResizer);
+} else {
+    initializeRegimenBuilderResizer();
+}
 let memberTimelineStart = null;
 let dashboardCalendarStart = localDateKey();
 let memberCalendarStart = localDateKey();
