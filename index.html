@@ -42,33 +42,41 @@
                 
                 <!-- 1. DASHBOARD -->
                 <div id="panel-dashboard">
-                    <fieldset>
-                        <legend>Medication Schedule Calendar</legend>
-                        <div class="calendar-controls">
-                            <button type="button" onclick="shiftDashboardCalendar(-7)">Previous 7 Days</button>
-                            <strong id="dashboard-calendar-range"></strong>
-                            <button type="button" onclick="shiftDashboardCalendar(7)">Next 7 Days</button>
-                            <button type="button" onclick="resetDashboardCalendar()">Today</button>
+                    <div class="dashboard-workspace">
+                        <div class="dashboard-main-column">
+                            <fieldset>
+                                <legend>Medication Schedule Calendar</legend>
+                                <div class="calendar-controls">
+                                    <button type="button" onclick="shiftDashboardCalendar(-7)">Previous 7 Days</button>
+                                    <strong id="dashboard-calendar-range"></strong>
+                                    <button type="button" onclick="shiftDashboardCalendar(7)">Next 7 Days</button>
+                                    <button type="button" onclick="resetDashboardCalendar()">Today</button>
+                                </div>
+                                <div id="calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: #808080; border: 2px inset white; padding: 2px;">
+                                    <!-- Calendar headers and days will be injected here -->
+                                </div>
+                            </fieldset>
+
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Today View</legend>
+                                <div id="today-view-dashboard"></div>
+                            </fieldset>
+
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Monitoring Trends</legend>
+                                <div id="vitals-dashboard"></div>
+                            </fieldset>
+
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Inventory Status</legend>
+                                <div id="inventory-status"></div>
+                            </fieldset>
                         </div>
-                        <div id="calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: #808080; border: 2px inset white; padding: 2px;">
-                            <!-- Calendar headers and days will be injected here -->
-                        </div>
-                    </fieldset>
-
-                    <fieldset style="margin-top: 10px;">
-                        <legend>Today View</legend>
-                        <div id="today-view-dashboard"></div>
-                    </fieldset>
-
-                    <fieldset style="margin-top: 10px;">
-                        <legend>Monitoring Trends</legend>
-                        <div id="vitals-dashboard"></div>
-                    </fieldset>
-
-                    <fieldset style="margin-top: 10px;">
-                        <legend>Inventory Status</legend>
-                        <div id="inventory-status"></div>
-                    </fieldset>
+                        <aside class="workspace-right-rail dashboard-command-rail">
+                            <div class="rail-titlebar">Daily Command Panel</div>
+                            <div id="dashboard-right-panel"></div>
+                        </aside>
+                    </div>
 
                     <fieldset style="margin-top: 10px;">
                         <legend>PDF Reports</legend>
@@ -834,6 +842,8 @@
                                 <li>Supported frequencies include one-time, daily, BID, TID, QID, nightly, PRN, every other day, weekly, every X weeks, X times per week, monthly, and every X hours.</li>
                                 <li>Every X hours schedules preview upcoming times and can adjust future times after late/early documentation.</li>
                                 <li>Use linked medications when items must be taken together or when only one formulation should be selected.</li>
+                                <li>Regimen therapy days let one medication run for a smaller window inside a larger regimen, such as days 1-5 of a treatment cycle.</li>
+                                <li>Medication, current-list, and regimen PDF/Print tools open a built-in preview where medications and columns can be included or excluded.</li>
                             </ul>
                         </fieldset>
 
@@ -1201,6 +1211,8 @@
             <input id="m-current-med-list-data" type="hidden">
             <input id="m-lab-documents-data" type="hidden">
             <input id="m-progress-notes-data" type="hidden">
+
+            <aside id="member-profile-right-panel" class="workspace-right-rail member-context-rail"></aside>
 
             <section data-member-section="main" class="profile-main-grid">
                 <input id="m-providers" type="hidden">
