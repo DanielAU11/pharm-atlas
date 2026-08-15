@@ -942,7 +942,7 @@ button {
 
 .lab-upload-grid {
     display: grid;
-    grid-template-columns: 150px minmax(260px, 360px) minmax(0, 1fr);
+    grid-template-columns: minmax(170px, 1fr) 130px minmax(230px, 0.9fr) auto;
     gap: 8px;
     align-items: end;
 }
@@ -967,6 +967,11 @@ button {
     width: 100%;
     min-height: 44px;
     resize: vertical;
+}
+
+.lab-upload-actions {
+    align-self: end;
+    white-space: nowrap;
 }
 
 .lab-file-control input {
@@ -1009,10 +1014,11 @@ button {
 
 .profile-main-grid {
     display: grid;
-    grid-template-columns: minmax(360px, 0.85fr) minmax(520px, 1.15fr);
+    grid-template-columns: minmax(390px, 0.9fr) minmax(560px, 1.25fr);
     gap: 10px;
     margin-top: 10px;
     align-items: start;
+    width: calc(100% - min(350px, 27vw) - 22px);
 }
 
 .dashboard-workspace {
@@ -1023,7 +1029,7 @@ button {
 }
 
 .dashboard-workspace.command-panel-collapsed {
-    grid-template-columns: minmax(0, 1fr) 34px;
+    grid-template-columns: minmax(0, 1fr) 78px;
 }
 
 .dashboard-workspace.command-panel-collapsed #dashboard-right-panel {
@@ -1032,7 +1038,7 @@ button {
 
 .dashboard-workspace.command-panel-collapsed .dashboard-command-rail {
     padding: 0;
-    min-height: 112px;
+    min-height: 76px;
     overflow: hidden;
 }
 
@@ -1051,16 +1057,22 @@ button {
 }
 
 .dashboard-workspace.command-panel-collapsed .daily-command-title {
-    writing-mode: vertical-rl;
-    min-height: 112px;
+    writing-mode: horizontal-tb;
+    min-height: 76px;
     margin: 0;
-    padding: 5px 3px;
+    padding: 4px;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .dashboard-workspace.command-panel-collapsed .daily-command-title button {
     writing-mode: horizontal-tb;
-    min-width: 28px;
-    height: auto;
+    min-width: 64px;
+    height: 24px;
+}
+
+.dashboard-workspace.command-panel-collapsed .daily-command-title span {
+    display: none;
 }
 
 .tab-list li[draggable="true"] {
@@ -1097,12 +1109,17 @@ button {
 
 .member-context-rail {
     float: right;
-    width: min(330px, 27vw);
+    width: min(340px, 27vw);
     margin: 10px 0 10px 10px;
 }
 
 .member-context-rail[style*="none"] {
     float: none;
+}
+
+.member-context-rail[style*="none"] ~ .profile-main-grid,
+.profile-main-grid:only-child {
+    width: 100%;
 }
 
 .rail-titlebar {
@@ -1315,7 +1332,7 @@ button {
 }
 
 .profile-card-goals {
-    grid-column: 1 / -1;
+    grid-column: 2;
     background: linear-gradient(90deg, #f3f7ff 0%, #edf8ef 55%, #fff8dc 100%);
 }
 
@@ -1383,7 +1400,7 @@ button {
 }
 
 .goal-card-grid {
-    grid-template-columns: repeat(4, minmax(170px, 1fr));
+    grid-template-columns: repeat(2, minmax(210px, 1fr));
 }
 
 .goal-card {
@@ -1412,7 +1429,7 @@ button {
 
 .goal-card-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 6px;
     color: #000080;
@@ -1420,7 +1437,7 @@ button {
 }
 
 .goal-card-header select {
-    max-width: 190px;
+    max-width: 150px;
 }
 
 .goal-range-row,
@@ -1436,7 +1453,7 @@ button {
 }
 
 .bp-goal-grid {
-    grid-template-columns: repeat(4, minmax(58px, 1fr));
+    grid-template-columns: repeat(2, minmax(58px, 1fr));
 }
 
 .goal-card label {
@@ -2366,6 +2383,10 @@ button {
     .goal-card-grid,
     .profile-diary-layout {
         grid-template-columns: 1fr;
+    }
+
+    .profile-main-grid {
+        width: 100%;
     }
 
     .profile-card-goals,
@@ -5854,6 +5875,11 @@ button {
     text-align: center;
 }
 
+.timeline-day.timeline-today {
+    background: #fff3a6;
+    border-color: #a08300;
+}
+
 .timeline-date {
     display: block;
     font-size: 9px;
@@ -5900,6 +5926,49 @@ button {
 .timeline-dose.timeline-future {
     background: #a8c4e8;
     border-color: #365c8f;
+}
+
+.container-open-status.unopened {
+    background: #baf0ba;
+    color: #004800;
+}
+
+.container-open-status.opened {
+    background: #f4a1a1;
+    color: #6e0000;
+}
+
+.container-open-status.unknown {
+    background: #fff1a8;
+    color: #5a3b00;
+}
+
+.container-state-choices {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.container-state-choice {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    gap: 2px 6px;
+    padding: 8px;
+    border: 2px outset #ffffff;
+    background: #f5f5f5;
+}
+
+.container-state-choice span {
+    grid-column: 2;
+    font-size: 11px;
+}
+
+.container-state-choice.unopened {
+    background: #e7ffe7;
+}
+
+.container-state-choice.opened {
+    background: #ffe7e7;
 }
 
 .profile-notification-options {
@@ -6316,7 +6385,7 @@ button {
 
 .return-prepack-filter-panel {
     display: grid;
-    grid-template-columns: minmax(190px, 1.35fr) repeat(2, minmax(128px, 0.7fr)) minmax(190px, 1fr) minmax(150px, 0.85fr) minmax(96px, auto);
+    grid-template-columns: minmax(170px, 1.2fr) repeat(2, minmax(120px, 0.65fr)) minmax(170px, 1fr) minmax(130px, 0.8fr) minmax(120px, 0.75fr) auto;
     align-items: end;
     gap: 6px;
     padding: 7px;
@@ -6324,6 +6393,10 @@ button {
     background: #eef6ff;
     max-width: 100%;
     box-sizing: border-box;
+}
+
+.return-label-option {
+    align-self: center;
 }
 
 .return-prepack-filter-panel label {
@@ -6457,6 +6530,19 @@ button {
 .return-prepack-meta {
     color: #333333;
     font-size: 10px;
+}
+
+.return-prepack-qty {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 3px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.return-prepack-qty input {
+    width: 82px;
 }
 
 @media (max-width: 920px) {
@@ -6606,6 +6692,131 @@ button {
 .member-regimen-actions {
     text-align: right;
     margin-top: 5px;
+}
+
+.member-schedule-grid-shell {
+    margin-bottom: 8px;
+    overflow-x: auto;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.member-schedule-grid-note {
+    padding: 5px 7px;
+    background: #fff7d6;
+    color: #000080;
+    border-bottom: 1px solid #808080;
+    font-size: 11px;
+}
+
+.member-schedule-grid {
+    width: 100%;
+    min-width: 920px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 11px;
+}
+
+.member-schedule-grid th,
+.member-schedule-grid td {
+    border: 1px solid #808080;
+    vertical-align: top;
+    padding: 4px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.member-schedule-grid th {
+    background: #d9d9d9;
+    color: #000080;
+    text-align: center;
+}
+
+.member-schedule-grid th:first-child,
+.member-schedule-grid-med-cell {
+    width: 275px;
+    background: #f7fbff;
+    overflow-wrap: anywhere;
+}
+
+.member-schedule-grid .member-grid-today {
+    background: #fff36b;
+    color: #004000;
+}
+
+.member-grid-med-cell strong {
+    color: #0000a0;
+    display: block;
+    margin-bottom: 2px;
+}
+
+.member-grid-instructions {
+    color: #004080;
+    margin-top: 3px;
+    max-width: 100%;
+}
+
+.member-grid-instructions summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: #0000a0;
+    cursor: pointer;
+    font-weight: bold;
+    list-style: none;
+    max-width: 100%;
+    text-decoration: underline;
+}
+
+.member-grid-instructions summary::-webkit-details-marker {
+    display: none;
+}
+
+.member-grid-caret::before {
+    content: ">";
+    display: inline-block;
+    width: 10px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.member-grid-instructions[open] .member-grid-caret::before {
+    content: "v";
+}
+
+.member-grid-instruction-text {
+    margin-top: 2px;
+    padding: 3px 4px;
+    max-width: 100%;
+    border-left: 2px solid #000080;
+    background: #f8fbff;
+    color: #004080;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+}
+
+.member-grid-prn {
+    display: block;
+    text-align: center;
+    color: #804000;
+    font-weight: bold;
+}
+
+.member-grid-actions {
+    display: flex;
+    gap: 3px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.member-grid-actions button {
+    min-width: 58px;
+}
+
+.member-schedule-grid .timeline-dose {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 #member-completed-meds-list {
@@ -6941,6 +7152,38 @@ button {
     font-family: monospace !important;
     font-size: 5.5pt !important;
     overflow-wrap: anywhere;
+}
+
+.prepack-day-label {
+    position: relative;
+}
+
+.prepack-day-label .label-date,
+.prepack-day-label .label-med-row {
+    padding-right: 24px;
+}
+
+.prepack-label-qr {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 20px;
+    height: 20px;
+    image-rendering: pixelated;
+}
+
+.inventory-return-label {
+    position: relative;
+    padding-right: 0.48in;
+}
+
+.inventory-return-label-qr {
+    position: absolute;
+    right: 0.03in;
+    bottom: 0.03in;
+    width: 0.38in;
+    height: 0.38in;
+    image-rendering: pixelated;
 }
 
 #label-preview-content .label-compact .label-title { font-size: 10pt; }

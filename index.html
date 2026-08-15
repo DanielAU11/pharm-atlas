@@ -1608,9 +1608,13 @@
                         <span>Attach PDF lab results to this member's monitoring record.</span>
                     </div>
                     <div class="lab-upload-grid">
+                        <label class="field-row-stacked lab-title-control">Title<input id="member-lab-title" type="text" placeholder="e.g. CMP 8/14/26"></label>
                         <label class="field-row-stacked">Document date<input id="member-lab-date" type="date"></label>
-                        <label class="field-row-stacked lab-file-control">PDF file<input id="member-lab-pdf-input" type="file" accept="application/pdf" onchange="addMemberLabPdf(this)"></label>
+                        <label class="field-row-stacked lab-file-control">PDF file<input id="member-lab-pdf-input" type="file" accept="application/pdf"></label>
                         <label class="field-row-stacked lab-notes-control">Notes<textarea id="member-lab-notes" rows="2" placeholder="e.g. CMP, CBC, INR, lipid panel"></textarea></label>
+                        <div class="lab-upload-actions">
+                            <button type="button" onclick="addMemberLabPdf()">Add Lab PDF</button>
+                        </div>
                     </div>
                 </div>
                 <div id="member-lab-document-list" class="member-lab-document-list"></div>

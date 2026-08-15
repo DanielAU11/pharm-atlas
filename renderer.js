@@ -4045,15 +4045,46 @@ function usesContainerTracking(med) {
     return med?.inventoryBehavior === 'container-finish' || dosageFormUsesContainerTracking(med?.formulation || '');
 }
 
-function isReturnPrepackExcludedMedication(med) {
+function isReturnPrepackExcludedMedication(med, schedule = null, item = null) {
+    if (!med) return true;
+    return requiresExplicitUnopenedForPrepackReturn(med) && !scheduleAllowsWholeContainerReturn(schedule, item);
+}
+
+function requiresExplicitUnopenedForPrepackReturn(med) {
     if (!med) return true;
     const formulation = String(med.formulation || '').toLowerCase();
     const adminUnit = String(med.administrationUnit || '').toLowerCase();
     const inventoryUnit = String(inventoryUnitFor(med) || '').toLowerCase();
     return usesContainerTracking(med) ||
+        formulation.includes('nasal') ||
+        formulation.includes('optic') ||
+        formulation.includes('ophthalmic') ||
+        formulation.includes('otic') ||
+        formulation.includes('spray') ||
         formulation.includes('drop') ||
+        adminUnit.includes('spray') ||
         adminUnit.includes('drop') ||
-        ['tube', 'jar', 'bottle', 'container'].some(unit => inventoryUnit.includes(unit) && usesContainerTracking(med));
+        ['tube', 'jar', 'bottle', 'container'].some(unit => inventoryUnit.includes(unit));
+}
+
+function scheduleAllowsWholeContainerReturn(schedule, item = null) {
+    if (item?.containerUnopened === true) return true;
+    return schedule?.containerOpened === false;
+}
+
+function containerOpenStatusButtonHtml(schedule, med) {
+    if (!requiresExplicitUnopenedForPrepackReturn(med)) return '';
+    const state = schedule?.containerOpened;
+    const className = state === true
+        ? 'container-open-status opened'
+        : state === false ? 'container-open-status unopened' : 'container-open-status unknown';
+    const text = state === true ? 'Opened' : state === false ? 'Unopened' : 'Container Status';
+    const title = state === true
+        ? 'Marked opened: prepacked containers will not be returnable.'
+        : state === false
+            ? 'Marked unopened: unused prepacked containers can be returned.'
+            : 'Choose whether this container has been opened for return tracking.';
+    return `<button class="${className}" title="${escapeHtml(title)}" onclick="event.stopPropagation(); setScheduleContainerOpenState('${escapeHtml(schedule.id)}')">${escapeHtml(text)}</button>`;
 }
 
 function finishedContainerButtonText(med) {
@@ -5020,12 +5051,13 @@ function renderMemberLabDocuments() {
         : '<div class="empty-state">No lab PDFs saved for this member.</div>';
 }
 
-window.addMemberLabPdf = async function(input) {
-    const file = input?.files?.[0];
+window.addMemberLabPdf = async function(input = null) {
+    const fileInput = input || document.getElementById('member-lab-pdf-input');
+    const file = fileInput?.files?.[0];
     if (!file) return;
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name || '')) {
         await appAlert('Select a PDF lab document.');
-        input.value = '';
+        if (fileInput) fileInput.value = '';
         return;
     }
     const dataUrl = await new Promise((resolve, reject) => {
@@ -5036,7 +5068,8 @@ window.addMemberLabPdf = async function(input) {
     });
     const doc = {
         id: `lab_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-        name: file.name || 'Lab PDF',
+        name: document.getElementById('member-lab-title')?.value.trim() || file.name || 'Lab PDF',
+        fileName: file.name || '',
         date: document.getElementById('member-lab-date')?.value || localDateKey(),
         notes: document.getElementById('member-lab-notes')?.value.trim() || '',
         dataUrl,
@@ -5049,7 +5082,9 @@ window.addMemberLabPdf = async function(input) {
         member.labDocuments = docs;
         await sync();
     }
-    if (input) input.value = '';
+    if (fileInput) fileInput.value = '';
+    const title = document.getElementById('member-lab-title');
+    if (title) title.value = '';
     const notes = document.getElementById('member-lab-notes');
     if (notes) notes.value = '';
     renderMemberLabDocuments();
@@ -5060,7 +5095,7 @@ window.previewMemberLabPdf = async function(docId) {
     if (!doc) return;
     await showActionModal(`Lab PDF Preview: ${doc.name || 'Document'}`, `
         <div data-action-modal-size="wide" class="lab-pdf-preview-shell">
-            <div class="form-help">${escapeHtml(doc.date || 'No date')}${doc.notes ? ` | ${escapeHtml(doc.notes)}` : ''}</div>
+            <div class="form-help">${escapeHtml(doc.date || 'No date')}${doc.fileName ? ` | File: ${escapeHtml(doc.fileName)}` : ''}${doc.notes ? ` | ${escapeHtml(doc.notes)}` : ''}</div>
             <iframe class="lab-pdf-preview-frame" src="${escapeHtml(doc.dataUrl)}"></iframe>
         </div>
     `, 'Close');
@@ -6675,17 +6710,22 @@ function scheduleHasTargetedLinks(schedule) {
     return scheduleLinkRules(schedule).length > 0;
 }
 
-function scheduleRuleTargets(rule, target) {
-    return (rule.targetId && rule.targetId === target?.id) || (rule.targetRowId && rule.targetRowId === target?.rowId);
+function scheduleRuleTargets(rule, target, source = null) {
+    if (rule.targetId) return rule.targetId === target?.id;
+    if (!rule.targetRowId || rule.targetRowId !== target?.rowId) return false;
+    const sourceRegimen = source?.orderSetId || '';
+    const targetRegimen = target?.orderSetId || '';
+    if (sourceRegimen || targetRegimen) return !!sourceRegimen && sourceRegimen === targetRegimen;
+    return true;
 }
 
 function scheduleHasPairLink(source, target, mode = '') {
-    return scheduleLinkRules(source).some(rule => scheduleRuleTargets(rule, target) && (!mode || rule.mode === mode));
+    return scheduleLinkRules(source).some(rule => scheduleRuleTargets(rule, target, source) && (!mode || rule.mode === mode));
 }
 
 function scheduleLinkModeBetween(a, b) {
-    const pairRule = scheduleLinkRules(a).find(rule => scheduleRuleTargets(rule, b))
-        || scheduleLinkRules(b).find(rule => scheduleRuleTargets(rule, a));
+    const pairRule = scheduleLinkRules(a).find(rule => scheduleRuleTargets(rule, b, a))
+        || scheduleLinkRules(b).find(rule => scheduleRuleTargets(rule, a, b));
     if (pairRule?.mode) return pairRule.mode;
     if (!scheduleHasTargetedLinks(a) && !scheduleHasTargetedLinks(b) && a?.linkGroup && a.linkGroup === b?.linkGroup) {
         return a.linkMode || b.linkMode || 'together';
@@ -6694,8 +6734,8 @@ function scheduleLinkModeBetween(a, b) {
 }
 
 function directScheduleLinkModeBetween(a, b) {
-    const pairRule = scheduleLinkRules(a).find(rule => scheduleRuleTargets(rule, b))
-        || scheduleLinkRules(b).find(rule => scheduleRuleTargets(rule, a));
+    const pairRule = scheduleLinkRules(a).find(rule => scheduleRuleTargets(rule, b, a))
+        || scheduleLinkRules(b).find(rule => scheduleRuleTargets(rule, a, b));
     return pairRule?.mode || '';
 }
 
@@ -7167,6 +7207,7 @@ function renderMemberPrnMedicationOrders(memberId) {
                 <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${escapeHtml(schedule.id)}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                 <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${escapeHtml(schedule.id)}')">Waste</button>
                 <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>
+                ${containerOpenStatusButtonHtml(schedule, med)}
                 ${usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${escapeHtml(schedule.id)}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                 ${set
                     ? `<button onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit Regimen</button>`
@@ -7453,7 +7494,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
     };
 
     // 1. Clear all fields safely
-    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-height', 'm-current-weight', 'm-bmi', 'm-providers', 'm-diag', 'm-addr', 'm-phone', 'm-email', 'm-care-notes', 'm-meds', 'member-lab-notes', 'm-progress-note-title', 'm-care-reminder-note', 'm-care-reminder-edit-id'];
+    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-height', 'm-current-weight', 'm-bmi', 'm-addr', 'm-phone', 'm-email', 'm-care-notes', 'member-lab-title', 'member-lab-notes', 'm-progress-note-title', 'm-care-reminder-note', 'm-care-reminder-edit-id'];
     fields.forEach(f => safeSet(f, ''));
     safeSet('m-height-unit', 'in');
     safeSet('m-current-weight-unit', 'lb');
@@ -7518,13 +7559,10 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
             safeSet('m-current-weight', m.currentWeight || latestWeight?.weight || '');
             safeSet('m-current-weight-unit', m.currentWeightUnit || latestWeight?.weightUnit || 'lb');
             updateMemberBmiPreview();
-            safeSet('m-providers', m.providers);
-            safeSet('m-diag', '');
             safeSet('m-addr', m.address);
             safeSet('m-phone', m.phone);
             safeSet('m-email', m.email);
             safeSet('m-care-notes', m.careNotes);
-            safeSet('m-meds', m.prescribedMeds);
             safeSet('m-calendar-color', m.calendarColor || (m.sex === 'Female' ? '#8b1558' : '#000080'));
             const notifications = m.notificationPrefs || {};
             if (notifyEnabled) notifyEnabled.checked = notifications.medicationReminders !== false;
@@ -7582,6 +7620,15 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                     event.stopPropagation();
                     window.emailMemberSchedulePdfReport(m.id, startInput.value, endInput.value);
                 });
+                const viewLabel = document.createElement('label');
+                viewLabel.innerText = 'View:';
+                const viewSelect = document.createElement('select');
+                viewSelect.innerHTML = '<option value="timeline">Timeline cards</option><option value="grid">Date grid</option>';
+                viewSelect.value = memberScheduleViewMode();
+                viewSelect.addEventListener('change', event => {
+                    event.stopPropagation();
+                    setMemberScheduleViewMode(viewSelect.value);
+                });
                 printControls.appendChild(startLabel);
                 printControls.appendChild(startInput);
                 printControls.appendChild(endLabel);
@@ -7589,6 +7636,8 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                 printControls.appendChild(printButton);
                 printControls.appendChild(schedulePdfButton);
                 printControls.appendChild(emailSchedulePdfButton);
+                printControls.appendChild(viewLabel);
+                printControls.appendChild(viewSelect);
                 const timelineControls = document.createElement('div');
                 timelineControls.className = 'timeline-controls';
                 timelineControls.innerHTML = `
@@ -7597,6 +7646,10 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                     <button type="button" onclick="shiftMemberTimeline(7)">Next 7 Days</button>`;
                 printControls.appendChild(timelineControls);
                 activeMedsContainer.appendChild(printControls);
+                const gridView = document.createElement('div');
+                gridView.id = 'member-schedule-grid-view';
+                gridView.className = 'member-schedule-grid-shell';
+                activeMedsContainer.appendChild(gridView);
             }
             const memberOrderSets = db.orderSets.filter(set =>
                 set.memberId === id && set.status !== 'completed' && db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule))
@@ -7621,6 +7674,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                             <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${schedule.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                             <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${schedule.id}')">Waste</button>
                             <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${schedule.id}')">&#8635; Reorder</button>
+                            ${med ? containerOpenStatusButtonHtml(schedule, med) : ''}
                             ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${schedule.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         </div>
                     </div>`;
@@ -7667,6 +7721,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
                         <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${s.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                         <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${s.id}')">Waste</button>
                         <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${s.id}')">&#8635; Reorder</button>
+                        ${med ? containerOpenStatusButtonHtml(s, med) : ''}
                         ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
                     </div>
@@ -10428,6 +10483,20 @@ function prepackItemId() {
     return `prep_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+function prepackPackageCode(memberId, date, shift = 'all') {
+    const memberPart = String(memberId || 'member').replace(/[^a-z0-9]/gi, '').slice(-8).toUpperCase() || 'MEMBER';
+    const datePart = String(date || localDateKey()).replace(/[^0-9]/g, '');
+    const shiftPart = String(shift || 'all').replace(/[^a-z0-9]/gi, '').toUpperCase() || 'ALL';
+    return `PA-PREP-${memberPart}-${datePart}-${shiftPart}`;
+}
+
+function ensurePrepackDayCodes(queue) {
+    if (!queue) return;
+    (queue.days || []).forEach(day => {
+        if (!day.prepackCode) day.prepackCode = prepackPackageCode(queue.memberId, firstDateInPrepackDay(day) || day.date, queue.selection?.prepackShift || 'all');
+    });
+}
+
 function isInventoryUnitDoseQueue(queue) {
     return queue?.selection?.kind === 'inventory-unit-dose';
 }
@@ -10640,6 +10709,52 @@ function prepackItemDoseQty(queue, item) {
     return parseAmount(schedule?.doseQty ?? item?.quantity, 0);
 }
 
+function isRangePrepackItem(item) {
+    return String(item?.instanceKey || '').startsWith('range|');
+}
+
+function prepackItemRangeBounds(day, item) {
+    const parts = String(item?.instanceKey || '').split('|');
+    if (parts[0] === 'range') {
+        return {
+            start: parts[2] || firstDateInPrepackDay(day),
+            end: parts[3] || parts[2] || lastDateInPrepackDay(day)
+        };
+    }
+    return {
+        start: firstDateInPrepackDay(day),
+        end: lastDateInPrepackDay(day) || firstDateInPrepackDay(day)
+    };
+}
+
+function rangePrepackGivenQty(queue, day, item) {
+    if (!isRangePrepackItem(item) || !item?.scheduleId) return 0;
+    const schedule = prepackItemSchedule(item);
+    const med = db.inventory.find(candidate => candidate.id === item.medId);
+    const range = prepackItemRangeBounds(day, item);
+    return db.history.reduce((sum, entry) => {
+        if (entry.scheduleId !== item.scheduleId) return sum;
+        if (queue?.memberId && entry.memberId && entry.memberId !== queue.memberId) return sum;
+        if (item.medId && entry.medId && entry.medId !== item.medId) return sum;
+        if (!isGivenStatus(entry.doseStatus || 'given')) return sum;
+        const entryDate = String(entry.scheduledDate || historyEntryDateKey(entry) || '').slice(0, 10);
+        if (!entryDate || (range.start && entryDate < range.start) || (range.end && entryDate > range.end)) return sum;
+        const qty = parseAmount(entry.stockDelta, NaN);
+        if (Number.isFinite(qty) && qty > 0) return sum + qty;
+        return sum + parseAmount(schedule?.doseQty ?? item.dose ?? 0, 0);
+    }, 0);
+}
+
+function prepackItemReturnableQty(row) {
+    const { queue, day, item } = row || {};
+    if (!item) return 0;
+    const total = parseAmount(item.stockDelta, NaN);
+    const packedQty = Number.isFinite(total) && total > 0 ? total : prepackItemDoseQty(queue, item);
+    const alreadyReturned = parseAmount(item.returnedQuantity, 0);
+    const givenQty = isRangePrepackItem(item) ? rangePrepackGivenQty(queue, day, item) : 0;
+    return Math.max(0, packedQty - givenQty - alreadyReturned);
+}
+
 function prepackStockShortagesForItems(queue, items = []) {
     if (isInventoryUnitDoseQueue(queue)) return [];
     const stockLedger = new Map();
@@ -10703,7 +10818,7 @@ function applyPrepackItemStock(queue, item, method = 'scan') {
     return true;
 }
 
-function reversePrepackItemStock(queue, item, reason = 'returned') {
+function reversePrepackItemStock(queue, item, reason = 'returned', quantityOverride = null) {
     if (isInventoryUnitDoseQueue(queue)) {
         reverseInventoryUnitDoseItemStock(queue, item);
         item.inventoryReturned = true;
@@ -10712,9 +10827,15 @@ function reversePrepackItemStock(queue, item, reason = 'returned') {
     }
     if (!queue || !item?.inventoryDeducted || item.inventoryReturned === true) return;
     const med = db.inventory.find(candidate => candidate.id === item.medId);
-    const qty = parseAmount(item.stockDelta, 0);
+    const maxQty = parseAmount(item.stockDelta, 0);
+    const requestedQty = parseAmount(quantityOverride, NaN);
+    const alreadyReturned = parseAmount(item.returnedQuantity, 0);
+    const qty = Number.isFinite(requestedQty) && requestedQty > 0
+        ? Math.min(requestedQty, Math.max(0, maxQty - alreadyReturned))
+        : Math.max(0, maxQty - alreadyReturned);
     if (med && qty > 0) med.stock = parseAmount(med.stock, 0) + qty;
-    item.inventoryReturned = true;
+    item.returnedQuantity = alreadyReturned + qty;
+    item.inventoryReturned = !isRangePrepackItem(item) || item.returnedQuantity >= maxQty - 0.000001;
     item.returnReason = reason;
     item.returnedAt = new Date().toISOString();
     db.history.unshift({
@@ -10730,6 +10851,7 @@ function reversePrepackItemStock(queue, item, reason = 'returned') {
         details: `Prepacked dose returned to inventory (${reason}); +${formatAmount(qty)} ${med?.administrationUnit || (med ? inventoryUnitFor(med) : 'units')}.`
     });
     if (med) addAudit('Prepack stock returned', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | ${reason} | +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}.`);
+    return qty;
 }
 
 const returnPrepackCutoffDate = '2026-08-04';
@@ -10749,8 +10871,32 @@ function isReturnablePrepackDate(day) {
     return !!date && date > returnPrepackCutoffDate;
 }
 
+function normalizeRecordOnlyPrepackReturnFlags() {
+    let changed = false;
+    (db.prepackQueues || []).forEach(queue => {
+        if (isInventoryUnitDoseQueue(queue)) return;
+        (queue.days || []).forEach(day => {
+            (day.items || []).forEach(item => {
+                if (item.inventoryReturned && !item.inventoryDeducted && !item.inventoryWasted && !item.recordOnlyReturn) {
+                    item.inventoryReturned = false;
+                    item.returnReason = '';
+                    item.returnedAt = '';
+                    item.returnNote = '';
+                    changed = true;
+                }
+            });
+        });
+    });
+    return changed;
+}
+
+function prepackItemSchedule(item) {
+    return item?.scheduleId ? db.schedules.find(schedule => schedule.id === item.scheduleId) : null;
+}
+
 function prepackItemHasDocumentedGivenDose(queue, day, item) {
     if (!item?.scheduleId) return false;
+    if (isRangePrepackItem(item)) return false;
     const exactKey = item.instanceKey && !String(item.instanceKey).startsWith('range|')
         ? item.instanceKey
         : (day?.date && item.time && !String(day.date).includes(' - ') && !String(item.time).includes(' - ')
@@ -10759,22 +10905,15 @@ function prepackItemHasDocumentedGivenDose(queue, day, item) {
     if (exactKey) {
         if (db.history.some(entry => entry.scheduleInstanceKey === exactKey && isGivenStatus(entry.doseStatus || 'given'))) return true;
     }
-    const range = String(item.instanceKey || '').split('|');
-    if (range[0] === 'range') {
-        const start = range[2] || '';
-        const end = range[3] || start;
-        if (db.history.some(entry =>
-            entry.scheduleId === item.scheduleId &&
-            isGivenStatus(entry.doseStatus || 'given') &&
-            (!start || String(entry.scheduledDate || historyEntryDateKey(entry)) >= start) &&
-            (!end || String(entry.scheduledDate || historyEntryDateKey(entry)) <= end)
-        )) return true;
-    }
     const fallbackStart = firstDateInPrepackDay(day);
     const fallbackEnd = lastDateInPrepackDay(day) || fallbackStart;
     return db.history.some(entry => {
         if (!isGivenStatus(entry.doseStatus || 'given')) return false;
-        if (entry.scheduleId && entry.scheduleId !== item.scheduleId) return false;
+        if (item.scheduleId) {
+            if (entry.scheduleId && entry.scheduleId !== item.scheduleId) return false;
+            if (!entry.scheduleId && entry.scheduleInstanceKey && !String(entry.scheduleInstanceKey).startsWith(`${item.scheduleId}|`)) return false;
+            if (!entry.scheduleId && !entry.scheduleInstanceKey) return false;
+        }
         if (queue.memberId && entry.memberId && entry.memberId !== queue.memberId) return false;
         if (item.medId && entry.medId && entry.medId !== item.medId) return false;
         const entryDate = String(entry.scheduledDate || historyEntryDateKey(entry) || '').slice(0, 10);
@@ -10785,12 +10924,16 @@ function prepackItemHasDocumentedGivenDose(queue, day, item) {
     });
 }
 
-function markPrepackItemReturned(row, reason = 'returned', note = '') {
+function markPrepackItemReturned(row, reason = 'returned', note = '', quantityOverride = null) {
     const { queue, day, item, med } = row;
+    const requestedQty = parseAmount(quantityOverride, NaN);
     if (item.inventoryDeducted) {
-        reversePrepackItemStock(queue, item, reason);
+        const returnedQty = reversePrepackItemStock(queue, item, reason, Number.isFinite(requestedQty) && requestedQty > 0 ? requestedQty : null);
+        if (note) item.returnNote = note;
+        return returnedQty;
     } else {
         item.inventoryReturned = true;
+        item.recordOnlyReturn = true;
         item.returnReason = reason;
         item.returnedAt = new Date().toISOString();
         db.history.unshift({
@@ -10808,6 +10951,31 @@ function markPrepackItemReturned(row, reason = 'returned', note = '') {
         if (med) addAudit('Prepack item returned', med.name, `${queue.memberName || 'Prepack'} | ${day?.date || ''} ${item.time || ''} | no stock change.`);
     }
     if (note) item.returnNote = note;
+    return 0;
+}
+
+function returnPrepackUnitLabel(row, qtyReturned) {
+    const med = row.med || db.inventory.find(candidate => candidate.id === row.item?.medId);
+    if (!med) return '';
+    const qrCode = medicationCodes(med)[0] || row.item?.barcodeCode || '';
+    const qrDataUrl = medicationQrDataUrl(qrCode);
+    const unit = med.administrationUnit || inventoryUnitFor(med);
+    const returnedDate = localDateKey();
+    const qtyText = `${formatAmount(qtyReturned)} ${unit || 'unit(s)'}`;
+    const labelClass = getLabelClass([
+        med.name,
+        formatLabelMedStrength(med),
+        qtyText,
+        med.expiry || '',
+        returnedDate
+    ], 5);
+    return `<div class="${labelClass} inventory-return-label">
+        <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
+        <div class="label-small"><b>Qty returned:</b> ${escapeHtml(qtyText)}</div>
+        <div class="label-small"><b>Exp:</b> ${escapeHtml(med.expiry || 'N/A')}</div>
+        <div class="label-small"><b>Returned:</b> ${escapeHtml(returnedDate)}</div>
+        ${qrDataUrl ? `<img class="inventory-return-label-qr" src="${qrDataUrl}" alt="Inventory QR code">` : ''}
+    </div>`;
 }
 
 function markPrepackItemWasted(row, reason = 'wasted', note = '') {
@@ -11257,6 +11425,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         .sort(([first], [second]) => first.localeCompare(second))
         .map(([date, items]) => ({
             date,
+            prepackCode: prepackPackageCode(memberId, date, selection?.prepackShift || 'all'),
             status: 'pending',
             needsReprint: false,
             items: items.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.medName.localeCompare(b.medName))
@@ -11286,6 +11455,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         };
         days = [{
             date: aggregateItem.time,
+            prepackCode: prepackPackageCode(memberId, selection.startDate, selection?.prepackShift || 'all'),
             status: 'pending',
             needsReprint: false,
             items: [aggregateItem]
@@ -11375,6 +11545,7 @@ function reconcilePrepackQueue(queue) {
             }
         });
         const previousDay = previousDays.get(day.date);
+        if (previousDay?.prepackCode) day.prepackCode = previousDay.prepackCode;
         const oldFingerprints = (previousDay?.items || []).map(prepackItemFingerprint).sort().join('||');
         const newFingerprints = day.items.map(prepackItemFingerprint).sort().join('||');
         const dayChanged = oldFingerprints !== newFingerprints;
@@ -11439,6 +11610,7 @@ async function createPrepackQueue(definition, options = {}) {
         existing.scheduledFor = options.scheduledFor || existing.scheduledFor || '';
         existing.labelsPrinted = existing.labelsPrinted || options.labelsPrinted === true;
         existing.days = definition.days;
+        ensurePrepackDayCodes(existing);
         existing.currentDayIndex = 0;
         updatePrepackQueueStatus(existing);
         activePrepackQueueId = existing.id;
@@ -11461,6 +11633,7 @@ async function createPrepackQueue(definition, options = {}) {
         completedAt: '',
         days: definition.days
     };
+    ensurePrepackDayCodes(queue);
     db.prepackQueues.unshift(queue);
     activePrepackQueueId = queue.id;
     await sync();
@@ -11485,6 +11658,7 @@ async function commitPrepackPrint(definition) {
 }
 
 function updatePrepackQueueStatus(queue) {
+    ensurePrepackDayCodes(queue);
     queue.days.forEach(day => {
         day.status = isPrepackDayComplete(day)
             ? 'completed'
@@ -11669,6 +11843,7 @@ window.selectPrepackDay = function(queueId, dayIndex) {
 };
 
 function returnablePrepackItems() {
+    normalizeRecordOnlyPrepackReturnFlags();
     const rows = [];
     (db.prepackQueues || []).forEach(queue => {
         if (isInventoryUnitDoseQueue(queue)) return;
@@ -11677,11 +11852,15 @@ function returnablePrepackItems() {
             if (!isReturnablePrepackDate(day)) return;
             (day.items || []).forEach(item => {
                 if (item.inventoryReturned) return;
+                if (item.inventoryWasted) return;
                 if (item.status !== 'correct' && item.inventoryDeducted !== true) return;
                 const med = db.inventory.find(candidate => candidate.id === item.medId);
-                if (isReturnPrepackExcludedMedication(med)) return;
-                if (prepackItemHasDocumentedGivenDose(queue, day, item)) return;
-                rows.push({ queue, day, item, med });
+                const schedule = prepackItemSchedule(item);
+                if (isReturnPrepackExcludedMedication(med, schedule, item)) return;
+                const row = { queue, day, item, med, schedule };
+                if (isRangePrepackItem(item) && prepackItemReturnableQty(row) <= 0) return;
+                if (!isRangePrepackItem(item) && prepackItemHasDocumentedGivenDose(queue, day, item)) return;
+                rows.push(row);
             });
         });
     });
@@ -11725,9 +11904,14 @@ function returnPrepackGroups(rows) {
 function returnPrepackEligibleItemCount(queue, day) {
     return (day?.items || []).filter(item => {
         if (item.inventoryReturned) return false;
+        if (item.inventoryWasted) return false;
         if (item.status !== 'correct' && item.inventoryDeducted !== true) return false;
         const med = db.inventory.find(candidate => candidate.id === item.medId);
-        return !isReturnPrepackExcludedMedication(med);
+        const schedule = prepackItemSchedule(item);
+        const row = { queue, day, item, med, schedule };
+        if (isReturnPrepackExcludedMedication(med, schedule, item)) return false;
+        if (isRangePrepackItem(item)) return prepackItemReturnableQty(row) > 0;
+        return !prepackItemHasDocumentedGivenDose(queue, day, item);
     }).length;
 }
 
@@ -11797,6 +11981,36 @@ window.updateReturnPrepackPackageState = function(input) {
     group.classList.toggle('selected', checked > 0);
 };
 
+window.selectReturnPrepackByCode = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const input = body.querySelector('[name="returnPrepackCode"]');
+    const code = normalizeMedicationCode(input?.value || '');
+    if (!code) return;
+    let matched = null;
+    body.querySelectorAll('.return-prepack-group').forEach(group => {
+        if (normalizeMedicationCode(group.dataset.prepackCode || '') === code) matched = group;
+    });
+    if (!matched) {
+        const status = body.querySelector('#return-prepack-scan-status');
+        if (status) status.textContent = 'No returnable package matched that QR code.';
+        return;
+    }
+    body.querySelector('[name="returnMemberFilter"]').value = '';
+    body.querySelector('[name="returnPackageStatus"]').value = 'all';
+    filterReturnPrepackList();
+    matched.open = true;
+    matched.scrollIntoView({ block: 'center' });
+    const packageCheck = matched.querySelector('.return-prepack-package-check');
+    if (packageCheck) {
+        packageCheck.checked = true;
+        packageCheck.indeterminate = false;
+        toggleReturnPrepackPackage(packageCheck);
+    }
+    const status = body.querySelector('#return-prepack-scan-status');
+    if (status) status.textContent = 'Package selected. Review items, then process the return or waste.';
+};
+
 window.returnPrepackedDispense = async function() {
     const rows = returnablePrepackItems();
     if (rows.length === 0) {
@@ -11821,22 +12035,32 @@ window.returnPrepackedDispense = async function() {
         const groupDate = firstDateInPrepackDay(group.day);
         const childRows = group.rows.map(row => {
             const inputId = `return-prepack-${row.returnIndex}`;
+            const returnableQty = prepackItemReturnableQty(row);
+            const unit = row.med?.administrationUnit || (row.med ? inventoryUnitFor(row.med) : 'units');
             const qty = row.item.stockDelta
-                ? `${formatAmount(parseAmount(row.item.stockDelta))} ${row.med?.administrationUnit || (row.med ? inventoryUnitFor(row.med) : 'units')}`
+                ? `${formatAmount(returnableQty || parseAmount(row.item.stockDelta))} ${unit}`
                 : (row.item.quantity || 'quantity not recorded');
             const stockText = row.item.inventoryDeducted
                 ? `Inventory return: ${qty}`
-                : 'Record only: this prepack has no prior stock deduction marker, so returning it will not add inventory.';
+                : 'Prepared record only: PharmAtlas did not record an inventory deduction marker for this item, so returning it documents the package without changing stock.';
+            const rangeQtyInput = isRangePrepackItem(row.item)
+                ? `<label class="return-prepack-qty">Return qty
+                    <input name="returnQty_${row.returnIndex}" type="number" step="any" min="0" max="${escapeHtml(returnableQty)}" value="${escapeHtml(returnableQty)}">
+                    <span>${escapeHtml(unit)}</span>
+                </label>`
+                : '';
             return `<label class="return-prepack-row" for="${inputId}">
                 <span class="return-prepack-check"><input id="${inputId}" name="returnRows" type="checkbox" value="${row.returnIndex}" onchange="updateReturnPrepackPackageState(this)"></span>
                 <span class="return-prepack-main">
                     <span class="return-prepack-time">${escapeHtml(returnPrepackItemTimeLabel(row))}</span>
                     <strong>${escapeHtml(row.item.medName)} ${escapeHtml(row.item.strength || '')}</strong>
                     <span class="return-prepack-meta">${escapeHtml(stockText)}</span>
+                    ${rangeQtyInput}
                 </span>
             </label>`;
         }).join('');
-        return `<details class="return-prepack-group" data-member-id="${escapeHtml(group.queue.memberId || '')}" data-date="${escapeHtml(groupDate)}" data-package-status="${escapeHtml(groupStatus)}" data-stock-mode="${escapeHtml(stockMode)}">
+        ensurePrepackDayCodes(group.queue);
+        return `<details class="return-prepack-group" data-member-id="${escapeHtml(group.queue.memberId || '')}" data-date="${escapeHtml(groupDate)}" data-prepack-code="${escapeHtml(group.day.prepackCode || '')}" data-package-status="${escapeHtml(groupStatus)}" data-stock-mode="${escapeHtml(stockMode)}">
             <summary class="return-prepack-package">
                 <span class="return-prepack-check"><input id="${packageId}" class="return-prepack-package-check" type="checkbox" onclick="event.stopPropagation()" onchange="toggleReturnPrepackPackage(this)"></span>
                 <span class="return-prepack-main">
@@ -11853,6 +12077,10 @@ window.returnPrepackedDispense = async function() {
         <div data-action-modal-size="wide" class="return-prepack-modal">
             <div class="form-help" style="margin-bottom:8px;">Use this when a prepacked dose was missed, refused, held, broken, lost, or otherwise not used. Return adds eligible quantities back to inventory. Waste documents the loss and does not change inventory.</div>
             <div class="return-prepack-filter-panel">
+                <label>Scan package QR
+                    <input name="returnPrepackCode" type="text" placeholder="PA-PREP..." onkeydown="if(event.key==='Enter'){event.preventDefault();selectReturnPrepackByCode()}" style="width:150px;">
+                </label>
+                <button type="button" onclick="selectReturnPrepackByCode()">Select Package</button>
                 <label>Member
                     <select name="returnMemberFilter" onchange="filterReturnPrepackList()">
                         <option value="">All members</option>
@@ -11892,8 +12120,13 @@ window.returnPrepackedDispense = async function() {
                         <option value="waste">Waste / do not return</option>
                     </select>
                 </label>
+                <label class="return-label-option">
+                    <input name="previewReturnLabels" type="checkbox" value="yes" checked>
+                    Preview return label
+                </label>
                 <span id="return-prepack-filter-count">${groups.length} package${groups.length === 1 ? '' : 's'} shown</span>
             </div>
+            <div id="return-prepack-scan-status" class="form-help" style="margin-top:4px;">Scan a package QR to open/select that day. Nothing is returned until you click Process Selected.</div>
             <div class="field-row-stacked" style="margin-top:8px;">
                 <label>Note:</label><textarea name="note" rows="2" style="width:100%; resize:none;" placeholder="Optional return note"></textarea>
             </div>
@@ -11906,14 +12139,35 @@ window.returnPrepackedDispense = async function() {
         await appAlert('Select at least one prepacked dose to return.');
         return;
     }
-    selected.forEach(value => {
+    const labelRows = [];
+    for (const value of selected) {
         const row = rows[parseInt(value, 10)];
-        if (!row) return;
-        if (result.handling === 'waste') markPrepackItemWasted(row, result.reason || 'wasted', result.note || '');
-        else markPrepackItemReturned(row, result.reason || 'returned', result.note || '');
-    });
+        if (!row) continue;
+        const qtyOverride = result[`returnQty_${row.returnIndex}`];
+        if (isRangePrepackItem(row.item)) {
+            const qty = parseAmount(qtyOverride, NaN);
+            const max = prepackItemReturnableQty(row);
+            if (!Number.isFinite(qty) || qty <= 0 || qty > max + 0.000001) {
+                await appAlert(`Enter a return quantity between 0 and ${formatAmount(max)} for ${row.item.medName}.`);
+                return;
+            }
+        }
+        if (result.handling === 'waste') {
+            markPrepackItemWasted(row, result.reason || 'wasted', result.note || '');
+        } else {
+            const returnedQty = markPrepackItemReturned(row, result.reason || 'returned', result.note || '', qtyOverride);
+            const labelQty = returnedQty || parseAmount(qtyOverride, 0) || prepackItemReturnableQty(row);
+            if (labelQty > 0) labelRows.push({ row, qty: labelQty });
+        }
+    }
     await sync();
     await appAlert(`${selected.length} prepacked dose${selected.length === 1 ? '' : 's'} ${result.handling === 'waste' ? 'marked wasted' : 'returned to inventory'}.`, result.handling === 'waste' ? 'Prepack Waste Complete' : 'Prepack Return Complete');
+    const wantsLabels = Array.isArray(result.previewReturnLabels)
+        ? result.previewReturnLabels.includes('yes')
+        : result.previewReturnLabels === 'yes';
+    if (result.handling !== 'waste' && wantsLabels && labelRows.length) {
+        previewLabelHtml(labelRows.map(entry => returnPrepackUnitLabel(entry.row, entry.qty)).join(''));
+    }
 };
 
 window.wasteScheduledMedicationDose = async function(scheduleId) {
@@ -11992,11 +12246,24 @@ window.scanPrepackCode = async function(queueId) {
     const queue = db.prepackQueues.find(item => item.id === queueId);
     const input = document.getElementById('prepack-scan-input');
     if (!queue || !input) return;
+    ensurePrepackDayCodes(queue);
+    const scannedCode = normalizeMedicationCode(input.value);
+    if (!scannedCode) return;
+    const packageMatch = (db.prepackQueues || []).find(candidate =>
+        !isInventoryUnitDoseQueue(candidate) &&
+        (candidate.days || []).some(day => normalizeMedicationCode(day.prepackCode) === scannedCode)
+    );
+    if (packageMatch) {
+        ensurePrepackDayCodes(packageMatch);
+        activePrepackQueueId = packageMatch.id;
+        packageMatch.currentDayIndex = Math.max(0, packageMatch.days.findIndex(day => normalizeMedicationCode(day.prepackCode) === scannedCode));
+        input.value = '';
+        renderPrepackageQueues();
+        return;
+    }
     const day = queue.days[queue.currentDayIndex || 0];
     const item = day?.items.find(candidate => candidate.status !== 'correct');
     if (!day || !item) return;
-    const scannedCode = normalizeMedicationCode(input.value);
-    if (!scannedCode) return;
     const med = db.inventory.find(candidate => candidate.id === item.medId);
     const expectedCodes = med ? medicationCodes(med) : [normalizeMedicationCode(item.barcodeCode)].filter(Boolean);
     item.scannedCode = scannedCode;
@@ -12515,6 +12782,8 @@ window.addLastMinutePrepackItem = async function(queueId) {
 };
 
 function prepackDayLabelHtml(queue, day) {
+    ensurePrepackDayCodes(queue);
+    const qrDataUrl = medicationQrDataUrl(day.prepackCode);
     const labelClass = getLabelClass(
         day.items.map(item => `${item.time} ${item.medName} ${item.dose || item.strength} ${item.quantity}`),
         day.items.length + 1
@@ -12522,8 +12791,8 @@ function prepackDayLabelHtml(queue, day) {
     const rows = day.items.length
         ? day.items.map(item => `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(item.medName)} ${escapeHtml(item.dose || item.strength || '')} (${escapeHtml(item.quantity)})</div>`).join('')
         : '<div class="label-med-row">No medications in this prepack</div>';
-    return `<div class="${labelClass}">
-        <div class="label-date label-date-with-icon">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}${labelShiftIconHtml(queue.selection?.prepackShift)}</div>
+    return `<div class="${labelClass} prepack-day-label">
+        <div class="label-date label-date-with-icon">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}${labelShiftIconHtml(queue.selection?.prepackShift)}${qrDataUrl ? `<img class="prepack-label-qr" src="${qrDataUrl}" alt="Prepack QR code">` : ''}</div>
         ${rows}
     </div>`;
 }
@@ -13520,9 +13789,107 @@ function memberMedicationTimelineHtml(schedule) {
                 }).join('')
                 : '<span class="timeline-dose" title="No scheduled dose">-</span>';
         }
-        days.push(`<div class="timeline-day"><span class="timeline-date">${date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}</span>${doses}</div>`);
+        const todayClass = dateKey === localDateKey() ? ' timeline-today' : '';
+        days.push(`<div class="timeline-day${todayClass}"><span class="timeline-date">${date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}</span>${doses}</div>`);
     }
     return `<div class="med-timeline" aria-label="Medication administration timeline">${days.join('')}</div>`;
+}
+
+function memberScheduleViewMode() {
+    return db.settings?.memberScheduleViewMode === 'grid' ? 'grid' : 'timeline';
+}
+
+function memberScheduleGridRows(memberId) {
+    return db.schedules
+        .filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule))
+        .sort((a, b) => {
+            const aTime = getScheduleTimes(a)[0] || (a.freq === 'PRN' ? '99:99' : '');
+            const bTime = getScheduleTimes(b)[0] || (b.freq === 'PRN' ? '99:99' : '');
+            const byTime = timeToMinutes(aTime) - timeToMinutes(bTime);
+            if (byTime) return byTime;
+            const aMed = db.inventory.find(item => item.id === a.medId);
+            const bMed = db.inventory.find(item => item.id === b.medId);
+            return String(aMed?.name || '').localeCompare(String(bMed?.name || ''), undefined, { sensitivity: 'base' });
+        });
+}
+
+function memberScheduleGridHtml(memberId) {
+    const schedules = memberScheduleGridRows(memberId);
+    if (!schedules.length) return '';
+    const range = getTimelineRange();
+    const start = parseLocal(range.start);
+    const dayKeys = [];
+    for (let i = 0; i < 7; i++) {
+        const date = new Date(start);
+        date.setDate(date.getDate() + i);
+        dayKeys.push(localDateKey(date));
+    }
+    const headerCells = dayKeys.map(dateKey => {
+        const date = parseLocal(dateKey);
+        const todayClass = dateKey === localDateKey() ? ' member-grid-today' : '';
+        return `<th class="${todayClass}">${date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}</th>`;
+    }).join('');
+    const rows = schedules.map(schedule => {
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        const medName = med ? `${med.name} ${formatMedStrength(med)}` : 'Unknown medication';
+        const instructions = schedule.instructions ? `<details class="member-grid-instructions" onclick="event.stopPropagation()">
+            <summary><span class="member-grid-caret" aria-hidden="true"></span>Admin Instructions</summary>
+            <div class="member-grid-instruction-text">${escapeHtml(schedule.instructions)}</div>
+        </details>` : '';
+        const doseLine = med ? `${escapeHtml(formatPrescribedDose(med, schedule.doseQty))} (${escapeHtml(formatQtyForSchedule(schedule, med))})` : escapeHtml(schedule.doseQty || '');
+        const cells = dayKeys.map(dateKey => {
+            if (schedule.freq === 'PRN' && !hasScheduledPrnReminders(schedule)) {
+                const entries = prnTimelineEntries(schedule, dateKey);
+                const content = entries.length
+                    ? entries.map(entry => {
+                        const time = historyEntryDateTime(entry).time;
+                        const cls = isGivenStatus(entry.doseStatus || 'given') ? 'timeline-given' : 'timeline-not-given';
+                        return `<button type="button" class="timeline-dose ${cls}" onclick="event.stopPropagation(); editAdministration('${entry.id}')">${escapeHtml(time)}</button>`;
+                    }).join('')
+                    : (isPrnActiveOnDate(schedule, dateKey) ? '<span class="member-grid-prn">PRN</span>' : '');
+                return `<td>${content}</td>`;
+            }
+            const instances = getScheduleInstancesForDate(schedule, dateKey);
+            const content = instances.length
+                ? instances.map(instance => {
+                    const state = timelineDoseState(schedule, instance);
+                    const click = state.entryId
+                        ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"`
+                        : ` onclick="event.stopPropagation(); documentScheduleInstance('${schedule.id}','${instance.date}','${instance.time}')"`;
+                    return `<button type="button" class="timeline-dose ${state.className}" title="${escapeHtml(state.title)}"${click}>${escapeHtml(state.label || instance.time)}</button>`;
+                }).join('')
+                : '';
+            return `<td>${content}</td>`;
+        }).join('');
+        return `<tr>
+            <td class="member-grid-med-cell">
+                <strong>${holdIndicatorHtml(schedule)}${escapeHtml(medName)}</strong>
+                <div>Dose: ${doseLine}</div>
+                <div>Freq: ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || (schedule.freq === 'PRN' ? 'PRN' : ''))}</div>
+                <div>Start: ${escapeHtml(schedule.startDate || '')}${schedule.endDate && schedule.endDate !== 'Ongoing' ? ` End: ${escapeHtml(schedule.endDate)}` : ''}</div>
+                ${instructions}
+                <div class="member-grid-actions">
+                    <button type="button" onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Label</button>
+                    <button type="button" onclick="event.stopPropagation(); administerDose('${schedule.medId}','${schedule.id}')">Administer</button>
+                    <button type="button" onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Edit</button>
+                </div>
+            </td>
+            ${cells}
+        </tr>`;
+    }).join('');
+    return `<div class="member-schedule-grid-note">Date-grid view is for quick review/documentation. Use timeline cards below for full regimen controls, audit, hold, waste, and discontinue actions.</div>
+        <table class="member-schedule-grid">
+            <thead><tr><th>Medications</th>${headerCells}</tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+}
+
+function renderMemberScheduleGrid(memberId = currentEditingMemberId) {
+    const container = document.getElementById('member-schedule-grid-view');
+    if (!container) return;
+    const showGrid = memberScheduleViewMode() === 'grid';
+    container.style.display = showGrid ? '' : 'none';
+    container.innerHTML = showGrid && memberId ? memberScheduleGridHtml(memberId) : '';
 }
 
 function renderMemberMedicationTimelines() {
@@ -13535,6 +13902,7 @@ function renderMemberMedicationTimelines() {
         const schedule = db.schedules.find(item => item.id === container.dataset.scheduleId);
         if (schedule) container.innerHTML = memberMedicationTimelineHtml(schedule);
     });
+    renderMemberScheduleGrid();
 }
 
 window.shiftMemberTimeline = function(days) {
@@ -13543,6 +13911,13 @@ window.shiftMemberTimeline = function(days) {
     start.setDate(start.getDate() + days);
     memberTimelineStart = localDateKey(start);
     renderMemberMedicationTimelines();
+};
+
+window.setMemberScheduleViewMode = async function(mode) {
+    db.settings = db.settings || {};
+    db.settings.memberScheduleViewMode = mode === 'grid' ? 'grid' : 'timeline';
+    renderMemberScheduleGrid();
+    await saveData();
 };
 
 function renderVitalDashboard() {
@@ -13745,10 +14120,12 @@ function renderDashboardRightPanel(rows = todayDoseRows(), counts = null) {
 }
 
 function dataHealthIssues() {
+    normalizeRecordOnlyPrepackReturnFlags();
     const issues = [];
     const inventoryIds = new Set(db.inventory.map(item => item.id));
     const memberIds = new Set(db.family.map(item => item.id));
     const barcodeMap = new Map();
+    const linkedTimingPairs = new Set();
 
     db.schedules.forEach(schedule => {
         const scheduleMed = db.inventory.find(item => item.id === schedule.medId);
@@ -13763,7 +14140,10 @@ function dataHealthIssues() {
         db.schedules
             .filter(item => item.memberId === schedule.memberId && item.id !== schedule.id && !isScheduleArchived(item))
             .forEach(linked => {
+            const pairKey = [schedule.id, linked.id].sort().join('|');
+            if (linkedTimingPairs.has(pairKey)) return;
             if (directScheduleLinkModeBetween(schedule, linked) === 'together' && !schedulesHaveAlignedTiming(schedule, linked)) {
+                linkedTimingPairs.add(pairKey);
                 const med = db.inventory.find(item => item.id === schedule.medId);
                 const linkedMed = db.inventory.find(item => item.id === linked.medId);
                 issues.push({ severity: 'medium', repairable: false, type: 'linked-mismatch', message: `Linked meds do not align: ${med?.name || schedule.id} and ${linkedMed?.name || linked.id}.` });
@@ -13792,7 +14172,7 @@ function dataHealthIssues() {
             (day.items || []).forEach(item => {
                 if (item.medId && !inventoryIds.has(item.medId)) issues.push({ severity: 'medium', repairable: false, type: 'orphan-prepack-med', message: `Prepack ${queue.title || queue.sourceLabel || queue.id} includes a medication no longer in inventory.` });
                 if (item.scheduleId && !db.schedules.some(schedule => schedule.id === item.scheduleId) && queue.status !== 'completed') issues.push({ severity: 'low', repairable: false, type: 'orphan-prepack-schedule', message: `Active prepack ${queue.title || queue.sourceLabel || queue.id} references a medication schedule that is no longer active.` });
-                if (item.inventoryReturned && !item.inventoryDeducted) issues.push({ severity: 'low', repairable: false, type: 'prepack-return-without-deduction', message: `Prepack item ${item.medName || item.id} is marked returned but was not marked deducted.` });
+                if (item.inventoryReturned && !item.inventoryDeducted && !item.inventoryWasted && !item.recordOnlyReturn) issues.push({ severity: 'low', repairable: true, type: 'prepack-return-without-deduction', prepackQueueId: queue.id, prepackItemId: item.id, message: `Prepack item ${item.medName || item.id} is marked returned but was not marked deducted.` });
             });
         });
     });
@@ -16251,6 +16631,39 @@ window.finishTopicalContainer = async function(scheduleId) {
     if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
         await openMemberModal(schedule.memberId, 'orders');
     }
+};
+
+window.setScheduleContainerOpenState = async function(scheduleId) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+    if (!schedule || !med || !requiresExplicitUnopenedForPrepackReturn(med)) return;
+    const current = schedule.containerOpened;
+    const result = await showActionModal(`Container Status: ${med.name}`, `
+        <div class="form-help" style="margin-bottom:8px;">
+            Use this for whole-container items such as creams, nasal sprays, eye/ear drops, inhalers, tubes, jars, bottles, and similar products.
+            Unopened prepacked containers can be returned to stock if held, skipped, refused, or missed. Opened containers stay out of return inventory.
+        </div>
+        <div class="container-state-choices">
+            <label class="container-state-choice unopened">
+                <input type="radio" name="containerOpened" value="no" ${current === false ? 'checked' : ''}>
+                <strong>Unopened</strong>
+                <span>Eligible for prepack return if the dose was not used.</span>
+            </label>
+            <label class="container-state-choice opened">
+                <input type="radio" name="containerOpened" value="yes" ${current === true ? 'checked' : ''}>
+                <strong>Opened</strong>
+                <span>Not returnable to inventory; use Waste if it was prepared and cannot be used.</span>
+            </label>
+        </div>
+    `, 'Save Status');
+    if (!result) return;
+    schedule.containerOpened = result.containerOpened === 'yes';
+    addAudit('Container status updated', med.name, `${memberDisplayName(db.family.find(member => member.id === schedule.memberId))} | ${schedule.containerOpened ? 'opened' : 'unopened'}`, {
+        scheduleId: schedule.id,
+        medId: med.id,
+        memberId: schedule.memberId
+    });
+    await sync();
 };
 
 window.administerOrderSet = async function(orderSetId) {
@@ -19891,12 +20304,14 @@ window.printDateRangeLabels = async function(memberId, startDate, endDate) {
                 <b>${escapeHtml(row.instance.time)}</b>: ${escapeHtml(formatMultiMedLabelName(row.schedule, row.med))} (${escapeHtml(formatQtyForSchedule(row.schedule, row.med))})</div>`;
             }).join('')
             : '<div class="label-med-row">No included medications scheduled</div>';
+        const prepackCode = prepackPackageCode(memberId, yyyymmdd, prepackShift || 'all');
+        const prepackQr = medicationQrDataUrl(prepackCode);
 
-        labelsHtml += `
-            <div class="${labelClass}">
-                <div class="label-date label-date-with-icon">${cursor.toLocaleDateString()} - ${mem.firstName}${labelShiftIconHtml(prepackShift)}</div>
-                ${medRowsHtml}
-            </div>`;
+            labelsHtml += `
+                <div class="${labelClass} prepack-day-label">
+                    <div class="label-date label-date-with-icon">${cursor.toLocaleDateString()} - ${mem.firstName}${labelShiftIconHtml(prepackShift)}${prepackQr ? `<img class="prepack-label-qr" src="${prepackQr}" alt="Prepack QR code">` : ''}</div>
+                    ${medRowsHtml}
+                </div>`;
         cursor.setDate(cursor.getDate() + 1);
     }
 
