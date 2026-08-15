@@ -2202,6 +2202,7 @@ function scheduleReminderTemplate(schedule, type, source = {}) {
         sourceType: source.sourceType || '',
         sourceId: source.sourceId || '',
         sourceLabel: source.sourceLabel || '',
+        sourceRefs: source.sourceType && source.sourceId ? [{ type: source.sourceType, id: source.sourceId, label: source.sourceLabel || '' }] : [],
         holdRule: source.holdRule || null
     };
 }
@@ -2239,10 +2240,80 @@ function rebaseMonitoringReminderSchedule(config, sourceStart, targetStart, targ
     return rebased;
 }
 
+function careReminderHasSource(reminder, sourceType, sourceId) {
+    if (!sourceType || !sourceId || !reminder) return false;
+    if (reminder.sourceType === sourceType && reminder.sourceId === sourceId) return true;
+    return Array.isArray(reminder.sourceRefs) && reminder.sourceRefs.some(ref => ref?.type === sourceType && ref?.id === sourceId);
+}
+
+function careReminderMergeKey(reminder) {
+    return [
+        reminder.memberId || '',
+        reminder.type || '',
+        reminder.startDate || '',
+        reminder.endDate || '',
+        scheduleTimingFrequency(reminder) || reminder.freq || '',
+        getScheduleTimes(reminder).join(','),
+        reminder.intervalHours || '',
+        reminder.intervalWeeks || '',
+        reminder.monthlyAnchor || '',
+        reminder.timesPerWeek || '',
+        Array.isArray(reminder.weekdays) ? reminder.weekdays.join(',') : '',
+        reminder.qodStart || '',
+        JSON.stringify(normalizeHoldRules(reminder.holdRule || null, reminder.memberId || ''))
+    ].join('|');
+}
+
+function normalizeCareReminderSources(reminders = []) {
+    const merged = new Map();
+    reminders.forEach(reminder => {
+        if (!reminder) return;
+        const refs = Array.isArray(reminder.sourceRefs) && reminder.sourceRefs.length
+            ? reminder.sourceRefs
+            : (reminder.sourceType && reminder.sourceId ? [{ type: reminder.sourceType, id: reminder.sourceId, label: reminder.sourceLabel || '' }] : []);
+        const shouldMerge = ['schedule', 'orderSet'].includes(reminder.sourceType) || refs.some(ref => ['schedule', 'orderSet'].includes(ref.type));
+        if (!shouldMerge) {
+            merged.set(reminder.id || `care_${Date.now()}_${Math.random()}`, { ...reminder, sourceRefs: refs });
+            return;
+        }
+        const key = careReminderMergeKey(reminder);
+        const existing = merged.get(key);
+        if (!existing) {
+            merged.set(key, { ...reminder, sourceRefs: [...refs] });
+            return;
+        }
+        const sourceRefs = [...(existing.sourceRefs || [])];
+        refs.forEach(ref => {
+            if (ref?.type && ref?.id && !sourceRefs.some(item => item.type === ref.type && item.id === ref.id)) sourceRefs.push(ref);
+        });
+        const labels = sourceRefs.map(ref => ref.label).filter(Boolean);
+        existing.sourceRefs = sourceRefs;
+        existing.sourceLabel = labels.length ? Array.from(new Set(labels)).join(', ') : existing.sourceLabel;
+        existing.sourceType = sourceRefs.length > 1 ? 'multiple' : existing.sourceType;
+        existing.sourceId = sourceRefs.length > 1 ? sourceRefs.map(ref => ref.id).join(',') : existing.sourceId;
+        existing.title = `${careReminderTypeLabel(existing.type, existing.memberId)} with ${existing.sourceLabel || 'linked medications'}`;
+    });
+    return [...merged.values()];
+}
+
 function replaceCareRemindersForSource(sourceType, sourceId, reminders = []) {
     ensureCareReminderStore();
-    db.careReminders = db.careReminders.filter(reminder => reminder.sourceType !== sourceType || reminder.sourceId !== sourceId);
+    db.careReminders = db.careReminders
+        .map(reminder => {
+            if (!careReminderHasSource(reminder, sourceType, sourceId)) return reminder;
+            const refs = Array.isArray(reminder.sourceRefs) ? reminder.sourceRefs.filter(ref => !(ref?.type === sourceType && ref?.id === sourceId)) : [];
+            if (refs.length === 0) return null;
+            return {
+                ...reminder,
+                sourceRefs: refs,
+                sourceType: refs.length > 1 ? 'multiple' : refs[0].type,
+                sourceId: refs.length > 1 ? refs.map(ref => ref.id).join(',') : refs[0].id,
+                sourceLabel: Array.from(new Set(refs.map(ref => ref.label).filter(Boolean))).join(', ')
+            };
+        })
+        .filter(Boolean);
     db.careReminders.push(...reminders);
+    db.careReminders = normalizeCareReminderSources(db.careReminders);
 }
 
 function createCareRemindersForSchedule(schedule) {
@@ -2456,6 +2527,8 @@ function careReminderNextInstances(reminder, days = 14, fromDate = new Date()) {
 }
 
 function careReminderSourceText(reminder) {
+    const refs = Array.isArray(reminder.sourceRefs) ? reminder.sourceRefs.filter(ref => ref?.label) : [];
+    if (refs.length > 1) return `Linked medications: ${Array.from(new Set(refs.map(ref => ref.label))).join(', ')}`;
     if (reminder.sourceType === 'schedule') return `Medication: ${reminder.sourceLabel || 'scheduled medication'}`;
     if (reminder.sourceType === 'orderSet') return `Regimen: ${reminder.sourceLabel || 'assigned regimen'}`;
     return reminder.sourceLabel || 'Member profile';
@@ -4484,8 +4557,7 @@ window.switchMemberProfileTab = function(tab = 'main') {
     });
     const rail = document.getElementById('member-profile-right-panel');
     if (rail) {
-        const fullWidthTabs = new Set(['orders', 'diary']);
-        rail.style.display = fullWidthTabs.has(tab) ? 'none' : '';
+        rail.style.display = tab === 'main' ? '' : 'none';
     }
     renderMemberContextRail(currentEditingMemberId);
 };
@@ -4534,7 +4606,11 @@ function renderMemberContextRail(memberId = currentEditingMemberId) {
     const rail = document.getElementById('member-profile-right-panel');
     if (!rail) return;
     const activeTab = document.querySelector('.member-profile-tab.active')?.dataset.memberProfileTab || 'main';
-    if (new Set(['orders', 'diary']).has(activeTab)) return;
+    if (activeTab !== 'main') {
+        rail.innerHTML = '';
+        rail.style.display = 'none';
+        return;
+    }
     const member = db.family.find(item => item.id === memberId);
     if (!member) {
         rail.innerHTML = `
@@ -5037,6 +5113,8 @@ function resetProgressNoteEditor() {
         const input = document.getElementById(`m-progress-note-${suffix}`);
         if (input) input.value = '';
     });
+    const disableRatings = document.getElementById('m-progress-note-disable-ratings');
+    if (disableRatings) disableRatings.checked = false;
     toggleProgressNoteScales(false);
     const fileInput = document.getElementById('m-progress-note-attachment');
     if (fileInput) fileInput.value = '';
@@ -5131,12 +5209,25 @@ window.updateProgressNoteFlagVisuals = function() {
 };
 
 window.toggleProgressNoteScales = function(forceOpen = null) {
+    if (document.getElementById('m-progress-note-disable-ratings')?.checked) forceOpen = false;
     const panel = document.getElementById('m-progress-note-scales-panel');
     const button = document.querySelector('.profile-diary-scale-toggle-row button');
     if (!panel) return;
     const open = forceOpen === null ? panel.style.display === 'none' : !!forceOpen;
     panel.style.display = open ? '' : 'none';
     if (button) button.textContent = open ? 'Hide ratings' : 'Add ratings';
+};
+
+window.toggleProgressNoteRatingsDisabled = function(disabled) {
+    if (disabled) {
+        ['pain', 'mood', 'sleep', 'nausea', 'energy'].forEach(suffix => {
+            const input = document.getElementById(`m-progress-note-${suffix}`);
+            if (input) input.value = '';
+        });
+        toggleProgressNoteScales(false);
+    }
+    const button = document.querySelector('.profile-diary-scale-toggle-row button');
+    if (button) button.disabled = !!disabled;
 };
 
 function progressNoteFlagBadgesHtml(note = {}) {
@@ -5158,6 +5249,7 @@ function progressNoteScaleValue(value, min, max) {
 }
 
 function collectProgressNoteScales() {
+    if (document.getElementById('m-progress-note-disable-ratings')?.checked) return {};
     return {
         pain: progressNoteScaleValue(document.getElementById('m-progress-note-pain')?.value, 0, 10),
         mood: progressNoteScaleValue(document.getElementById('m-progress-note-mood')?.value, 1, 5),
@@ -5863,7 +5955,13 @@ window.editMemberProgressNote = function(noteId) {
             if (input) input.value = '';
         }
     });
-    toggleProgressNoteScales(Object.values(note.scales || {}).some(value => value !== '' && value !== undefined && value !== null));
+    const hasScales = Object.values(note.scales || {}).some(value => value !== '' && value !== undefined && value !== null);
+    const disableRatings = document.getElementById('m-progress-note-disable-ratings');
+    if (disableRatings) {
+        disableRatings.checked = !hasScales;
+        toggleProgressNoteRatingsDisabled(disableRatings.checked);
+    }
+    toggleProgressNoteScales(hasScales);
     pendingProgressNoteAttachments = Array.isArray(note.attachments) ? note.attachments.slice() : [];
     renderProgressNoteAttachmentList();
     if (editor) {
@@ -6595,6 +6693,12 @@ function scheduleLinkModeBetween(a, b) {
     return '';
 }
 
+function directScheduleLinkModeBetween(a, b) {
+    const pairRule = scheduleLinkRules(a).find(rule => scheduleRuleTargets(rule, b))
+        || scheduleLinkRules(b).find(rule => scheduleRuleTargets(rule, a));
+    return pairRule?.mode || '';
+}
+
 function schedulesLinkedByMode(a, b, mode) {
     const pairMode = scheduleLinkModeBetween(a, b);
     return pairMode === mode;
@@ -6913,8 +7017,74 @@ window.adminOrderSetToggleLinked = function(input) {
     normalizeAdminOrderSetSelection(inputs, current, input.checked);
 };
 
+const defaultTabOrder = ['dashboard', 'schedules', 'prepackage', 'order-sets', 'vitals', 'inventory', 'recipes', 'family', 'drug-info', 'help'];
+
+function currentTabOrder() {
+    const saved = Array.isArray(db.settings?.tabOrder) ? db.settings.tabOrder : [];
+    const valid = saved.filter(tab => defaultTabOrder.includes(tab));
+    return [...valid, ...defaultTabOrder.filter(tab => !valid.includes(tab))];
+}
+
+function applyCustomTabOrder() {
+    const tabList = document.querySelector('.tab-list');
+    if (!tabList) return;
+    currentTabOrder().forEach(tab => {
+        const element = document.getElementById(`tab-${tab}`);
+        if (element) {
+            element.draggable = true;
+            element.dataset.tabName = tab;
+            tabList.appendChild(element);
+        }
+    });
+}
+
+window.handleTabDragStart = function(event) {
+    const tab = event.target?.closest('li[data-tab-name]');
+    if (!tab) return;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', tab.dataset.tabName || '');
+};
+
+window.handleTabDragOver = function(event) {
+    if (!event.target?.closest('li[data-tab-name]')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+};
+
+window.handleTabDrop = async function(event) {
+    const target = event.target?.closest('li[data-tab-name]');
+    const dragged = event.dataTransfer?.getData('text/plain');
+    if (!target || !dragged || target.dataset.tabName === dragged) return;
+    event.preventDefault();
+    const order = currentTabOrder().filter(tab => tab !== dragged);
+    const targetIndex = order.indexOf(target.dataset.tabName);
+    order.splice(targetIndex < 0 ? order.length : targetIndex, 0, dragged);
+    db.settings = db.settings || {};
+    db.settings.tabOrder = order;
+    applyCustomTabOrder();
+    await sync();
+};
+
+window.toggleDashboardCommandPanel = async function() {
+    db.settings = db.settings || {};
+    db.settings.dashboardCommandCollapsed = !db.settings.dashboardCommandCollapsed;
+    applyDashboardCommandPanelState();
+    await sync();
+};
+
+function applyDashboardCommandPanelState() {
+    const workspace = document.querySelector('#panel-dashboard .dashboard-workspace');
+    const button = document.getElementById('dashboard-command-toggle');
+    const collapsed = !!db.settings?.dashboardCommandCollapsed;
+    if (workspace) workspace.classList.toggle('command-panel-collapsed', collapsed);
+    if (button) {
+        button.textContent = collapsed ? '◀ Open' : '▶ Hide';
+        button.title = collapsed ? 'Show Daily Command Panel' : 'Hide Daily Command Panel';
+    }
+}
+
 window.switchTab = function(tabName) {
-    const tabs = ['dashboard', 'schedules', 'prepackage', 'order-sets', 'vitals', 'inventory', 'recipes', 'family', 'drug-info', 'help'];
+    const tabs = defaultTabOrder;
     tabs.forEach(t => {
         const tabElement = document.getElementById(`tab-${t}`);
         const panelElement = document.getElementById(`panel-${t}`);
@@ -6926,6 +7096,8 @@ window.switchTab = function(tabName) {
             if (panelElement) panelElement.style.display = 'none';
         }
     });
+    applyCustomTabOrder();
+    applyDashboardCommandPanelState();
 };
 
 async function sync() {
@@ -8852,7 +9024,8 @@ function regimenDurationDaysBetween(startDate, endDate) {
 }
 
 function regimenCycleMode(item = {}) {
-    return item.cycleMode === 'dates' || item.cycleStartDate || item.cycleEndDate ? 'dates' : 'days';
+    const safeItem = item || {};
+    return safeItem.cycleMode === 'dates' || safeItem.cycleStartDate || safeItem.cycleEndDate ? 'dates' : 'days';
 }
 
 function orderSetItemDateWindow(item, regimenStart, regimenEnd) {
@@ -8907,6 +9080,7 @@ function orderSetRowPreviewItem(row, index) {
     const header = orderSetBuilderTitle();
     const cycleStartDay = normalizeRegimenCycleStartDay(row.querySelector('.os-cycle-start')?.value || 1);
     const cycleDurationDays = normalizeRegimenCycleDuration(row.querySelector('.os-cycle-duration')?.value || '');
+    const cycleMode = row.querySelector('.os-cycle-mode')?.value || 'days';
     const proxy = {
         freq,
         prnScheduleFreq,
@@ -8918,8 +9092,11 @@ function orderSetRowPreviewItem(row, index) {
         qodStart: row.querySelector('.os-qod-start')?.value || '',
         monthlyAnchor: row.querySelector('.os-anchor-date')?.value || '',
         anchorDate: row.querySelector('.os-anchor-date')?.value || '',
+        cycleMode,
         cycleStartDay,
-        cycleDurationDays
+        cycleDurationDays,
+        cycleStartDate: cycleMode === 'dates' ? (row.querySelector('.os-cycle-start-date')?.value || '') : '',
+        cycleEndDate: cycleMode === 'dates' ? (row.querySelector('.os-cycle-end-date')?.value || '') : ''
     };
     const linkMode = row.querySelector('.os-link-mode')?.value || '';
     const linkTargets = selectedOptionValues(row.querySelector('.os-link-target'))
@@ -10179,7 +10356,7 @@ function renderOrderSets() {
     if (startInput && !startInput.value) startInput.value = localDateKey();
 
     const medList = document.getElementById('order-set-med-list');
-    if (medList && medList.children.length === 0 && db.inventory.length > 0) {
+    if (medList && medList.children.length === 0) {
         addOrderSetMedicationRow();
     }
     renderOrderSetMedicationPreview();
@@ -12804,6 +12981,7 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         });
     }
 
+    const hoverPoints = [];
     pointsBySeries.forEach(item => {
         ctx.strokeStyle = item.color;
         ctx.fillStyle = item.color;
@@ -12820,6 +12998,13 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         item.values.forEach(point => {
             const x = xFor(point.index);
             const y = yFor(point.value);
+            const reading = readings[point.index] || {};
+            hoverPoints.push({
+                x,
+                y,
+                label: `${item.label}: ${formatAmount(point.value)} ${options.unit || ''}`.trim(),
+                when: `${reading.date || ''} ${reading.time || ''}`.trim()
+            });
             ctx.fillStyle = isChartPointOutOfRange(options.type, item.key, point.value, options.member, options) ? '#ff0000' : item.color;
             ctx.beginPath();
             ctx.arc(x, y, 3, 0, Math.PI * 2);
@@ -12852,6 +13037,23 @@ function drawVitalChart(canvas, readings, series, options = {}) {
         ctx.fillText(readings[0].date.slice(5), leftPad, height - 4);
         ctx.fillText(readings[readings.length - 1].date.slice(5), Math.max(leftPad, width - 42), height - 4);
     }
+    canvas._pharmAtlasVitalPoints = hoverPoints;
+}
+
+function attachVitalChartHover(canvas) {
+    if (!canvas || canvas.dataset.hoverReady) return;
+    canvas.dataset.hoverReady = '1';
+    canvas.addEventListener('mousemove', event => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / Math.max(rect.width, 1);
+        const scaleY = canvas.height / Math.max(rect.height, 1);
+        const x = (event.clientX - rect.left) * scaleX;
+        const y = (event.clientY - rect.top) * scaleY;
+        const nearest = (canvas._pharmAtlasVitalPoints || [])
+            .map(point => ({ ...point, distance: Math.hypot(point.x - x, point.y - y) }))
+            .sort((a, b) => a.distance - b.distance)[0];
+        canvas.title = nearest && nearest.distance <= 12 ? `${nearest.when}\n${nearest.label}` : 'Hover over a point to see its value.';
+    });
 }
 
 function renderVitals() {
@@ -12975,7 +13177,9 @@ function renderMemberVitalCharts(memberId, container) {
             <div class="vital-legend">${legend}${monitoringLegend}<span><span class="legend-swatch" style="background:#ff0000;"></span>Out of goal</span></div>
         `;
         grid.appendChild(panel);
-        drawVitalChart(panel.querySelector('canvas'), readings, chart.series, { ...chart, member, adherenceEntries });
+        const canvas = panel.querySelector('canvas');
+        drawVitalChart(canvas, readings, chart.series, { ...chart, member, adherenceEntries });
+        attachVitalChartHover(canvas);
     });
 
     if (!grid.children.length) {
@@ -13556,8 +13760,10 @@ function dataHealthIssues() {
         const intervalHours = parseInt(schedule.intervalHours, 10);
         if (schedule.freq === 'QXH' && (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24)) issues.push({ severity: 'medium', repairable: false, type: 'invalid-interval', message: `Every-X-hours schedule ${schedule.id} has an invalid hour interval.` });
         if (schedule.freq === 'QOD' && !(schedule.qodStart || schedule.startDate)) issues.push({ severity: 'medium', repairable: false, type: 'missing-qod-anchor', message: `Every-other-day schedule ${schedule.id} needs an anchor/start date.` });
-        linkedSchedulesFor(schedule, db.schedules.filter(item => item.memberId === schedule.memberId)).forEach(linked => {
-            if (scheduleLinkModeBetween(schedule, linked) === 'together' && !schedulesHaveAlignedTiming(schedule, linked)) {
+        db.schedules
+            .filter(item => item.memberId === schedule.memberId && item.id !== schedule.id && !isScheduleArchived(item))
+            .forEach(linked => {
+            if (directScheduleLinkModeBetween(schedule, linked) === 'together' && !schedulesHaveAlignedTiming(schedule, linked)) {
                 const med = db.inventory.find(item => item.id === schedule.medId);
                 const linkedMed = db.inventory.find(item => item.id === linked.medId);
                 issues.push({ severity: 'medium', repairable: false, type: 'linked-mismatch', message: `Linked meds do not align: ${med?.name || schedule.id} and ${linkedMed?.name || linked.id}.` });
@@ -18874,6 +19080,20 @@ window.clearInventorySearch = function() {
     renderAll();
 };
 
+function renderPanelSafely(label, renderFn, fallbackId = '') {
+    try {
+        return renderFn();
+    } catch (error) {
+        console.error(`PharmAtlas render failed: ${label}`, error);
+        if (fallbackId) {
+            const container = document.getElementById(fallbackId);
+            if (container) {
+                container.innerHTML = `<div class="render-error">Could not render ${escapeHtml(label)}. ${escapeHtml(error?.message || '')}</div>`;
+            }
+        }
+        return null;
+    }
+}
 
 function renderAll() {
     const sortedInventory = [...db.inventory].sort((a, b) => {
@@ -18988,20 +19208,22 @@ sortedInventory.forEach(med => {
                 <button onclick="deleteSchedule('${s.id}')">Discontinue</button></div>`;
         });
     }
-    renderCalendar();
-    renderOrderSets();
-    renderPrepackageQueues();
-    renderRecipes();
-    renderPendingScheduleOrders();
-    renderScheduleLinkOptions();
-    renderVitals();
-    renderTodayViewDashboard();
-    renderInventoryStatus();
-    renderInventoryWorkflowSummary();
-    renderVitalDashboard();
-    renderDataHealthSummary();
-    enhanceButtonIcons();
-    renderGuidedHelpTips();
+    renderPanelSafely('Medication schedule calendar', () => renderCalendar(), 'calendar-grid');
+    renderPanelSafely('Regimens', () => renderOrderSets(), 'order-set-med-list');
+    renderPanelSafely('Prepackage queues', () => renderPrepackageQueues(), 'prepack-active-list');
+    renderPanelSafely('Recipes', () => renderRecipes(), 'compound-recipe-list');
+    renderPanelSafely('Pending scheduled medications', () => renderPendingScheduleOrders(), 'pending-schedule-list');
+    renderPanelSafely('Schedule links', () => renderScheduleLinkOptions());
+    renderPanelSafely('Monitoring', () => renderVitals());
+    renderPanelSafely('Today View', () => renderTodayViewDashboard(), 'today-view-dashboard');
+    renderPanelSafely('Inventory Status', () => renderInventoryStatus(), 'inventory-status');
+    renderPanelSafely('Inventory Workflow Summary', () => renderInventoryWorkflowSummary(), 'inventory-workflow-summary');
+    renderPanelSafely('Monitoring Trends', () => renderVitalDashboard(), 'vitals-dashboard');
+    renderPanelSafely('Data Health Summary', () => renderDataHealthSummary(), 'data-health-summary');
+    renderPanelSafely('Button icons', () => enhanceButtonIcons());
+    renderPanelSafely('Guided help tips', () => renderGuidedHelpTips());
+    renderPanelSafely('Tab order', () => applyCustomTabOrder());
+    renderPanelSafely('Dashboard command panel', () => applyDashboardCommandPanelState());
 }
 window.calculateLiveDose = function() {
     const medId = document.getElementById('sched-strength-display').value;

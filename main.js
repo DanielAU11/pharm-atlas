@@ -234,6 +234,11 @@ function createWindow() {
     });
 
     win.loadFile('index.html');
+    win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+        if (level >= 2) {
+            console.error(`[renderer] ${message} (${sourceId}:${line})`);
+        }
+    });
 
     // FIX: Close logic must be inside createWindow so 'win' is defined
     win.on('close', function (event) {

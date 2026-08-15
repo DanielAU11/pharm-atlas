@@ -1022,6 +1022,51 @@ button {
     align-items: start;
 }
 
+.dashboard-workspace.command-panel-collapsed {
+    grid-template-columns: minmax(0, 1fr) 34px;
+}
+
+.dashboard-workspace.command-panel-collapsed #dashboard-right-panel {
+    display: none;
+}
+
+.dashboard-workspace.command-panel-collapsed .dashboard-command-rail {
+    padding: 0;
+    min-height: 112px;
+    overflow: hidden;
+}
+
+.daily-command-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.daily-command-title button {
+    min-width: 64px;
+    height: 22px;
+    padding: 1px 5px;
+    font-size: 11px;
+}
+
+.dashboard-workspace.command-panel-collapsed .daily-command-title {
+    writing-mode: vertical-rl;
+    min-height: 112px;
+    margin: 0;
+    padding: 5px 3px;
+}
+
+.dashboard-workspace.command-panel-collapsed .daily-command-title button {
+    writing-mode: horizontal-tb;
+    min-width: 28px;
+    height: auto;
+}
+
+.tab-list li[draggable="true"] {
+    cursor: move;
+}
+
 .dashboard-main-column,
 .workspace-right-rail {
     min-width: 0;
@@ -5345,6 +5390,15 @@ button {
 
 .os-link-row .os-link-mode {
     width: 170px;
+}
+
+.render-error {
+    margin: 4px;
+    padding: 6px 8px;
+    border: 1px solid #800000;
+    background: #fff0f0;
+    color: #800000;
+    font-weight: bold;
 }
 
 .regimen-notes-grid {

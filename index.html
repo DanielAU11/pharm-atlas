@@ -22,7 +22,7 @@
 
         <div class="window-body">
             <div class="tabs">
-            <menu role="tablist">
+            <menu role="tablist" class="tab-list" ondragstart="handleTabDragStart(event)" ondragover="handleTabDragOver(event)" ondrop="handleTabDrop(event)">
                 <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')"><span class="win98-icon icon-dashboard"></span>Dashboard</a></li>
                 <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')"><span class="win98-icon icon-calendar"></span>Schedule Medications</a></li>
                 <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')"><span class="win98-icon icon-box"></span>Prepackage Meds</a></li>
@@ -73,7 +73,7 @@
                             </fieldset>
                         </div>
                         <aside class="workspace-right-rail dashboard-command-rail">
-                            <div class="rail-titlebar">Daily Command Panel</div>
+                            <div class="rail-titlebar daily-command-title"><span>Daily Command Panel</span><button id="dashboard-command-toggle" type="button" onclick="toggleDashboardCommandPanel()">▶ Hide</button></div>
                             <div id="dashboard-right-panel"></div>
                         </aside>
                     </div>
@@ -1432,6 +1432,7 @@
                             </div>
                             <div class="profile-diary-scale-toggle-row">
                                 <button type="button" onclick="toggleProgressNoteScales()">Add ratings</button>
+                                <label><input id="m-progress-note-disable-ratings" type="checkbox" onchange="toggleProgressNoteRatingsDisabled(this.checked)"> Ratings off for this entry</label>
                                 <span class="form-help">Optional subjective diary ratings: pain/nausea 0 none to 10 worst; mood/sleep/energy 1 low to 5 best.</span>
                             </div>
                             <div id="m-progress-note-scales-panel" class="profile-diary-scale-panel" style="display:none;">
