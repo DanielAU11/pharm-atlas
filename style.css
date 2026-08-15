@@ -4020,6 +4020,11 @@ button {
 
 .receive-intake-member input[type="checkbox"],
 .member-assignment-option input[type="checkbox"] {
+    appearance: auto !important;
+    -webkit-appearance: checkbox !important;
+    display: inline-block !important;
+    position: static !important;
+    opacity: 1 !important;
     width: 13px !important;
     min-width: 13px;
     height: 13px;
@@ -5277,9 +5282,9 @@ button {
 
 .regimen-cycle-row {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(82px, 100px) minmax(82px, 100px) auto;
+    grid-template-columns: minmax(200px, 1fr) minmax(150px, 180px) minmax(260px, 420px);
     gap: 7px;
-    align-items: end;
+    align-items: center;
     margin: 0 7px 7px;
     padding: 6px;
     border: 1px dotted #7aa37a;
@@ -5307,6 +5312,22 @@ button {
 .regimen-cycle-row input {
     width: 100%;
     box-sizing: border-box;
+}
+
+.regimen-cycle-row select {
+    width: 100%;
+}
+
+.os-cycle-days-fields,
+.os-cycle-date-fields {
+    display: grid;
+    grid-template-columns: minmax(78px, 1fr) minmax(78px, 1fr) auto;
+    gap: 6px;
+    align-items: end;
+}
+
+.os-cycle-date-fields {
+    grid-template-columns: minmax(115px, 1fr) minmax(115px, 1fr);
 }
 
 .os-link-row {

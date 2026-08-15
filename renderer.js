@@ -24,16 +24,23 @@ let currentEditingMedId = null;
 let currentEditingMemberId = null;
 const notifiedDoseKeys = new Set();
 const componentUnitOptions = ['mg', 'mL', 'mg/mL', 'mg/g', 'mEq', 'IU', 'mcg', 'g', 'g/g', '%', 'units', 'U/mL', 'CFU'];
-const componentPerUnitOptions = ['', 'mL', 'g', 'mg', 'tablet', 'capsule', 'packet', 'spray', 'drop', 'inhalation', 'patch', 'suppository'];
+const componentPerUnitOptions = ['', 'mL', 'g', 'mg', 'tablet', 'capsule', 'lozenge', 'packet', 'spray', 'drop', 'inhalation', 'patch', 'suppository', 'vial', 'syringe', 'film', 'unit'];
 const formulationDoseUnits = {
     Tablets: 'tablet',
     Capsules: 'capsule',
+    Chewable: 'tablet',
+    ODT: 'tablet',
+    Sublingual: 'tablet',
+    Lozenge: 'lozenge',
     mL: 'mL',
     Powder: 'g',
     Granules: 'packet',
     Packet: 'packet',
     Inhalations: 'inhalation',
     Sprays: 'spray',
+    Injection: 'mL',
+    Vial: 'mL',
+    'Prefilled Syringe': 'mL',
     Suppository: 'suppository',
     Cream: 'application',
     Ointment: 'application',
@@ -47,12 +54,19 @@ const formulationDoseUnits = {
 const dosageFormDefinitions = {
     Tablets: { label: 'Tablets', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
     Capsules: { label: 'Capsules', stockUnit: 'capsule', adminUnit: 'capsule', perUnit: 'capsule', strengthStyle: 'per-unit' },
+    Chewable: { label: 'Chewable tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    ODT: { label: 'Orally disintegrating tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    Sublingual: { label: 'Sublingual tablet/film', stockUnit: 'unit', adminUnit: 'unit', perUnit: 'unit', strengthStyle: 'per-unit' },
+    Lozenge: { label: 'Lozenge', stockUnit: 'lozenge', adminUnit: 'lozenge', perUnit: 'lozenge', strengthStyle: 'per-unit' },
     mL: { label: 'Liquid (mL)', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
     Powder: { label: 'Powder / Bulk Powder', stockUnit: 'g', adminUnit: 'g', perUnit: 'g', strengthStyle: 'bulk' },
     Granules: { label: 'Granules', stockUnit: 'packet', adminUnit: 'packet', perUnit: 'packet', strengthStyle: 'per-unit' },
     Packet: { label: 'Packet', stockUnit: 'packet', adminUnit: 'packet', perUnit: 'packet', strengthStyle: 'per-unit' },
     Inhalations: { label: 'Inhalations', stockUnit: 'inhalation', adminUnit: 'inhalation', perUnit: 'inhalation', strengthStyle: 'per-unit' },
     Sprays: { label: 'Sprays', stockUnit: 'spray', adminUnit: 'spray', perUnit: 'spray', strengthStyle: 'per-unit' },
+    Injection: { label: 'Injection / solution (mL)', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
+    Vial: { label: 'Vial', stockUnit: 'vial', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration', containerTracking: true, containerUnit: 'vial' },
+    'Prefilled Syringe': { label: 'Prefilled syringe', stockUnit: 'syringe', adminUnit: 'syringe', perUnit: 'syringe', strengthStyle: 'per-unit' },
     Suppository: { label: 'Suppository', stockUnit: 'suppository', adminUnit: 'suppository', perUnit: 'suppository', strengthStyle: 'per-unit' },
     Cream: { label: 'Cream', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
     Ointment: { label: 'Ointment', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
@@ -2997,11 +3011,11 @@ function formatCombinationStrength(med, includeNames = false, includeSolidDenomi
 
 function formatInventoryUnits(med) {
     if (!med?.isCombination || !Array.isArray(med.components) || med.components.length === 0) {
-        return med?.units || '';
+        return normalizeSlashPartsText(med?.units || '');
     }
     const units = Array.from(new Set(med.components.map(component => getComponentUnit(component, med)).filter(Boolean)));
     const sharedDenominator = sharedComponentDenominator(med.components);
-    return `${units.join('/')}${sharedDenominator ? `/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}` : ''}`;
+    return normalizeSlashPartsText(`${units.join('/')}${sharedDenominator ? `/${formatAmount(sharedDenominator.amount)}${sharedDenominator.unit}` : ''}`);
 }
 
 function compactRepeatedDenominatorText(value) {
@@ -3016,9 +3030,80 @@ function compactRepeatedDenominatorText(value) {
     return `${matches.map(match => match[1]).join('/')}/${denominator}`;
 }
 
+function normalizeSlashPartsText(value) {
+    const text = compactRepeatedDenominatorText(value);
+    if (!text.includes('/')) return text;
+    const parts = text.split('/').map(part => part.trim()).filter(Boolean);
+    while (
+        parts.length > 2 &&
+        parts[parts.length - 1].toLowerCase() === parts[parts.length - 2].toLowerCase()
+    ) {
+        parts.pop();
+    }
+    return parts.join('/');
+}
+
+function splitUnitBasis(value) {
+    const parts = normalizeSlashPartsText(value).split('/').map(part => part.trim()).filter(Boolean);
+    return {
+        activeUnit: parts[0] || '',
+        perUnit: parts.length > 1 ? parts[parts.length - 1] : ''
+    };
+}
+
+function parseStrengthToken(value) {
+    const text = normalizeSlashPartsText(value);
+    const match = text.match(/^(-?\d+(?:\.\d+)?)(.*)$/);
+    if (!match) return { amount: NaN, activeUnit: '', perUnit: '' };
+    const units = splitUnitBasis(match[2].trim());
+    return {
+        amount: parseAmount(match[1], NaN),
+        activeUnit: units.activeUnit,
+        perUnit: units.perUnit
+    };
+}
+
+function normalizeSingleStrengthSpec(source = {}, fallbackUnit = 'mg') {
+    const parsedStrength = parseStrengthToken(source.strength ?? source.strengthAmount ?? '');
+    const units = splitUnitBasis(source.activeUnit || source.units || parsedStrength.activeUnit || fallbackUnit);
+    const perFromUnit = units.perUnit || parsedStrength.perUnit;
+    const strengthAmount = Number.isFinite(parseAmount(source.strengthAmount, NaN))
+        ? parseAmount(source.strengthAmount, NaN)
+        : (Number.isFinite(parsedStrength.amount) ? parsedStrength.amount : parseAmount(source.strength, NaN));
+    const activeUnit = units.activeUnit || parsedStrength.activeUnit || fallbackUnit;
+    const perAmount = parseAmount(source.perAmount, 1);
+    const perUnit = source.perUnit || perFromUnit || '';
+    const hasDenominator = perUnit && Number.isFinite(perAmount) && perAmount > 0;
+    const normalizedStrength = hasDenominator && Number.isFinite(strengthAmount)
+        ? strengthAmount / perAmount
+        : strengthAmount;
+    const normalizedUnits = normalizeSlashPartsText(hasDenominator ? `${activeUnit}/${perUnit}` : activeUnit);
+    return {
+        strengthAmount,
+        activeUnit,
+        perAmount: hasDenominator ? perAmount : null,
+        perUnit: hasDenominator ? perUnit : '',
+        strength: normalizedStrength,
+        units: normalizedUnits,
+        displayStrength: Number.isFinite(strengthAmount)
+            ? (hasDenominator
+                ? `${formatAmount(strengthAmount)}${activeUnit}/${perAmount === 1 ? '' : formatAmount(perAmount)}${perUnit}`
+                : `${formatAmount(strengthAmount)}${activeUnit}`)
+            : combineStrengthAndUnits(source.strength, normalizedUnits)
+    };
+}
+
+function formatInventoryUnitsForColumn(med) {
+    if (!med) return '';
+    if (med.isCombination && Array.isArray(med.components) && med.components.length > 0) {
+        return Array.from(new Set(med.components.map(component => getComponentUnit(component, med)).filter(Boolean))).join('/');
+    }
+    return splitUnitBasis(med.units || med.activeUnit || '').activeUnit || med.units || '';
+}
+
 function combineStrengthAndUnits(strength, units) {
-    const strengthText = compactRepeatedDenominatorText(strength);
-    const unitText = String(units || '').trim();
+    const strengthText = normalizeSlashPartsText(strength);
+    const unitText = normalizeSlashPartsText(units);
     if (!strengthText) return unitText;
     if (!unitText) return strengthText;
     const normalizedStrength = strengthText.replace(/\s+/g, '');
@@ -3155,21 +3240,22 @@ function formatMedStrength(med, includeNames = false, includeSolidDenominator = 
     if (med.isCombination && med.components && med.components.length > 0) {
         return formatCombinationStrength(med, includeNames, includeSolidDenominator);
     }
+    const normalized = normalizeSingleStrengthSpec(med, splitUnitBasis(med.units || '').activeUnit || 'mg');
     if (Number.isFinite(parseAmount(med.strengthAmount, NaN)) && med.activeUnit) {
-        if (med.perUnit && Number.isFinite(parseAmount(med.perAmount, NaN))) {
-            const isLiquidDenominator = ['ml', 'l'].includes(String(med.perUnit).toLowerCase());
+        if (normalized.perUnit && Number.isFinite(parseAmount(normalized.perAmount, NaN))) {
+            const isLiquidDenominator = ['ml', 'l'].includes(String(normalized.perUnit).toLowerCase());
             const denominator = includeSolidDenominator || isLiquidDenominator
-                ? `/${parseAmount(med.perAmount) === 1 ? '' : formatAmount(parseAmount(med.perAmount))}${med.perUnit}`
+                ? `/${parseAmount(normalized.perAmount) === 1 ? '' : formatAmount(parseAmount(normalized.perAmount))}${normalized.perUnit}`
                 : '';
-            return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}${denominator}`;
+            return normalizeSlashPartsText(`${formatAmount(parseAmount(normalized.strengthAmount))}${normalized.activeUnit}${denominator}`);
         }
-        return `${formatAmount(parseAmount(med.strengthAmount))}${med.activeUnit}`;
+        return normalizeSlashPartsText(`${formatAmount(parseAmount(normalized.strengthAmount))}${normalized.activeUnit}`);
     }
     if (Number.isFinite(parseAmount(med.strength, NaN)) && med.units && !String(med.units).includes('/')) {
-        return `${formatAmount(parseAmount(med.strength))}${med.units}`;
+        return normalizeSlashPartsText(`${formatAmount(parseAmount(med.strength))}${med.units}`);
     }
-    if (med.displayStrength) return med.displayStrength;
-    return `${med.strength}${med.units}`;
+    if (med.displayStrength) return normalizeSlashPartsText(med.displayStrength);
+    return combineStrengthAndUnits(med.strength, med.units);
 }
 
 function formatLabelMedStrength(med, includeNames = false) {
@@ -3840,6 +3926,42 @@ function defaultPerUnitForFormulation(formulation = 'Other') {
 
 function isConcentrationFormulation(formulation = 'Other') {
     return dosageFormDefinition(formulation).strengthStyle === 'concentration';
+}
+
+function defaultStrengthUnitForFormulation(formulation = 'Other') {
+    const style = dosageFormDefinition(formulation).strengthStyle;
+    if (style === 'topical') return '%';
+    if (style === 'bulk') return 'mg';
+    return 'mg';
+}
+
+function dosageFormMeasurementProfile(formulation = 'Other', behavior = '') {
+    const def = dosageFormDefinition(formulation);
+    const inventoryBehavior = dosageFormUsesContainerTracking(formulation)
+        ? 'container-finish'
+        : (behavior || defaultInventoryBehaviorForFormulation(formulation));
+    const perUnit = def.perUnit || '';
+    const strengthUnit = defaultStrengthUnitForFormulation(formulation);
+    const stockUnit = defaultInventoryUnitForFormulation(formulation, inventoryBehavior);
+    const adminUnit = defaultAdministrationUnitForFormulation(formulation);
+    const guidanceByStyle = {
+        concentration: `Enter concentration as amount per volume, for example 5 mg per 1 mL. Stock is counted in ${stockUnit}.`,
+        topical: `Enter topical strength as %, mg/g, or amount per ${perUnit || 'container'}. Stock is counted by ${stockUnit}; administrations are documented as ${adminUnit}.`,
+        bulk: `Enter powder potency or amount per ${perUnit || 'g'}. Stock is counted by weight/quantity, usually ${stockUnit}.`,
+        'per-unit': `Enter the amount in one ${perUnit || adminUnit || stockUnit}. Stock and doses are counted by ${stockUnit}.`
+    };
+    return {
+        formulation,
+        strengthStyle: def.strengthStyle || 'per-unit',
+        strengthUnit,
+        perAmount: 1,
+        perUnit,
+        stockUnit,
+        adminUnit,
+        inventoryBehavior,
+        containerTracking: inventoryBehavior === 'container-finish',
+        guidance: guidanceByStyle[def.strengthStyle] || guidanceByStyle['per-unit']
+    };
 }
 
 function isTopicalMedication(med) {
@@ -7669,6 +7791,7 @@ window.addInventory = async function() {
     let finalStrength = strengthAmount;
     let finalUnits = activeUnit;
     let displayStrength = '';
+    let singleSpec = null;
 
     if (isCombo) {
         const combo = collectCombinationComponents('med');
@@ -7682,14 +7805,16 @@ window.addInventory = async function() {
         displayStrength = finalStrength;
     } else if (!Number.isFinite(strengthAmount) || strengthAmount <= 0) {
         return void appAlert("Strength required.");
-    } else if (perUnit && Number.isFinite(perAmount) && perAmount > 0) {
-        finalStrength = strengthAmount / perAmount;
-        finalUnits = `${activeUnit}/${perUnit}`;
-        displayStrength = perAmount === 1
-            ? `${formatAmount(strengthAmount)}${activeUnit}/${perUnit}`
-            : `${formatAmount(strengthAmount)}${activeUnit}/${formatAmount(perAmount)}${perUnit}`;
     } else {
-        displayStrength = `${formatAmount(strengthAmount)}${activeUnit}`;
+        singleSpec = normalizeSingleStrengthSpec({
+            strength: strengthAmount,
+            units: selectedUnit,
+            perAmount,
+            perUnit
+        }, defaultStrengthUnitForFormulation(formulation));
+        finalStrength = singleSpec.strength;
+        finalUnits = singleSpec.units;
+        displayStrength = singleSpec.displayStrength;
     }
 
     let imagePath = null;
@@ -7711,10 +7836,10 @@ window.addInventory = async function() {
         strength: finalStrength,
         units: finalUnits,
         displayStrength,
-        strengthAmount: isCombo ? null : strengthAmount,
-        activeUnit: isCombo ? null : activeUnit,
-        perAmount: isCombo ? null : (perUnit ? perAmount : null),
-        perUnit: isCombo ? null : perUnit,
+        strengthAmount: isCombo ? null : singleSpec.strengthAmount,
+        activeUnit: isCombo ? null : singleSpec.activeUnit,
+        perAmount: isCombo ? null : singleSpec.perAmount,
+        perUnit: isCombo ? null : singleSpec.perUnit,
         formulation, // 'Tablets', 'mL', 'Capsules', etc.
         inventoryUnit,
         administrationUnit,
@@ -8289,12 +8414,19 @@ window.updateMedProfileMode = function() {
     const administrationUnit = document.getElementById('modal-administration-unit');
     const guidance = document.getElementById('modal-inventory-guidance');
     const formulationChanged = behavior?.dataset.formulation !== formulation;
+    const profile = dosageFormMeasurementProfile(formulation, behavior?.value);
 
     document.getElementById('modal-single-strength-fields').style.display = isCombo ? 'none' : 'flex';
     document.getElementById('modal-combination-fields').style.display = isCombo ? 'block' : 'none';
     if (isCombo && document.getElementById('modal-ingredient-list').children.length === 0) addModalIngredientRow();
 
     if (formulationChanged) {
+        const units = document.getElementById('modal-units');
+        const perAmount = document.getElementById('modal-per-amount');
+        const perUnit = document.getElementById('modal-per-unit');
+        if (units && (!units.value || componentUnitOptions.includes(units.value))) units.value = profile.strengthUnit;
+        if (perAmount) perAmount.value = '1';
+        if (perUnit) perUnit.value = profile.perUnit || '';
         if (administrationUnit) administrationUnit.value = defaultAdministrationUnitForFormulation(formulation);
         if (behavior) behavior.value = defaultInventoryBehaviorForFormulation(formulation);
         if (inventoryUnit) inventoryUnit.value = defaultInventoryUnitForFormulation(formulation, behavior?.value);
@@ -8320,7 +8452,7 @@ window.updateMedProfileMode = function() {
     if (guidance) {
         guidance.innerText = behavior?.value === 'container-finish'
             ? 'Administrations are logged without reducing stock. Mark the container finished when it is empty.'
-            : `Each administered ${administrationUnit?.value || 'dose unit'} reduces stock by the quantity given.`;
+            : `${profile.guidance} Each administered ${administrationUnit?.value || 'dose unit'} reduces stock by the quantity given.`;
     }
     updateCombinationPreview('modal');
 };
@@ -8430,12 +8562,19 @@ window.saveMedProfile = async function() {
                 await appAlert('Enter a valid strength and unit.');
                 return;
             }
-            const hasConcentrationDenominator = Number.isFinite(perAmount) && perAmount > 0 && perUnit;
-            med.strength = hasConcentrationDenominator ? strengthAmount / perAmount : strengthAmount;
-            med.units = hasConcentrationDenominator ? `${activeUnit}/${perUnit}` : activeUnit;
-            med.displayStrength = hasConcentrationDenominator
-                ? `${formatAmount(strengthAmount)}${activeUnit}/${formatAmount(perAmount)}${perUnit}`
-                : `${formatAmount(strengthAmount)}${activeUnit}`;
+            const singleSpec = normalizeSingleStrengthSpec({
+                strength: strengthAmount,
+                units: activeUnit,
+                perAmount,
+                perUnit
+            }, defaultStrengthUnitForFormulation(formulation));
+            strengthAmount = singleSpec.strengthAmount;
+            activeUnit = singleSpec.activeUnit;
+            perAmount = singleSpec.perAmount;
+            perUnit = singleSpec.perUnit;
+            med.strength = singleSpec.strength;
+            med.units = singleSpec.units;
+            med.displayStrength = singleSpec.displayStrength;
         }
         med.name = updatedName;
         med.stock = parseAmount(document.getElementById('modal-stock').value, med.stock);
@@ -8453,7 +8592,7 @@ window.saveMedProfile = async function() {
         med.components = components;
         med.strengthAmount = isCombination ? null : strengthAmount;
         med.activeUnit = isCombination ? null : activeUnit;
-        med.perAmount = isCombination || !perUnit ? null : perAmount;
+        med.perAmount = isCombination ? null : perAmount;
         med.perUnit = isCombination ? '' : perUnit;
         med.minThreshold = parseAmount(document.getElementById('modal-threshold').value, 0);
         med.inventoryBehavior = dosageFormUsesContainerTracking(formulation)
@@ -8691,15 +8830,56 @@ function normalizeRegimenCycleDuration(value) {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function regimenDayNumberForDate(regimenStart, date) {
+    if (!regimenStart || !date) return null;
+    const start = parseLocal(regimenStart);
+    const target = parseLocal(date);
+    if (!start || !target) return null;
+    start.setHours(0, 0, 0, 0);
+    target.setHours(0, 0, 0, 0);
+    return Math.round((target - start) / 86400000) + 1;
+}
+
+function regimenDurationDaysBetween(startDate, endDate) {
+    if (!startDate || !endDate) return null;
+    const start = parseLocal(startDate);
+    const end = parseLocal(endDate);
+    if (!start || !end) return null;
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    const days = Math.round((end - start) / 86400000) + 1;
+    return days > 0 ? days : null;
+}
+
+function regimenCycleMode(item = {}) {
+    return item.cycleMode === 'dates' || item.cycleStartDate || item.cycleEndDate ? 'dates' : 'days';
+}
+
 function orderSetItemDateWindow(item, regimenStart, regimenEnd) {
-    const startDay = normalizeRegimenCycleStartDay(item?.cycleStartDay || 1);
-    const duration = normalizeRegimenCycleDuration(item?.cycleDurationDays);
+    const mode = regimenCycleMode(item);
+    let startDay = normalizeRegimenCycleStartDay(item?.cycleStartDay || 1);
+    let duration = normalizeRegimenCycleDuration(item?.cycleDurationDays);
     let startDate = regimenStart || localDateKey();
-    if (regimenStart && startDay > 1) startDate = addDaysKey(regimenStart, startDay - 1);
     let endDate = regimenEnd || 'Ongoing';
-    if (duration) endDate = addDaysKey(startDate, duration - 1);
+    if (mode === 'dates' && item?.cycleStartDate) {
+        startDate = item.cycleStartDate;
+        endDate = item.cycleEndDate || item.cycleStartDate;
+        startDay = regimenDayNumberForDate(regimenStart, startDate) || startDay;
+        duration = regimenDurationDaysBetween(startDate, endDate);
+    } else {
+        if (regimenStart && startDay > 1) startDate = addDaysKey(regimenStart, startDay - 1);
+        if (duration) endDate = addDaysKey(startDate, duration - 1);
+    }
     if (regimenEnd && regimenEnd !== 'Ongoing' && endDate !== 'Ongoing' && endDate > regimenEnd) endDate = regimenEnd;
-    return { startDate, endDate, cycleStartDay: startDay, cycleDurationDays: duration };
+    return {
+        startDate,
+        endDate,
+        cycleMode: mode,
+        cycleStartDay: startDay,
+        cycleDurationDays: duration,
+        cycleStartDate: mode === 'dates' ? startDate : '',
+        cycleEndDate: mode === 'dates' ? endDate : ''
+    };
 }
 
 function regimenCycleText(item, regimenStart = '', regimenEnd = '') {
@@ -9044,9 +9224,21 @@ window.addOrderSetMedicationRow = function(item = null) {
                 <strong>Regimen therapy days</strong>
                 <small>Use when this medication only runs during part of the regimen, such as days 1-5 of a cycle.</small>
             </div>
-            <label>Start day<input class="os-cycle-start" type="number" min="1" step="1" value="${escapeHtml(item?.cycleStartDay || 1)}"></label>
-            <label>For<input class="os-cycle-duration" type="number" min="1" step="1" placeholder="all" value="${escapeHtml(item?.cycleDurationDays || '')}"></label>
-            <span>day(s)</span>
+            <label>Set by
+                <select class="os-cycle-mode">
+                    <option value="days" ${regimenCycleMode(item) !== 'dates' ? 'selected' : ''}>Start day + duration</option>
+                    <option value="dates" ${regimenCycleMode(item) === 'dates' ? 'selected' : ''}>Specific dates</option>
+                </select>
+            </label>
+            <div class="os-cycle-days-fields">
+                <label>Start day<input class="os-cycle-start" type="number" min="1" step="1" value="${escapeHtml(item?.cycleStartDay || 1)}"></label>
+                <label>For<input class="os-cycle-duration" type="number" min="1" step="1" placeholder="all" value="${escapeHtml(item?.cycleDurationDays || '')}"></label>
+                <span>day(s)</span>
+            </div>
+            <div class="os-cycle-date-fields">
+                <label>Start date<input class="os-cycle-start-date" type="date" value="${escapeHtml(item?.cycleStartDate || '')}"></label>
+                <label>End date<input class="os-cycle-end-date" type="date" value="${escapeHtml(item?.cycleEndDate || '')}"></label>
+            </div>
         </div>
         <div class="field-row os-link-row">
             <label>Link to:</label><div class="os-link-target link-choice-panel"></div>
@@ -9072,8 +9264,9 @@ window.addOrderSetMedicationRow = function(item = null) {
     row.querySelector('.os-dose').addEventListener('input', () => { updateOrderSetRowDose(row); renderOrderSetMedicationPreview(row); renderOrderSetBuilderSummary(); });
     row.querySelector('.os-remove').addEventListener('click', () => { row.remove(); renderOrderSetLinkOptions(); renderOrderSetBuilderSummary(); renderOrderSetMedicationPreview(); });
     row.querySelectorAll('.os-indication, .os-instructions, .os-time-input').forEach(input => input.addEventListener('input', renderOrderSetBuilderSummary));
-    row.querySelectorAll('.os-link-mode, .os-interval-hours, .os-interval-weeks, .os-times-per-week, .os-prn-max-doses, .os-prn-window-hours, .os-qod-start, .os-anchor-date, .os-cycle-start, .os-cycle-duration').forEach(input => {
+    row.querySelectorAll('.os-link-mode, .os-interval-hours, .os-interval-weeks, .os-times-per-week, .os-prn-max-doses, .os-prn-window-hours, .os-qod-start, .os-anchor-date, .os-cycle-mode, .os-cycle-start, .os-cycle-duration, .os-cycle-start-date, .os-cycle-end-date').forEach(input => {
         const handleChange = () => {
+            renderOrderSetCycleControls(row);
             renderOrderSetIntervalPreview(row);
             renderOrderSetBuilderSummary();
         };
@@ -9084,6 +9277,7 @@ window.addOrderSetMedicationRow = function(item = null) {
     container.appendChild(row);
     updateOrderSetStrengthOptions(row, item?.medId || '');
     renderOrderSetRowControls(row, scheduleTimingFrequency(item) === 'QXH' ? [item?.startTime || item?.times?.[0]] : item?.times);
+    renderOrderSetCycleControls(row);
     renderOrderSetLinkOptions();
     setActiveOrderSetRow(row);
     renderOrderSetBuilderSummary();
@@ -9126,6 +9320,22 @@ window.openOrderSetLinkPicker = async function(rowId) {
     renderOrderSetLinkOptions();
     renderOrderSetBuilderSummary();
 };
+
+function renderOrderSetCycleControls(row) {
+    if (!row) return;
+    const mode = row.querySelector('.os-cycle-mode')?.value || 'days';
+    const daysFields = row.querySelector('.os-cycle-days-fields');
+    const dateFields = row.querySelector('.os-cycle-date-fields');
+    if (daysFields) daysFields.style.display = mode === 'dates' ? 'none' : 'grid';
+    if (dateFields) dateFields.style.display = mode === 'dates' ? 'grid' : 'none';
+    if (mode === 'dates') {
+        const regimenStart = document.getElementById('order-set-start')?.value || localDateKey();
+        const start = row.querySelector('.os-cycle-start-date');
+        const end = row.querySelector('.os-cycle-end-date');
+        if (start && !start.value) start.value = regimenStart;
+        if (end && !end.value) end.value = start?.value || regimenStart;
+    }
+}
 
 function renderOrderSetRowControls(row, existingTimes = null) {
     const rawFreq = row.querySelector('.os-freq').value;
@@ -9185,8 +9395,11 @@ function renderOrderSetIntervalPreview(row) {
     const regimenStartDate = document.getElementById('order-set-start')?.value || localDateKey();
     const regimenEndValue = document.getElementById('order-set-end')?.value || '';
     const itemWindow = orderSetItemDateWindow({
+        cycleMode: row.querySelector('.os-cycle-mode')?.value || 'days',
         cycleStartDay: row.querySelector('.os-cycle-start')?.value || 1,
-        cycleDurationDays: row.querySelector('.os-cycle-duration')?.value || ''
+        cycleDurationDays: row.querySelector('.os-cycle-duration')?.value || '',
+        cycleStartDate: row.querySelector('.os-cycle-start-date')?.value || '',
+        cycleEndDate: row.querySelector('.os-cycle-end-date')?.value || ''
     }, regimenStartDate, regimenEndValue || 'Ongoing');
     const startDate = itemWindow.startDate;
     const endValue = itemWindow.endDate === 'Ongoing' ? '' : itemWindow.endDate;
@@ -9240,13 +9453,44 @@ function collectOrderSetItem(row) {
         : [];
     const prnMaxDoses = freq === 'PRN' ? parseInt(row.querySelector('.os-prn-max-doses')?.value, 10) : null;
     const prnWindowHours = freq === 'PRN' ? parseInt(row.querySelector('.os-prn-window-hours')?.value, 10) : null;
+    const regimenStart = document.getElementById('order-set-start')?.value || localDateKey();
+    const regimenEnd = document.getElementById('order-set-end')?.value || '';
+    const cycleMode = row.querySelector('.os-cycle-mode')?.value || 'days';
     const cycleStartDay = normalizeRegimenCycleStartDay(row.querySelector('.os-cycle-start')?.value || 1);
     const cycleDurationDays = normalizeRegimenCycleDuration(row.querySelector('.os-cycle-duration')?.value || '');
+    const cycleStartDate = row.querySelector('.os-cycle-start-date')?.value || '';
+    const cycleEndDate = row.querySelector('.os-cycle-end-date')?.value || '';
+    const cycleFields = {
+        cycleMode,
+        cycleStartDay,
+        cycleDurationDays,
+        cycleStartDate: cycleMode === 'dates' ? cycleStartDate : '',
+        cycleEndDate: cycleMode === 'dates' ? cycleEndDate : ''
+    };
     if (!medId || !doseQty) {
         return { error: "Each regimen medication needs a medication, strength, and dose quantity." };
     }
     if (row.querySelector('.os-cycle-start')?.value && cycleStartDay < 1) {
         return { error: "Regimen therapy day start must be 1 or higher." };
+    }
+    if (cycleMode === 'dates') {
+        if (!cycleStartDate || !cycleEndDate) {
+            return { error: "Specific regimen therapy dates need both a start date and end date." };
+        }
+        if (cycleEndDate < cycleStartDate) {
+            return { error: "Regimen therapy end date cannot be before the therapy start date." };
+        }
+        if (regimenStart && cycleStartDate < regimenStart) {
+            return { error: "Regimen therapy start date cannot be before the regimen start date." };
+        }
+        if (regimenEnd && cycleEndDate > regimenEnd) {
+            return { error: "Regimen therapy end date cannot be after the regimen end date." };
+        }
+    } else if (cycleDurationDays && regimenEnd) {
+        const therapyEnd = addDaysKey(addDaysKey(regimenStart, cycleStartDay - 1), cycleDurationDays - 1);
+        if (therapyEnd > regimenEnd) {
+            return { error: "Regimen therapy days extend past the regimen end date. Shorten the duration or extend the regimen." };
+        }
     }
     const selectedLinkTargetRowIds = selectedOptionValues(row.querySelector('.os-link-target'));
     const linkMode = row.querySelector('.os-link-mode')?.value || '';
@@ -9273,8 +9517,7 @@ function collectOrderSetItem(row) {
             weekdays: [],
             prnMaxDoses: prnMaxDoses || null,
             prnWindowHours: prnWindowHours || 24,
-            cycleStartDay,
-            cycleDurationDays,
+            ...cycleFields,
             startTime: rawTimes[0],
             qodStart: '',
             anchorDate: '',
@@ -9308,8 +9551,7 @@ function collectOrderSetItem(row) {
                 weekdays: [],
                 prnMaxDoses: prnMaxDoses || null,
                 prnWindowHours: prnWindowHours || 24,
-                cycleStartDay,
-                cycleDurationDays,
+                ...cycleFields,
                 startTime: '',
                 qodStart: '',
                 anchorDate: '',
@@ -9356,8 +9598,7 @@ function collectOrderSetItem(row) {
         weekdays,
         prnMaxDoses: prnMaxDoses || null,
         prnWindowHours: prnWindowHours || 24,
-        cycleStartDay,
-        cycleDurationDays,
+        ...cycleFields,
         startTime: rawTimes[0] || '',
         qodStart: timingFreq === 'QOD' ? row.querySelector('.os-qod-start').value : '',
         anchorDate: ['QW', 'Monthly'].includes(timingFreq) ? row.querySelector('.os-anchor-date').value : '',
@@ -9399,8 +9640,11 @@ function orderSetItemToSchedule(orderSet, item, index, existingSchedule = null) 
         weekdays: item.weekdays || [],
         prnMaxDoses: item.prnMaxDoses || null,
         prnWindowHours: item.prnWindowHours || 24,
+        cycleMode: itemWindow.cycleMode,
         cycleStartDay: itemWindow.cycleStartDay,
         cycleDurationDays: itemWindow.cycleDurationDays,
+        cycleStartDate: itemWindow.cycleStartDate || '',
+        cycleEndDate: itemWindow.cycleEndDate || '',
         startTime: item.startTime || item.times[0] || '',
         isOneTime: timingFreq === 'ONCE' || (itemStartDate === itemEndDate && itemEndDate !== 'Ongoing'),
         orderSetId: orderSet.id,
@@ -9428,8 +9672,11 @@ function orderSetItemTimingProxy(item, startDate, endDate) {
         endDate: timingFreq === 'ONCE' ? itemStartDate : itemWindow.endDate,
         monthlyAnchor: timingFreq === 'Monthly' ? (item.anchorDate || itemStartDate) : '',
         qodStart: timingFreq === 'QOD' ? (item.qodStart || itemStartDate) : '',
+        cycleMode: itemWindow.cycleMode,
         cycleStartDay: itemWindow.cycleStartDay,
-        cycleDurationDays: itemWindow.cycleDurationDays
+        cycleDurationDays: itemWindow.cycleDurationDays,
+        cycleStartDate: itemWindow.cycleStartDate || '',
+        cycleEndDate: itemWindow.cycleEndDate || ''
     };
 }
 
@@ -10216,6 +10463,33 @@ function prepackItemDoseQty(queue, item) {
     return parseAmount(schedule?.doseQty ?? item?.quantity, 0);
 }
 
+function prepackStockShortagesForItems(queue, items = []) {
+    if (isInventoryUnitDoseQueue(queue)) return [];
+    const stockLedger = new Map();
+    const shortages = [];
+    items.forEach(item => {
+        if (!item || item.inventoryDeducted === true || item.inventoryReturned === true) return;
+        const med = db.inventory.find(candidate => candidate.id === item.medId);
+        if (!med) {
+            shortages.push(`${item.medName || 'Medication'} is no longer in inventory.`);
+            return;
+        }
+        if (usesContainerTracking(med)) return;
+        const qty = prepackItemDoseQty(queue, item);
+        if (!Number.isFinite(qty) || qty <= 0) {
+            shortages.push(`${med.name} does not have a valid prepack quantity.`);
+            return;
+        }
+        const remaining = stockLedger.has(med.id) ? stockLedger.get(med.id) : parseAmount(med.stock, 0);
+        if (remaining < qty) {
+            shortages.push(`${med.name} needs ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}, but only ${formatAmount(Math.max(0, remaining))} is available.`);
+            return;
+        }
+        stockLedger.set(med.id, remaining - qty);
+    });
+    return shortages;
+}
+
 function applyPrepackItemStock(queue, item, method = 'scan') {
     if (isInventoryUnitDoseQueue(queue)) return applyInventoryUnitDoseItemStock(queue, item, method);
     if (!queue || !item || item.inventoryDeducted === true || item.inventoryReturned === true) return true;
@@ -10233,6 +10507,8 @@ function applyPrepackItemStock(queue, item, method = 'scan') {
     med.stock = Math.max(0, parseAmount(med.stock, 0) - qty);
     item.inventoryDeducted = true;
     item.stockDelta = qty;
+    item.stockDeductedAt = new Date().toISOString();
+    item.stockDeductionMethod = method;
     item.stockLogDetail = `Prepacked ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from inventory.`;
     db.history.unshift({
         id: Date.now().toString(),
@@ -11373,7 +11649,7 @@ window.returnPrepackedDispense = async function() {
                 : (row.item.quantity || 'quantity not recorded');
             const stockText = row.item.inventoryDeducted
                 ? `Inventory return: ${qty}`
-                : 'Prepared record only: no prior stock deduction found';
+                : 'Record only: this prepack has no prior stock deduction marker, so returning it will not add inventory.';
             return `<label class="return-prepack-row" for="${inputId}">
                 <span class="return-prepack-check"><input id="${inputId}" name="returnRows" type="checkbox" value="${row.returnIndex}" onchange="updateReturnPrepackPackageState(this)"></span>
                 <span class="return-prepack-main">
@@ -11389,7 +11665,7 @@ window.returnPrepackedDispense = async function() {
                 <span class="return-prepack-main">
                     <span class="return-prepack-time">${escapeHtml(group.day.date)}</span>
                     <strong>${escapeHtml(group.queue.memberName || group.queue.title || 'Prepack package')}</strong>
-                    <span class="return-prepack-meta">${escapeHtml(sourceLabel)} | ${escapeHtml(itemText)} available to return/waste | ${groupStatus === 'partial' ? 'Partial package' : 'Complete package'} | ${stockMode === 'record' ? 'record only' : stockMode === 'stock' ? 'stock return' : 'mixed stock/record'}</span>
+                    <span class="return-prepack-meta">${escapeHtml(sourceLabel)} | ${escapeHtml(itemText)} available to return/waste | ${groupStatus === 'partial' ? 'Partial package' : 'Complete package'} | ${stockMode === 'record' ? 'record only/no stock change' : stockMode === 'stock' ? 'stock return available' : 'mixed stock + record'}</span>
                 </span>
                 <span class="return-prepack-caret" aria-hidden="true"></span>
             </summary>
@@ -11765,6 +12041,11 @@ window.markPrepackDayManual = async function(queueId) {
     const day = queue?.days[queue.currentDayIndex || 0];
     if (!queue || !day) return;
     if (!await appConfirm(`Confirm that every medication for ${day.date} was prepacked manually?`, 'Prepacked Manually')) return;
+    const shortages = prepackStockShortagesForItems(queue, day.items || []);
+    if (shortages.length) {
+        await appAlert(`This package was not marked prepacked because inventory is short:\n\n${shortages.join('\n')}`, 'Prepack Stock Check');
+        return;
+    }
     for (const item of day.items) {
         if (!applyPrepackItemStock(queue, item, 'manual')) {
             await appAlert(`${item.medName} does not have enough stock to prepack ${item.time}.`);
@@ -16766,19 +17047,25 @@ window.updateInventoryEntryMode = function() {
 
     const isContainerDefault = dosageFormUsesContainerTracking(formulation);
     const defaultPerUnit = defaultPerUnitForFormulation(formulation);
-    const isConcentration = isConcentrationFormulation(formulation) || units.includes('/');
+    const profile = dosageFormMeasurementProfile(formulation, inventoryBehavior?.value);
+    const usesBasis = !!(defaultPerUnit || unitParts[1] || profile.perUnit);
     const formulationChanged = inventoryBehavior?.dataset.formulation !== formulation;
 
     if (formulationChanged) {
+        if (unitsSelect && (!unitsSelect.value || componentUnitOptions.includes(unitsSelect.value))) {
+            unitsSelect.value = profile.strengthUnit;
+        }
         if (administrationUnitInput) administrationUnitInput.value = defaultAdministrationUnitForFormulation(formulation);
         if (inventoryBehavior) inventoryBehavior.value = defaultInventoryBehaviorForFormulation(formulation);
         if (inventoryUnitInput) inventoryUnitInput.value = defaultInventoryUnitForFormulation(formulation, inventoryBehavior?.value);
         if (inventoryBehavior) inventoryBehavior.dataset.formulation = formulation;
+        if (perAmountInput) perAmountInput.value = '1';
+        if (perUnitSelect) perUnitSelect.value = defaultPerUnit || '';
         const sharedUnit = document.getElementById('combo-shared-per-unit');
         const sharedAmount = document.getElementById('combo-shared-per-amount');
         if (sharedUnit && defaultPerUnit) sharedUnit.value = defaultPerUnit;
         if (sharedAmount && !sharedAmount.value) sharedAmount.value = '1';
-        if (isConcentration || defaultPerUnit) {
+        if (usesBasis) {
             document.querySelectorAll('#ingredient-list .ing-per-unit').forEach(select => {
                 if (!select.value) select.value = defaultPerUnit;
             });
@@ -16804,12 +17091,12 @@ window.updateInventoryEntryMode = function() {
     }
     if (perContainer) perContainer.style.display = isCombo ? 'none' : 'inline-block';
     if (perAmountInput) {
-        perAmountInput.disabled = isCombo || !isConcentration;
-        if (!isConcentration) perAmountInput.value = '1';
+        perAmountInput.disabled = isCombo || !usesBasis;
+        if (!usesBasis) perAmountInput.value = '1';
     }
     if (perUnitSelect) {
-        perUnitSelect.disabled = isCombo || !isConcentration;
-        if (!isConcentration) perUnitSelect.value = '';
+        perUnitSelect.disabled = isCombo || !usesBasis;
+        if (!usesBasis) perUnitSelect.value = '';
         else if (unitParts[1]) perUnitSelect.value = unitParts[1];
         else if (!perUnitSelect.value && defaultPerUnit) perUnitSelect.value = defaultPerUnit;
     }
@@ -16820,7 +17107,7 @@ window.updateInventoryEntryMode = function() {
     if (inventoryGuidance) {
         inventoryGuidance.innerText = tracksContainers
             ? 'Doses do not reduce stock. Use Finished Container when one is empty.'
-            : `Each administered ${administrationUnitInput?.value || 'dose unit'} reduces stock by the quantity given.`;
+            : `${profile.guidance} Each administered ${administrationUnitInput?.value || 'dose unit'} reduces stock by the quantity given.`;
     }
     updateCombinationPreview('med');
 };
@@ -17097,13 +17384,19 @@ window.renderOrderBuilderPreview = function() {
         const comboMed = { isCombination: true, components: combo.components };
         const strength = isCombination && combo.components.length
             ? formatCombinationStrength(comboMed)
-            : row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '';
+            : normalizeSingleStrengthSpec({
+                strength: row.querySelector('[name="orderCustomStrength"]')?.value.trim() || '',
+                units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+                perAmount: row.querySelector('[name="orderCustomPerAmount"]')?.value.trim() || '',
+                perUnit: row.querySelector('[name="orderCustomPerUnit"]')?.value.trim() || ''
+            }).displayStrength || '';
         const units = isCombination && combo.components.length
             ? formatInventoryUnits(comboMed)
-            : [
-                row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
-                row.querySelector('[name="orderCustomPerUnit"]')?.value.trim() || ''
-            ].filter(Boolean).join('/');
+            : formatInventoryUnitsForColumn(normalizeSingleStrengthSpec({
+                units: row.querySelector('[name="orderCustomUnits"]')?.value.trim() || '',
+                perAmount: row.querySelector('[name="orderCustomPerAmount"]')?.value.trim() || '',
+                perUnit: row.querySelector('[name="orderCustomPerUnit"]')?.value.trim() || ''
+            }));
         items.push({
             name,
             strength,
@@ -17327,8 +17620,8 @@ function orderLineFromInventory(med, reason = '') {
         sourceType: 'inventory',
         medId: med.id,
         name: med.name,
-        strength: formatMedStrength(med),
-        units: formatInventoryUnits(med),
+        strength: formatMedStrength(med, false, false),
+        units: formatInventoryUnitsForColumn(med),
         inventoryUnit: inventoryUnitFor(med),
         requestedQty: '',
         receivedQty: 0,
@@ -17344,19 +17637,20 @@ function orderLineFromInventory(med, reason = '') {
 
 function orderLineFromFormulary(item) {
     const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+    const itemSpec = normalizeSingleStrengthSpec(item);
     return {
         id: `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         sourceType: med ? 'inventory' : 'formulary',
         medId: med?.id || '',
         formularyId: item.id,
         name: med?.name || item.name,
-        strength: med ? formatMedStrength(med) : (item.strength || ''),
-        units: med ? formatInventoryUnits(med) : (item.units || ''),
+        strength: med ? formatMedStrength(med, false, false) : (itemSpec.displayStrength || item.strength || ''),
+        units: med ? formatInventoryUnitsForColumn(med) : (formatInventoryUnitsForColumn(itemSpec) || item.units || ''),
         formulation: med?.formulation || item.formulation || 'Other',
-        strengthAmount: item.strengthAmount || item.strength || '',
-        activeUnit: item.activeUnit || item.units || '',
-        perAmount: item.perAmount || '',
-        perUnit: item.perUnit || '',
+        strengthAmount: itemSpec.strengthAmount || item.strengthAmount || item.strength || '',
+        activeUnit: itemSpec.activeUnit || item.activeUnit || item.units || '',
+        perAmount: itemSpec.perAmount || item.perAmount || '',
+        perUnit: itemSpec.perUnit || item.perUnit || '',
         inventoryUnit: med ? inventoryUnitFor(med) : (item.units || 'unit'),
         expiry: item.expiry || '',
         storage: item.storage || '',
@@ -17382,8 +17676,9 @@ window.addOrderCustomRow = function(values = {}) {
     const isCombination = !!values.isCombination || (Array.isArray(values.components) && values.components.length > 0);
     const sharedBasis = sharedComponentDenominator(values.components || []);
     const selectedFormulation = values.formulation || 'Other';
-    const selectedUnit = String(values.activeUnit || values.units || '').split('/')[0] || 'mg';
-    const selectedPerUnit = values.perUnit || String(values.units || '').split('/')[1] || defaultPerUnitForFormulation(selectedFormulation) || '';
+    const profile = dosageFormMeasurementProfile(selectedFormulation, values.inventoryBehavior || '');
+    const selectedUnit = String(values.activeUnit || values.units || '').split('/')[0] || profile.strengthUnit;
+    const selectedPerUnit = values.perUnit || String(values.units || '').split('/')[1] || profile.perUnit || '';
     div.innerHTML = `
         <input name="orderCustomLineId" type="hidden" value="${escapeHtml(values.id || '')}">
         <div class="order-custom-head">
@@ -17401,24 +17696,24 @@ window.addOrderCustomRow = function(values = {}) {
         </div>
         <span class="order-custom-simple-strength">
             <label>Strength amount<input name="orderCustomStrength" type="text" placeholder="e.g. 0.63, 150" value="${escapeHtml(values.strengthAmount || values.strength || '')}" oninput="renderOrderBuilderPreview()"></label>
-            <label>Strength unit<select name="orderCustomUnits" onchange="renderOrderBuilderPreview()">${strengthUnitOptionsHtml(selectedUnit)}</select></label>
-            <label>Per amount<input name="orderCustomPerAmount" type="number" min="0.001" step="any" placeholder="1" value="${escapeHtml(values.perAmount || '1')}" oninput="renderOrderBuilderPreview()"></label>
-            <label>Per unit<select name="orderCustomPerUnit" onchange="renderOrderBuilderPreview()">${perUnitOptionsHtml(selectedPerUnit)}</select></label>
+            <label>Strength unit<select name="orderCustomUnits" data-auto-filled="${values.activeUnit || values.units ? 'false' : 'true'}" onchange="this.dataset.autoFilled='false'; renderOrderBuilderPreview()">${strengthUnitOptionsHtml(selectedUnit)}</select></label>
+            <label>Per amount<input name="orderCustomPerAmount" type="number" min="0.001" step="any" placeholder="1" value="${escapeHtml(values.perAmount || profile.perAmount || '1')}" data-auto-filled="${values.perAmount ? 'false' : 'true'}" oninput="this.dataset.autoFilled='false'; renderOrderBuilderPreview()"></label>
+            <label>Per unit<select name="orderCustomPerUnit" data-auto-filled="${values.perUnit || String(values.units || '').split('/')[1] ? 'false' : 'true'}" onchange="this.dataset.autoFilled='false'; renderOrderBuilderPreview()">${perUnitOptionsHtml(selectedPerUnit)}</select></label>
         </span>
         <div class="order-custom-combo-fields order-custom-wide" style="display:none;">
             <div class="order-custom-combo-title">Combination product active ingredients</div>
             <div class="combo-basis-panel">
                 <label><input name="orderCustomUseSharedPer" type="checkbox" ${sharedBasis || !values.components?.length ? 'checked' : ''} onchange="updateOrderCustomCombination('${rowId}')"> Use one package/concentration basis</label>
                 <span>per</span>
-                <input name="orderCustomSharedPerAmount" type="number" min="0.001" step="any" value="${escapeHtml(sharedBasis ? formatAmount(sharedBasis.amount) : (values.perAmount || '1'))}" oninput="updateOrderCustomCombination('${rowId}')">
-                <select name="orderCustomSharedPerUnit" onchange="updateOrderCustomCombination('${rowId}')">${perUnitOptionsHtml(sharedBasis?.unit || selectedPerUnit)}</select>
+                <input name="orderCustomSharedPerAmount" type="number" min="0.001" step="any" value="${escapeHtml(sharedBasis ? formatAmount(sharedBasis.amount) : (values.perAmount || profile.perAmount || '1'))}" data-auto-filled="${sharedBasis || values.perAmount ? 'false' : 'true'}" oninput="this.dataset.autoFilled='false'; updateOrderCustomCombination('${rowId}')">
+                <select name="orderCustomSharedPerUnit" data-auto-filled="${sharedBasis?.unit || selectedPerUnit ? 'false' : 'true'}" onchange="this.dataset.autoFilled='false'; updateOrderCustomCombination('${rowId}')">${perUnitOptionsHtml(sharedBasis?.unit || selectedPerUnit)}</select>
                 <button type="button" onclick="addOrderCustomComponentRow('${rowId}')">Add Ingredient</button>
             </div>
             <div class="order-custom-component-list"></div>
             <div class="order-custom-combo-preview combo-strength-preview">Add ingredients to preview the combined strength.</div>
         </div>
         <label>Order quantity<input name="orderCustomQty" type="text" placeholder="Amount to order" value="${escapeHtml(values.requestedQty || '')}" oninput="renderOrderBuilderPreview()"></label>
-        <label>Stock unit<input name="orderCustomInventoryUnit" type="text" placeholder="bottle, tablet, mL" value="${escapeHtml(values.inventoryUnit || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Stock unit<input name="orderCustomInventoryUnit" type="text" placeholder="bottle, tablet, mL" value="${escapeHtml(values.inventoryUnit || profile.stockUnit || '')}" data-auto-filled="${values.inventoryUnit ? 'false' : 'true'}" oninput="this.dataset.autoFilled='false'; renderOrderBuilderPreview()"></label>
         <label>Estimated price<input name="orderCustomPrice" type="text" placeholder="Line price" value="${escapeHtml(values.estimatedUnitPrice || '')}" oninput="renderOrderBuilderPreview()"></label>
         <label>Purchase link<input name="orderCustomLink" type="url" placeholder="https://..." value="${escapeHtml(values.purchaseLink || '')}" oninput="renderOrderBuilderPreview()"></label>
         <label>Expiry if known<input name="orderCustomExpiry" type="date" value="${escapeHtml(values.expiry || '')}" oninput="renderOrderBuilderPreview()"></label>
@@ -17496,21 +17791,22 @@ function buildInventoryOrderLinesFromResult(result, existingOrder = null) {
         const previous = item.lineId ? existingLines.find(line => line.id === item.lineId) : null;
         const comboMed = { isCombination: true, components: item.components || [] };
         const isCombination = !!item.isCombination && item.components?.length > 0;
+        const singleSpec = normalizeSingleStrengthSpec(item);
         const strength = isCombination ? formatCombinationStrength(comboMed) : item.strength;
-        const units = isCombination ? formatInventoryUnits(comboMed) : item.units;
+        const units = isCombination ? formatInventoryUnits(comboMed) : singleSpec.units;
         lines.push(preserveOrderLineState({
             id: item.lineId || `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
             sourceType: 'new',
             medId: '',
             formularyId: '',
             name: item.name,
-            strength,
+            strength: isCombination ? strength : singleSpec.displayStrength,
             units,
             formulation: item.formulation || 'Other',
-            strengthAmount: isCombination ? null : item.strength,
-            activeUnit: isCombination ? null : (item.units || 'mg'),
-            perAmount: item.perAmount || '1',
-            perUnit: item.perUnit || '',
+            strengthAmount: isCombination ? null : singleSpec.strengthAmount,
+            activeUnit: isCombination ? null : singleSpec.activeUnit,
+            perAmount: isCombination ? null : (singleSpec.perAmount || '1'),
+            perUnit: isCombination ? '' : singleSpec.perUnit,
             isCombination,
             components: isCombination ? item.components : [],
             inventoryUnit: item.inventoryUnit || defaultInventoryUnitForFormulation(item.formulation || 'Other', defaultInventoryBehaviorForFormulation(item.formulation || 'Other')),
@@ -17602,7 +17898,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
                 <div class="formulary-grid">${otherInventoryChoices || '<div class="empty-state">No other inventory items available.</div>'}</div>
                 <div style="font-size:11px; margin:8px 0 4px;"><strong>Add from formulary</strong></div>
                 <div class="formulary-grid">${formularyChoices || '<div class="empty-state">No formulary items saved.</div>'}</div>
-                <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-formulary Item</button></div>
+                <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-Inventory Item</button></div>
                 <div id="order-custom-list"></div>
                 <div class="field-row-stacked" style="margin-top:8px;">
                     <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;">${escapeHtml(isEdit ? editOrder.note || '' : '')}</textarea>
@@ -17777,6 +18073,42 @@ window.updateOrderCustomCombination = function(rowId) {
     const row = document.getElementById(rowId);
     if (!row) return;
     const isCombo = row.querySelector('[name="orderCustomIsCombination"]')?.checked;
+    const formulation = row.querySelector('[name="orderCustomFormulation"]')?.value || 'Other';
+    const profile = dosageFormMeasurementProfile(formulation);
+    const formulationChanged = row.dataset.formulation !== formulation;
+    if (formulationChanged) {
+        const strengthUnit = row.querySelector('[name="orderCustomUnits"]');
+        const perAmount = row.querySelector('[name="orderCustomPerAmount"]');
+        const perUnit = row.querySelector('[name="orderCustomPerUnit"]');
+        const stockUnit = row.querySelector('[name="orderCustomInventoryUnit"]');
+        const sharedAmount = row.querySelector('[name="orderCustomSharedPerAmount"]');
+        const sharedUnit = row.querySelector('[name="orderCustomSharedPerUnit"]');
+        if (strengthUnit && (!strengthUnit.value || strengthUnit.dataset.autoFilled === 'true')) {
+            strengthUnit.value = profile.strengthUnit;
+            strengthUnit.dataset.autoFilled = 'true';
+        }
+        if (perAmount && (!perAmount.value || perAmount.dataset.autoFilled === 'true')) {
+            perAmount.value = String(profile.perAmount || 1);
+            perAmount.dataset.autoFilled = 'true';
+        }
+        if (perUnit && (!perUnit.value || perUnit.dataset.autoFilled === 'true')) {
+            perUnit.value = profile.perUnit || '';
+            perUnit.dataset.autoFilled = 'true';
+        }
+        if (stockUnit && (!stockUnit.value || stockUnit.dataset.autoFilled === 'true')) {
+            stockUnit.value = profile.stockUnit || '';
+            stockUnit.dataset.autoFilled = 'true';
+        }
+        if (sharedAmount && (!sharedAmount.value || sharedAmount.dataset.autoFilled === 'true')) {
+            sharedAmount.value = String(profile.perAmount || 1);
+            sharedAmount.dataset.autoFilled = 'true';
+        }
+        if (sharedUnit && (!sharedUnit.value || sharedUnit.dataset.autoFilled === 'true')) {
+            sharedUnit.value = profile.perUnit || '';
+            sharedUnit.dataset.autoFilled = 'true';
+        }
+        row.dataset.formulation = formulation;
+    }
     const comboButton = row.querySelector('.order-custom-combo-button');
     if (comboButton) {
         comboButton.classList.toggle('checked', !!isCombo);
@@ -17852,6 +18184,7 @@ function perUnitOptionsHtml(selected = '') {
 window.updateReceiveIntakeDefaults = function() {
     const formulation = document.getElementById('receive-new-formulation')?.value || 'Other';
     const behaviorSelect = document.getElementById('receive-new-inventory-behavior');
+    const formulationChanged = behaviorSelect?.dataset.formulation !== formulation;
     if (behaviorSelect && dosageFormUsesContainerTracking(formulation)) {
         behaviorSelect.value = 'container-finish';
         behaviorSelect.disabled = true;
@@ -17862,11 +18195,40 @@ window.updateReceiveIntakeDefaults = function() {
     const behavior = behaviorSelect?.value || defaultInventoryBehaviorForFormulation(formulation);
     const stockUnit = document.getElementById('receive-new-inventory-unit');
     const adminUnit = document.getElementById('receive-new-administration-unit');
+    const profile = dosageFormMeasurementProfile(formulation, behavior);
+    const strengthUnit = document.querySelector('#receive-single-strength-fields [name="units"]');
+    const perAmount = document.querySelector('#receive-single-strength-fields [name="perAmount"]');
+    const perUnit = document.querySelector('#receive-single-strength-fields [name="perUnit"]');
+    const guidance = document.getElementById('receive-strength-guidance');
     const suggestedUnit = defaultInventoryUnitForFormulation(formulation, behavior);
-    if (stockUnit && !stockUnit.value) stockUnit.value = suggestedUnit;
-    if (adminUnit && !adminUnit.value) adminUnit.value = defaultAdministrationUnitForFormulation(formulation);
+    if (stockUnit && (!stockUnit.value || stockUnit.dataset.autoFilled === 'true')) {
+        stockUnit.value = suggestedUnit;
+        stockUnit.dataset.autoFilled = 'true';
+    }
+    if (adminUnit && (!adminUnit.value || adminUnit.dataset.autoFilled === 'true')) {
+        adminUnit.value = defaultAdministrationUnitForFormulation(formulation);
+        adminUnit.dataset.autoFilled = 'true';
+    }
+    if (formulationChanged) {
+        if (strengthUnit && (!strengthUnit.value || strengthUnit.dataset.autoFilled === 'true')) {
+            strengthUnit.value = profile.strengthUnit;
+            strengthUnit.dataset.autoFilled = 'true';
+        }
+        if (perAmount && (!perAmount.value || perAmount.dataset.autoFilled === 'true')) {
+            perAmount.value = String(profile.perAmount || 1);
+            perAmount.dataset.autoFilled = 'true';
+        }
+        if (perUnit && (!perUnit.value || perUnit.dataset.autoFilled === 'true')) {
+            perUnit.value = profile.perUnit || '';
+            perUnit.dataset.autoFilled = 'true';
+        }
+        if (behaviorSelect) behaviorSelect.dataset.formulation = formulation;
+    }
     const sharedUnit = document.getElementById('receive-combo-shared-per-unit');
     if (sharedUnit && !sharedUnit.value) sharedUnit.value = defaultPerUnitForFormulation(formulation);
+    if (guidance) guidance.textContent = behavior === 'container-finish'
+        ? `${profile.guidance} Stock changes when a container is marked finished.`
+        : profile.guidance;
     updateReceiveCombinationMode();
 };
 
@@ -17908,11 +18270,24 @@ window.updateReceiveAssignmentMode = function() {
 };
 
 async function promptNewInventoryFromOrderLine(line, barcode, qty) {
-    const unitParts = String(line.units || '').split('/');
-    const selectedUnit = line.activeUnit || unitParts[0] || 'mg';
-    const selectedPerUnit = line.perUnit || unitParts[1] || '';
-    const parsedLineStrength = parseAmount(line.strength, NaN);
-    const lineStrengthAmount = line.strengthAmount || (Number.isFinite(parsedLineStrength) ? String(parsedLineStrength) : '');
+    const parsedLineStrengthToken = parseStrengthToken(line.strength || '');
+    const lineUnitBasis = splitUnitBasis(line.units || '');
+    const hasIncomingStrengthUnit = !!(line.activeUnit || line.units || parsedLineStrengthToken.activeUnit);
+    const hasIncomingPerAmount = !!line.perAmount || !!lineUnitBasis.perUnit || !!parsedLineStrengthToken.perUnit;
+    const hasIncomingPerUnit = !!(line.perUnit || lineUnitBasis.perUnit || parsedLineStrengthToken.perUnit);
+    const incomingSpec = normalizeSingleStrengthSpec({
+        strength: line.strength,
+        strengthAmount: line.strengthAmount,
+        activeUnit: line.activeUnit,
+        units: line.units,
+        perAmount: line.perAmount,
+        perUnit: line.perUnit
+    });
+    const selectedUnit = incomingSpec.activeUnit || 'mg';
+    const selectedPerUnit = incomingSpec.perUnit || '';
+    const lineStrengthAmount = Number.isFinite(parseAmount(incomingSpec.strengthAmount, NaN))
+        ? formatAmount(parseAmount(incomingSpec.strengthAmount))
+        : '';
     const receivedBarcode = normalizeMedicationCode(barcode) || normalizeMedicationCode(line.barcodeCode) || asArray(line.barcodeCodes).map(normalizeMedicationCode).filter(Boolean)[0] || createMedicationCode();
     const selectedFormulation = line.formulation || 'Other';
     const selectedStorage = line.storage || 'Room Temp';
@@ -17954,9 +18329,9 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
                     </div>
                     <div id="receive-single-strength-fields" class="field-row">
                         <label>Strength:</label><input name="strength" type="number" min="0" step="any" value="${escapeHtml(lineStrengthAmount)}" style="width:80px;">
-                        <select name="units" style="width:90px;">${strengthUnitOptionsHtml(selectedUnit)}</select>
-                        <label>per</label><input name="perAmount" type="number" min="0.001" step="any" value="${escapeHtml(line.perAmount || '1')}" style="width:55px;">
-                        <select name="perUnit" style="width:90px;">${perUnitOptionsHtml(selectedPerUnit)}</select>
+                        <select name="units" data-auto-filled="${hasIncomingStrengthUnit ? 'false' : 'true'}" style="width:90px;" onchange="this.dataset.autoFilled='false'">${strengthUnitOptionsHtml(selectedUnit)}</select>
+                        <label>per</label><input name="perAmount" type="number" min="0.001" step="any" value="${escapeHtml(incomingSpec.perAmount || line.perAmount || '1')}" data-auto-filled="${hasIncomingPerAmount ? 'false' : 'true'}" style="width:55px;" oninput="this.dataset.autoFilled='false'">
+                        <select name="perUnit" data-auto-filled="${hasIncomingPerUnit ? 'false' : 'true'}" style="width:90px;" onchange="this.dataset.autoFilled='false'">${perUnitOptionsHtml(selectedPerUnit)}</select>
                     </div>
                     <div id="receive-combination-fields" style="display:none; margin-top:6px;">
                         <div class="order-custom-combo-title">Combination product active ingredients</div>
@@ -17982,9 +18357,10 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
                         </select>
                     </div>
                     <div class="field-row" style="margin-top:6px;">
-                        <label>Stock unit:</label><input id="receive-new-inventory-unit" name="inventoryUnit" type="text" value="${escapeHtml(line.inventoryUnit || '')}" style="width:90px;">
-                        <label>Give/apply as:</label><input id="receive-new-administration-unit" name="administrationUnit" type="text" value="${escapeHtml(line.administrationUnit || '')}" style="width:100px;">
+                        <label>Stock unit:</label><input id="receive-new-inventory-unit" name="inventoryUnit" type="text" value="${escapeHtml(line.inventoryUnit || '')}" data-auto-filled="${line.inventoryUnit ? 'false' : 'true'}" style="width:90px;" oninput="this.dataset.autoFilled='false'">
+                        <label>Give/apply as:</label><input id="receive-new-administration-unit" name="administrationUnit" type="text" value="${escapeHtml(line.administrationUnit || '')}" data-auto-filled="${line.administrationUnit ? 'false' : 'true'}" style="width:100px;" oninput="this.dataset.autoFilled='false'">
                     </div>
+                    <div id="receive-strength-guidance" class="form-help" style="margin-top:6px;"></div>
                 </fieldset>
                 <fieldset>
                     <legend>Safety & Assignment</legend>
@@ -18043,23 +18419,21 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
         await appAlert('Add at least one valid active ingredient and package basis for this combination product.');
         return null;
     }
-    const strengthAmount = isCombination ? null : parseAmount(result.strength, NaN);
+    const singleSpec = normalizeSingleStrengthSpec({
+        strength: result.strength,
+        units: result.units,
+        perAmount: result.perAmount,
+        perUnit: result.perUnit
+    }, selectedUnit || 'mg');
+    const strengthAmount = isCombination ? null : parseAmount(singleSpec.strengthAmount, NaN);
     if (!isCombination && (!Number.isFinite(strengthAmount) || strengthAmount <= 0)) {
         await appAlert('Strength must be greater than 0.');
         return null;
     }
-    const perAmount = parseAmount(result.perAmount, 1);
-    const perUnit = result.perUnit || '';
-    const activeUnit = result.units || selectedUnit || 'mg';
-    const hasDenominator = !isCombination && perUnit && Number.isFinite(perAmount) && perAmount > 0;
     const comboMed = { isCombination: true, components };
-    const finalStrength = isCombination ? formatCombinationStrength(comboMed) : (hasDenominator ? strengthAmount / perAmount : strengthAmount);
-    const finalUnits = isCombination ? formatInventoryUnits(comboMed) : (hasDenominator ? `${activeUnit}/${perUnit}` : activeUnit);
-    const displayStrength = isCombination
-        ? finalStrength
-        : (hasDenominator
-            ? (perAmount === 1 ? `${formatAmount(strengthAmount)}${activeUnit}/${perUnit}` : `${formatAmount(strengthAmount)}${activeUnit}/${formatAmount(perAmount)}${perUnit}`)
-            : `${formatAmount(strengthAmount)}${activeUnit}`);
+    const finalStrength = isCombination ? formatCombinationStrength(comboMed) : singleSpec.strength;
+    const finalUnits = isCombination ? formatInventoryUnits(comboMed) : singleSpec.units;
+    const displayStrength = isCombination ? finalStrength : singleSpec.displayStrength;
     const formulation = result.formulation || line.formulation || 'Other';
     const inventoryBehavior = dosageFormUsesContainerTracking(formulation)
         ? 'container-finish'
@@ -18072,9 +18446,9 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
         units: finalUnits,
         displayStrength,
         strengthAmount,
-        activeUnit: isCombination ? null : activeUnit,
-        perAmount: isCombination ? null : (hasDenominator ? perAmount : null),
-        perUnit: isCombination ? '' : (hasDenominator ? perUnit : ''),
+        activeUnit: isCombination ? null : singleSpec.activeUnit,
+        perAmount: isCombination ? null : singleSpec.perAmount,
+        perUnit: isCombination ? '' : singleSpec.perUnit,
         formulation,
         inventoryUnit,
         administrationUnit: result.administrationUnit || defaultAdministrationUnitForFormulation(formulation) || inventoryUnit,
@@ -18539,7 +18913,7 @@ function renderAll() {
         ? sortedInventory.filter(med => inventorySearchText(med).includes(inventoryQuery))
         : sortedInventory;
 filteredInventory.forEach(med => {
-    let displayStrength = formatMedStrength(med);
+    let displayStrength = formatMedStrength(med, false, false);
     if (tableBody) {
         const row = document.createElement('tr');
         if (med.isBulkPrepack) row.classList.add('bulk-inventory-row');
@@ -18566,7 +18940,7 @@ filteredInventory.forEach(med => {
                 ${med.isBulkPrepack ? '<span class="prepack-added-badge">Bulk</span>' : ''}
             </td>
             <td>${displayStrength}</td>
-            <td>${escapeHtml(formatInventoryUnits(med))}</td>
+            <td>${escapeHtml(formatInventoryUnitsForColumn(med))}</td>
             <td class="${isLowStock ? 'inventory-alert-cell' : ''}">${formatAmount(parseAmount(med.stock))} ${escapeHtml(inventoryUnitFor(med))}${refillForecastText(med) ? `<br><small class="forecast-text">${escapeHtml(refillForecastText(med))}</small>` : ''}</td>
             <td class="${isLowStock ? 'inventory-alert-cell' : ''}">${escapeHtml(formatAmount(parseAmount(med.minThreshold, 0)))}</td>
             <td class="${isExpired ? 'inventory-expired-cell' : (isExpiringSoon ? 'inventory-expiring-cell' : '')}">${escapeHtml(med.expiry || 'N/A')}</td> <!-- NEW EXPIRATION COLUMN -->
