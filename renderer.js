@@ -10920,6 +10920,30 @@ function prepackTogetherGroupItems(day, item) {
     return (day.items || []).filter(candidate => grouped.has(candidate.id));
 }
 
+function prepackLinkedPrimaryScore(item, groupItems) {
+    const schedule = prepackItemSchedule(item);
+    if (!schedule) return 0;
+    const groupSchedules = groupItems
+        .map(candidate => prepackItemSchedule(candidate))
+        .filter(Boolean);
+    const directTogetherLinks = scheduleLinkRules(schedule)
+        .filter(rule => rule.mode === 'together' && groupSchedules.some(target =>
+            target.id !== schedule.id && scheduleRuleTargets(rule, target, schedule)
+        )).length;
+    const connectedTogetherLinks = groupSchedules
+        .filter(target => target.id !== schedule.id && scheduleLinkModeBetween(schedule, target) === 'together')
+        .length;
+    return (directTogetherLinks * 10) + connectedTogetherLinks;
+}
+
+function prepackLinkedPrimaryItem(groupItems) {
+    return groupItems.slice().sort((a, b) =>
+        prepackLinkedPrimaryScore(b, groupItems) - prepackLinkedPrimaryScore(a, groupItems) ||
+        timeToMinutes(a.time) - timeToMinutes(b.time) ||
+        String(a.medName || '').localeCompare(String(b.medName || ''), undefined, { sensitivity: 'base' })
+    )[0] || groupItems[0];
+}
+
 function applyPrepackStockForReadyGroup(queue, day, item, method = 'scan') {
     const groupItems = prepackTogetherGroupItems(day, item);
     const pendingGroupItems = groupItems.filter(candidate => candidate.status !== 'correct');
@@ -13133,16 +13157,93 @@ window.addLastMinutePrepackItem = async function(queueId) {
     await sync();
 };
 
+function prepackItemLabelMedName(item) {
+    const schedule = prepackItemSchedule(item);
+    const med = db.inventory.find(candidate => candidate.id === item?.medId);
+    return schedule && med ? formatMultiMedLabelName(schedule, med) : `${item?.medName || 'Medication'} ${item?.dose || item?.strength || ''}`.trim();
+}
+
+function prepackPlainLabelRow(item) {
+    return `${item.time} ${prepackItemLabelMedName(item)} ${item.quantity || ''}`;
+}
+
+function prepackPlainLabelRowHtml(item) {
+    return `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(prepackItemLabelMedName(item))} (${escapeHtml(item.quantity || '')})</div>`;
+}
+
+function prepackLinkedLabelLineHtml(item) {
+    return `<div class="label-small linked-label-line"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(prepackItemLabelMedName(item))} Dose ${escapeHtml(item.dose || '')} Qty ${escapeHtml(item.quantity || '')}</div>`;
+}
+
+function prepackLinkedGroupLabelBlockHtml(queue, primaryItem, linkedItems) {
+    const primarySchedule = prepackItemSchedule(primaryItem);
+    const primaryMed = db.inventory.find(candidate => candidate.id === primaryItem?.medId);
+    const primaryName = primaryMed && primarySchedule
+        ? `${primaryMed.name} ${formatLabelMedStrength(primaryMed)}`
+        : `${primaryItem?.medName || 'Medication'} ${primaryItem?.strength || ''}`.trim();
+    const primaryDose = primaryItem?.dose || (primaryMed && primarySchedule ? formatPrescribedDose(primaryMed, primarySchedule.doseQty) : '');
+    const primaryQty = primaryItem?.quantity || (primaryMed && primarySchedule ? formatQtyForSchedule(primarySchedule, primaryMed) : '');
+    const instructionSchedules = [primarySchedule, ...linkedItems.map(prepackItemSchedule)].filter(Boolean);
+    const instructionLines = linkedMedicationInstructionLines(instructionSchedules);
+    return `<div class="prepack-linked-label-group">
+        <div class="label-title">${escapeHtml(primaryName)}</div>
+        <div class="label-small">Dose: ${escapeHtml(primaryDose)} | Qty: ${escapeHtml(primaryQty)}</div>
+        <div class="label-small">Member: ${escapeHtml(queue.memberName || '')}</div>
+        <div class="label-small linked-label-heading"><b>Take together:</b></div>
+        ${linkedItems.map(prepackLinkedLabelLineHtml).join('')}
+        ${instructionLines.map(line => `<div class="label-small"><b>Instructions:</b> ${escapeHtml(line)}</div>`).join('')}
+    </div>`;
+}
+
+function prepackDayLabelEntries(day) {
+    const seen = new Set();
+    const items = (day.items || []).slice().sort((a, b) =>
+        timeToMinutes(a.time) - timeToMinutes(b.time) ||
+        String(a.medName || '').localeCompare(String(b.medName || ''), undefined, { sensitivity: 'base' })
+    );
+    return items.map(item => {
+        if (seen.has(item.id)) return null;
+        const group = prepackTogetherGroupItems(day, item)
+            .filter(candidate => candidate && !seen.has(candidate.id))
+            .sort((a, b) =>
+                timeToMinutes(a.time) - timeToMinutes(b.time) ||
+                String(a.medName || '').localeCompare(String(b.medName || ''), undefined, { sensitivity: 'base' })
+            );
+        if (group.length > 1) {
+            const primary = prepackLinkedPrimaryItem(group);
+            group.forEach(candidate => seen.add(candidate.id));
+            return {
+                type: 'linked',
+                primary,
+                linked: group.filter(candidate => candidate.id !== primary.id)
+            };
+        }
+        seen.add(item.id);
+        return { type: 'single', item };
+    }).filter(Boolean);
+}
+
 function prepackDayLabelHtml(queue, day) {
     ensurePrepackDayCodes(queue);
     const printableCode = day.prepackScanCode || day.prepackCode;
     const barcodeDataUrl = aztecBarcodeDataUrl(printableCode) || code128DataUrl(printableCode);
+    const entries = prepackDayLabelEntries(day);
     const labelClass = getLabelClass(
-        day.items.map(item => `${item.time} ${item.medName} ${item.dose || item.strength} ${item.quantity}`),
-        day.items.length + 1
+        entries.flatMap(entry => entry.type === 'linked'
+            ? [
+                entry.primary.medName,
+                entry.primary.dose,
+                ...entry.linked.map(prepackPlainLabelRow)
+            ]
+            : [prepackPlainLabelRow(entry.item)]
+        ),
+        entries.reduce((count, entry) => count + (entry.type === 'linked' ? 5 + entry.linked.length : 1), 1)
     );
-    const rows = day.items.length
-        ? day.items.map(item => `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(item.medName)} ${escapeHtml(item.dose || item.strength || '')} (${escapeHtml(item.quantity)})</div>`).join('')
+    const rows = entries.length
+        ? entries.map(entry => entry.type === 'linked'
+            ? prepackLinkedGroupLabelBlockHtml(queue, entry.primary, entry.linked)
+            : prepackPlainLabelRowHtml(entry.item)
+        ).join('')
         : '<div class="label-med-row">No medications in this prepack</div>';
     return `<div class="${labelClass} prepack-day-label${barcodeDataUrl ? ' prepack-coded-label' : ''}">
         <div class="label-date label-date-with-icon">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}${labelShiftIconHtml(queue.selection?.prepackShift)}</div>

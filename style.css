@@ -7331,6 +7331,21 @@ button {
     line-height: 0.95;
 }
 
+#label-preview-content .prepack-linked-label-group,
+#print-area .prepack-linked-label-group {
+    margin-top: 1px;
+    padding-top: 1px;
+}
+
+#label-preview-content .prepack-linked-label-group + .prepack-linked-label-group,
+#label-preview-content .label-med-row + .prepack-linked-label-group,
+#label-preview-content .prepack-linked-label-group + .label-med-row,
+#print-area .prepack-linked-label-group + .prepack-linked-label-group,
+#print-area .label-med-row + .prepack-linked-label-group,
+#print-area .prepack-linked-label-group + .label-med-row {
+    border-top: 1px dotted #808080;
+}
+
 #label-preview-content .linked-label-line,
 #print-area .linked-label-line {
     padding-left: 0.08in;
