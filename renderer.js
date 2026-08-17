@@ -478,6 +478,83 @@ function medicationQrDataUrl(code) {
     return qr.createDataURL(4, 1);
 }
 
+const CODE128_PATTERNS = [
+    '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
+    '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132',
+    '221231','213212','223112','312131','311222','321122','321221','312212','322112','322211',
+    '212123','212321','232121','111323','131123','131321','112313','132113','132311','211313',
+    '231113','231311','112133','112331','132131','113123','113321','133121','313121','211331',
+    '231131','213113','213311','213131','311123','311321','331121','312113','312311','332111',
+    '314111','221411','431111','111224','111422','121124','121421','141122','141221','112214',
+    '112412','122114','122411','142112','142211','241211','221114','413111','241112','134111',
+    '111242','121142','121241','114212','124112','124211','411212','421112','421211','212141',
+    '214121','412121','111143','111341','131141','114113','114311','411113','411311','113141',
+    '114131','311141','411131','211412','211214','211232','2331112'
+];
+
+function code128DataUrl(code) {
+    const normalized = normalizeMedicationCode(code);
+    if (!normalized) return '';
+    const clean = normalized.replace(/[^\x20-\x7E]/g, '').slice(0, 80);
+    if (!clean) return '';
+    const values = [104, ...clean.split('').map(char => char.charCodeAt(0) - 32)];
+    let checksum = values[0];
+    for (let i = 1; i < values.length; i++) checksum += values[i] * i;
+    values.push(checksum % 103, 106);
+    const modules = [];
+    values.forEach(value => {
+        const pattern = CODE128_PATTERNS[value];
+        if (!pattern) return;
+        pattern.split('').forEach((width, index) => {
+            modules.push({ black: index % 2 === 0, width: parseInt(width, 10) });
+        });
+    });
+    const moduleWidth = 1;
+    const quiet = 8;
+    const height = 28;
+    const totalWidth = modules.reduce((sum, part) => sum + part.width * moduleWidth, quiet * 2);
+    let x = quiet;
+    const bars = modules.map(part => {
+        const width = part.width * moduleWidth;
+        const rect = part.black ? `<rect x="${x}" y="0" width="${width}" height="${height}" fill="#000"/>` : '';
+        x += width;
+        return rect;
+    }).join('');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height}" viewBox="0 0 ${totalWidth} ${height}" shape-rendering="crispEdges">${bars}</svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function bwipSvgDataUrl(options) {
+    try {
+        if (!window.bwipjs?.toSVG) return '';
+        const svg = window.bwipjs.toSVG(options);
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    } catch (error) {
+        console.warn('[barcode] Unable to render barcode', error);
+        return '';
+    }
+}
+
+function aztecBarcodeDataUrl(code) {
+    const normalized = normalizeMedicationCode(code);
+    if (!normalized) return '';
+    const clean = normalized.replace(/[^\x20-\x7E]/g, '').slice(0, 40);
+    if (!clean) return '';
+    return bwipSvgDataUrl({
+        bcid: 'azteccodecompact',
+        text: clean,
+        scale: 2,
+        padding: 0,
+        backgroundcolor: 'FFFFFF'
+    }) || bwipSvgDataUrl({
+        bcid: 'datamatrix',
+        text: clean,
+        scale: 2,
+        padding: 0,
+        backgroundcolor: 'FFFFFF'
+    }) || medicationQrDataUrl(clean);
+}
+
 // Helper to parse "YYYY-MM-DD" as a local date (avoiding UTC shift)
 function parseLocal(dateStr) {
     if (!dateStr || dateStr === "Ongoing") return null;
@@ -3681,7 +3758,7 @@ window.printPreviewedLabel = async function() {
     printArea.innerHTML = pendingLabelHtml;
     const prepackDefinition = pendingPrepackDefinition;
     window.closeLabelPreview();
-    if (prepackDefinition?.existingQueueId) await commitPrepackPrint(prepackDefinition);
+    if (prepackDefinition?.existingQueueId && !prepackDefinition.reprintOnly) await commitPrepackPrint(prepackDefinition);
     printPreparedArea();
 };
 
@@ -4586,6 +4663,7 @@ window.switchMemberProfileTab = function(tab = 'main') {
     document.querySelectorAll('[data-member-section]').forEach(section => {
         section.style.display = section.dataset.memberSection === tab ? '' : 'none';
     });
+    document.querySelector('.member-profile-window')?.classList.toggle('diary-workbench', tab === 'diary');
     const rail = document.getElementById('member-profile-right-panel');
     if (rail) {
         rail.style.display = tab === 'main' ? '' : 'none';
@@ -10483,6 +10561,30 @@ function prepackItemId() {
     return `prep_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+function prepackQueueId() {
+    return `queue_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function hashForShortCode(value) {
+    let hash = 2166136261;
+    String(value || '').split('').forEach(char => {
+        hash ^= char.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    });
+    return (hash >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(-6);
+}
+
+function prepackPackageScanCode(memberId, date, shift = 'all', uniqueSeed = '') {
+    const dateObj = parseLocal(date || localDateKey());
+    const epoch = parseLocal('2026-01-01');
+    const datePart = dateObj && epoch
+        ? Math.max(0, Math.round((dateObj - epoch) / 86400000)).toString(36).toUpperCase().padStart(3, '0').slice(-3)
+        : String(date || localDateKey()).replace(/[^0-9]/g, '').slice(-3) || '000';
+    const shiftPart = String(shift || 'all').replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 1) || 'A';
+    const memberHash = hashForShortCode(`${memberId}|${uniqueSeed}`).slice(-4);
+    return `P${datePart}${shiftPart}${memberHash}`;
+}
+
 function prepackPackageCode(memberId, date, shift = 'all') {
     const memberPart = String(memberId || 'member').replace(/[^a-z0-9]/gi, '').slice(-8).toUpperCase() || 'MEMBER';
     const datePart = String(date || localDateKey()).replace(/[^0-9]/g, '');
@@ -10493,8 +10595,19 @@ function prepackPackageCode(memberId, date, shift = 'all') {
 function ensurePrepackDayCodes(queue) {
     if (!queue) return;
     (queue.days || []).forEach(day => {
-        if (!day.prepackCode) day.prepackCode = prepackPackageCode(queue.memberId, firstDateInPrepackDay(day) || day.date, queue.selection?.prepackShift || 'all');
+        const codeDate = firstDateInPrepackDay(day) || day.date;
+        const shift = queue.selection?.prepackShift || 'all';
+        if (!day.prepackCode) day.prepackCode = prepackPackageCode(queue.memberId, codeDate, shift);
+        if (!day.prepackScanCode) day.prepackScanCode = prepackPackageScanCode(queue.memberId, codeDate, shift, queue.id || '');
     });
+}
+
+function prepackDayCodeMatches(day, scannedCode) {
+    const normalized = normalizeMedicationCode(scannedCode);
+    return !!normalized && [
+        day?.prepackScanCode,
+        day?.prepackCode
+    ].some(code => normalizeMedicationCode(code) === normalized);
 }
 
 function isInventoryUnitDoseQueue(queue) {
@@ -10782,6 +10895,40 @@ function prepackStockShortagesForItems(queue, items = []) {
     return shortages;
 }
 
+function prepackTogetherGroupItems(day, item) {
+    if (!day || !item?.scheduleId) return item ? [item] : [];
+    const grouped = new Set([item.id]);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        (day.items || []).forEach(candidate => {
+            if (!candidate?.scheduleId || grouped.has(candidate.id)) return;
+            if (candidate.time !== item.time) return;
+            const candidateSchedule = db.schedules.find(schedule => schedule.id === candidate.scheduleId);
+            if (!candidateSchedule) return;
+            const linkedToGroup = (day.items || []).some(groupItem => {
+                if (!grouped.has(groupItem.id)) return false;
+                const groupSchedule = db.schedules.find(schedule => schedule.id === groupItem.scheduleId);
+                return groupSchedule && scheduleLinkModeBetween(groupSchedule, candidateSchedule) === 'together';
+            });
+            if (linkedToGroup) {
+                grouped.add(candidate.id);
+                changed = true;
+            }
+        });
+    }
+    return (day.items || []).filter(candidate => grouped.has(candidate.id));
+}
+
+function applyPrepackStockForReadyGroup(queue, day, item, method = 'scan') {
+    const groupItems = prepackTogetherGroupItems(day, item);
+    const pendingGroupItems = groupItems.filter(candidate => candidate.status !== 'correct');
+    if (pendingGroupItems.length > 0) return true;
+    const shortages = prepackStockShortagesForItems(queue, groupItems);
+    if (shortages.length) return false;
+    return groupItems.every(candidate => applyPrepackItemStock(queue, candidate, method));
+}
+
 function applyPrepackItemStock(queue, item, method = 'scan') {
     if (isInventoryUnitDoseQueue(queue)) return applyInventoryUnitDoseItemStock(queue, item, method);
     if (!queue || !item || item.inventoryDeducted === true || item.inventoryReturned === true) return true;
@@ -10854,6 +11001,56 @@ function reversePrepackItemStock(queue, item, reason = 'returned', quantityOverr
     return qty;
 }
 
+function undoPrepackItemStock(queue, item, reason = 'prepack undone') {
+    if (!queue || !item) return 0;
+    let qty = 0;
+    if (isInventoryUnitDoseQueue(queue)) {
+        if (item.inventoryDeducted && !item.inventoryReturned && !item.inventoryWasted) {
+            reverseInventoryUnitDoseItemStock(queue, item);
+            qty = parseAmount(queue.selection?.qtyPerContainer, 0);
+        }
+    } else if (item.inventoryDeducted && !item.inventoryReturned && !item.inventoryWasted) {
+        const med = db.inventory.find(candidate => candidate.id === item.medId);
+        qty = parseAmount(item.stockDelta, 0);
+        if (med && qty > 0) {
+            med.stock = parseAmount(med.stock, 0) + qty;
+            db.history.unshift({
+                id: Date.now().toString(),
+                timestamp: new Date().toLocaleString(),
+                memberId: queue.memberId || '',
+                memberName: queue.memberName || '',
+                medId: med.id,
+                medName: med.name,
+                scheduleId: item.scheduleId || '',
+                prepackQueueId: queue.id,
+                prepackItemId: item.id,
+                details: `Prepack undone; +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} returned to inventory.`
+            });
+            addAudit('Prepack undone', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}.`);
+        }
+    }
+    item.status = 'pending';
+    item.scannedCode = '';
+    item.scannedAt = '';
+    item.verificationMethod = '';
+    item.inventoryDeducted = false;
+    item.stockDelta = 0;
+    item.stockDeductedAt = '';
+    item.stockDeductionMethod = '';
+    item.stockLogDetail = '';
+    item.inventoryReturned = false;
+    item.returnedQuantity = 0;
+    item.returnedAt = '';
+    item.returnReason = '';
+    item.returnNote = '';
+    item.inventoryWasted = false;
+    item.wastedAt = '';
+    item.wasteReason = '';
+    item.wasteNote = '';
+    item.recordOnlyReturn = false;
+    return qty;
+}
+
 const returnPrepackCutoffDate = '2026-08-04';
 
 function firstDateInPrepackDay(day) {
@@ -10869,6 +11066,13 @@ function lastDateInPrepackDay(day) {
 function isReturnablePrepackDate(day) {
     const date = firstDateInPrepackDay(day);
     return !!date && date > returnPrepackCutoffDate;
+}
+
+function isPreparedPrepackItem(item) {
+    return item?.status === 'correct' ||
+        item?.inventoryDeducted === true ||
+        ['manual', 'scan'].includes(String(item?.verificationMethod || '').toLowerCase()) ||
+        !!item?.scannedAt;
 }
 
 function normalizeRecordOnlyPrepackReturnFlags() {
@@ -10957,8 +11161,8 @@ function markPrepackItemReturned(row, reason = 'returned', note = '', quantityOv
 function returnPrepackUnitLabel(row, qtyReturned) {
     const med = row.med || db.inventory.find(candidate => candidate.id === row.item?.medId);
     if (!med) return '';
-    const qrCode = medicationCodes(med)[0] || row.item?.barcodeCode || '';
-    const qrDataUrl = medicationQrDataUrl(qrCode);
+    const labelCode = medicationCodes(med)[0] || row.item?.barcodeCode || '';
+    const barcodeDataUrl = code128DataUrl(labelCode) || medicationQrDataUrl(labelCode);
     const unit = med.administrationUnit || inventoryUnitFor(med);
     const returnedDate = localDateKey();
     const qtyText = `${formatAmount(qtyReturned)} ${unit || 'unit(s)'}`;
@@ -10974,7 +11178,7 @@ function returnPrepackUnitLabel(row, qtyReturned) {
         <div class="label-small"><b>Qty returned:</b> ${escapeHtml(qtyText)}</div>
         <div class="label-small"><b>Exp:</b> ${escapeHtml(med.expiry || 'N/A')}</div>
         <div class="label-small"><b>Returned:</b> ${escapeHtml(returnedDate)}</div>
-        ${qrDataUrl ? `<img class="inventory-return-label-qr" src="${qrDataUrl}" alt="Inventory QR code">` : ''}
+        ${barcodeDataUrl ? `<img class="inventory-return-label-code" src="${barcodeDataUrl}" alt="Inventory barcode">` : ''}
     </div>`;
 }
 
@@ -11364,7 +11568,9 @@ function prepackShiftForTime(time) {
 }
 
 function prepackIconForShift(shift) {
-    return shift === 'day' ? '☀' : (shift === 'evening' ? '☾' : '');
+    if (shift === 'day') return String.fromCharCode(9728);
+    if (shift === 'evening') return String.fromCharCode(9790);
+    return '';
 }
 
 function labelShiftIconHtml(shift) {
@@ -11376,8 +11582,8 @@ function prepackShiftChoiceHtml(current = 'all') {
     const selected = current || 'all';
     const choices = [
         { value: 'all', title: 'All times', detail: 'Keep every scheduled dose together' },
-        { value: 'day', title: '☀ Daytime', detail: '12:00 AM through 4:00 PM' },
-        { value: 'evening', title: '☾ Evening', detail: '5:00 PM through 11:59 PM' }
+        { value: 'day', title: `${prepackIconForShift('day')} Daytime`, detail: '12:00 AM through 4:00 PM' },
+        { value: 'evening', title: `${prepackIconForShift('evening')} Evening`, detail: '5:00 PM through 11:59 PM' }
     ];
     return `<div class="prepack-choice-grid">
         ${choices.map(choice => `
@@ -11399,8 +11605,18 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
     const member = db.family.find(item => item.id === memberId);
     const byDate = new Map();
     const addedScheduleIds = new Set(selection?.addedScheduleIds || []);
-    rows.forEach(row => {
+    const queueSeed = selection?.prepackQueueId || '';
+    const expandedRows = expandPrepackRowsWithTogetherLinks(rows, selection || { memberId });
+    const uniqueRows = [];
+    const seenRows = new Set();
+    expandedRows.forEach(row => {
         if (!row?.instance?.date || !row.med || !row.schedule) return;
+        const rowKey = `${row.schedule.id}|${row.instance.key || scheduleInstanceKey(row.schedule.id, row.instance.date, row.instance.time)}`;
+        if (seenRows.has(rowKey)) return;
+        seenRows.add(rowKey);
+        uniqueRows.push(row);
+    });
+    uniqueRows.forEach(row => {
         if (!byDate.has(row.instance.date)) byDate.set(row.instance.date, []);
         byDate.get(row.instance.date).push({
             id: prepackItemId(),
@@ -11426,13 +11642,15 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         .map(([date, items]) => ({
             date,
             prepackCode: prepackPackageCode(memberId, date, selection?.prepackShift || 'all'),
+            prepackScanCode: prepackPackageScanCode(memberId, date, selection?.prepackShift || 'all', queueSeed),
             status: 'pending',
             needsReprint: false,
             items: items.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.medName.localeCompare(b.medName))
         }));
-    if (selection?.singleMedication && selection.labelLayout === 'range' && rows.length > 0) {
-        const firstRow = rows[0];
-        const totalQuantity = rows.reduce((sum, row) => sum + parseAmount(row.schedule.doseQty, 0), 0);
+    const singleScheduleIds = new Set(uniqueRows.map(row => row.schedule?.id).filter(Boolean));
+    if (selection?.singleMedication && selection.labelLayout === 'range' && uniqueRows.length > 0 && singleScheduleIds.size === 1) {
+        const firstRow = uniqueRows[0];
+        const totalQuantity = uniqueRows.reduce((sum, row) => sum + parseAmount(row.schedule.doseQty, 0), 0);
         const aggregateItem = {
             id: prepackItemId(),
             instanceKey: `range|${firstRow.schedule.id}|${selection.startDate}|${selection.endDate}|${selection.specificTime || 'all'}`,
@@ -11456,6 +11674,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         days = [{
             date: aggregateItem.time,
             prepackCode: prepackPackageCode(memberId, selection.startDate, selection?.prepackShift || 'all'),
+            prepackScanCode: prepackPackageScanCode(memberId, selection.startDate, selection?.prepackShift || 'all', queueSeed),
             status: 'pending',
             needsReprint: false,
             items: [aggregateItem]
@@ -11465,6 +11684,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         memberId,
         memberName: memberDisplayName(member),
         sourceLabel,
+        queueId: queueSeed,
         title: `${memberDisplayName(member)} | ${days[0]?.date || selection?.startDate || ''}${days.length > 1 ? ` - ${days[days.length - 1].date}` : (!days.length && selection?.endDate && selection.endDate !== selection.startDate ? ` - ${selection.endDate}` : '')}`,
         selection: selection || {
             kind: 'schedule-list',
@@ -11490,6 +11710,7 @@ function prepackRowsForSelection(selection) {
         schedules = db.schedules.filter(schedule => scheduleIds.has(schedule.id) && !isScheduleArchived(schedule));
     }
     const excludedInstances = new Set(selection.excludedInstanceKeys || []);
+    const excludedPrepackDates = new Set(selection.excludedPrepackDates || []);
     const rows = [];
     schedules.forEach(schedule => {
         const med = db.inventory.find(item => item.id === schedule.medId);
@@ -11497,13 +11718,59 @@ function prepackRowsForSelection(selection) {
         getScheduleInstancesInRange(schedule, selection.startDate, selection.endDate)
             .filter(instance => !selection.specificTime || instance.time === selection.specificTime)
             .filter(instance => !excludedInstances.has(instance.key))
+            .filter(instance => !excludedPrepackDates.has(instance.date))
             .forEach(instance => rows.push({ schedule, med, instance }));
     });
-    return filterRowsByPrepackShift(rows, selection.prepackShift).sort((a, b) =>
+    const expandedRows = expandPrepackRowsWithTogetherLinks(rows, selection);
+    return filterRowsByPrepackShift(expandedRows, selection.prepackShift).sort((a, b) =>
         a.instance.date.localeCompare(b.instance.date) ||
         timeToMinutes(a.instance.time) - timeToMinutes(b.instance.time) ||
         a.med.name.localeCompare(b.med.name, undefined, { sensitivity: 'base' })
     );
+}
+
+function matchingPrepackInstance(schedule, sourceInstance, excludedInstances = new Set()) {
+    if (!schedule || !sourceInstance?.date || !sourceInstance?.time) return null;
+    return getScheduleInstancesForDate(schedule, sourceInstance.date)
+        .find(instance => instance.time === sourceInstance.time && !excludedInstances.has(instance.key));
+}
+
+function expandPrepackRowsWithTogetherLinks(rows, selection = {}) {
+    const output = [];
+    const queued = new Set();
+    const excludedInstances = new Set(selection?.excludedInstanceKeys || []);
+    const candidateByMember = new Map();
+    const pushRow = (row) => {
+        if (!row?.schedule || !row?.med || !row?.instance) return false;
+        const key = `${row.schedule.id}|${row.instance.key || scheduleInstanceKey(row.schedule.id, row.instance.date, row.instance.time)}`;
+        if (queued.has(key)) return false;
+        queued.add(key);
+        output.push(row);
+        return true;
+    };
+
+    rows.forEach(row => pushRow(row));
+
+    for (let index = 0; index < output.length; index++) {
+        const row = output[index];
+        const memberId = row.schedule.memberId || selection.memberId || '';
+        if (!memberId) continue;
+        if (!candidateByMember.has(memberId)) {
+            candidateByMember.set(memberId, db.schedules.filter(schedule =>
+                schedule.memberId === memberId && !isScheduleArchived(schedule)
+            ));
+        }
+        const candidates = candidateByMember.get(memberId);
+        linkedSchedulesFor(row.schedule, candidates)
+            .filter(linked => scheduleLinkModeBetween(row.schedule, linked) === 'together')
+            .forEach(linked => {
+                const linkedMed = db.inventory.find(item => item.id === linked.medId);
+                const linkedInstance = matchingPrepackInstance(linked, row.instance, excludedInstances);
+                if (linkedMed && linkedInstance) pushRow({ schedule: linked, med: linkedMed, instance: linkedInstance });
+            });
+    }
+
+    return output;
 }
 
 function prepackItemFingerprint(item) {
@@ -11540,12 +11807,28 @@ function reconcilePrepackQueue(queue) {
                 item.scannedCode = previous.scannedCode;
                 item.scannedAt = previous.scannedAt;
                 item.verificationMethod = previous.verificationMethod;
+                item.inventoryDeducted = previous.inventoryDeducted;
+                item.stockDelta = previous.stockDelta;
+                item.stockDeductedAt = previous.stockDeductedAt;
+                item.stockDeductionMethod = previous.stockDeductionMethod;
+                item.stockLogDetail = previous.stockLogDetail;
+                item.inventoryReturned = previous.inventoryReturned;
+                item.returnedQuantity = previous.returnedQuantity;
+                item.returnedAt = previous.returnedAt;
+                item.returnReason = previous.returnReason;
+                item.returnNote = previous.returnNote;
+                item.inventoryWasted = previous.inventoryWasted;
+                item.wastedAt = previous.wastedAt;
+                item.wasteReason = previous.wasteReason;
+                item.wasteNote = previous.wasteNote;
+                item.recordOnlyReturn = previous.recordOnlyReturn;
             } else {
                 changed = true;
             }
         });
         const previousDay = previousDays.get(day.date);
         if (previousDay?.prepackCode) day.prepackCode = previousDay.prepackCode;
+        day.prepackScanCode = previousDay?.prepackScanCode || '';
         const oldFingerprints = (previousDay?.items || []).map(prepackItemFingerprint).sort().join('||');
         const newFingerprints = day.items.map(prepackItemFingerprint).sort().join('||');
         const dayChanged = oldFingerprints !== newFingerprints;
@@ -11571,6 +11854,7 @@ function prepackSelectionFingerprint(selection) {
         memberId: selection.memberId || '',
         scheduleIds: (selection.scheduleIds || []).slice().sort(),
         excludedScheduleIds: (selection.excludedScheduleIds || []).slice().sort(),
+        excludedPrepackDates: (selection.excludedPrepackDates || []).slice().sort(),
         excludedInstanceKeys: (selection.excludedInstanceKeys || []).slice().sort(),
         startDate: selection.startDate || '',
         endDate: selection.endDate || '',
@@ -11603,6 +11887,10 @@ async function createPrepackQueue(definition, options = {}) {
         prepackSelectionFingerprint(queue.selection) === fingerprint
     );
     if (existing) {
+        const previousCodes = new Map((existing.days || []).map(day => [
+            day.date,
+            { prepackCode: day.prepackCode || '', prepackScanCode: day.prepackScanCode || '' }
+        ]));
         existing.memberName = definition.memberName;
         existing.sourceLabel = definition.sourceLabel;
         existing.title = definition.title;
@@ -11610,6 +11898,11 @@ async function createPrepackQueue(definition, options = {}) {
         existing.scheduledFor = options.scheduledFor || existing.scheduledFor || '';
         existing.labelsPrinted = existing.labelsPrinted || options.labelsPrinted === true;
         existing.days = definition.days;
+        existing.days.forEach(day => {
+            const previous = previousCodes.get(day.date);
+            day.prepackCode = previous?.prepackCode || day.prepackCode || '';
+            day.prepackScanCode = previous?.prepackScanCode || '';
+        });
         ensurePrepackDayCodes(existing);
         existing.currentDayIndex = 0;
         updatePrepackQueueStatus(existing);
@@ -11618,7 +11911,7 @@ async function createPrepackQueue(definition, options = {}) {
         return existing;
     }
     const queue = {
-        id: `queue_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        id: definition.queueId || prepackQueueId(),
         memberId: definition.memberId,
         memberName: definition.memberName,
         sourceLabel: definition.sourceLabel,
@@ -11712,6 +12005,9 @@ function prepackWorkspaceHtml(queue) {
         const returnedClass = item.inventoryReturned ? 'prepack-item-returned' : '';
         const addedClass = item.isPrepackAdded ? 'prepack-item-added' : '';
         const orderSetText = item.orderSetName ? ` | ${item.orderSetName}` : '';
+        const undoButton = isPreparedPrepackItem(item) && !item.inventoryReturned && !item.inventoryWasted
+            ? `<button type="button" onclick="undoPrepackItem('${escapeHtml(queue.id)}','${escapeHtml(day.date)}','${escapeHtml(item.id)}')">Undo</button>`
+            : '';
         const removeButton = queue.selection?.singleMedication
             ? ''
             : `<button type="button" onclick="removePrepackItem('${escapeHtml(queue.id)}','${escapeHtml(day.date)}','${escapeHtml(item.id)}')">Remove</button>`;
@@ -11722,7 +12018,7 @@ function prepackWorkspaceHtml(queue) {
                 <small>Qty: ${escapeHtml(item.quantity)} | Dose: ${escapeHtml(item.dose)}${item.expirationDate ? ` | Exp: ${escapeHtml(item.expirationDate)}` : ''}${item.inventoryReturned ? ` | Returned: ${escapeHtml(item.returnReason || 'returned')}` : ''}${escapeHtml(orderSetText)}</small>
                 ${item.status === 'wrong' ? `<div class="prepack-scan-error">Wrong scan: ${escapeHtml(item.scannedCode || 'Unknown code')}</div>` : ''}
             </div>
-            ${removeButton}
+            <div class="prepack-item-actions">${undoButton}${removeButton}</div>
         </div>`;
     }).join('');
     const dayButtons = queue.days.map((entry, index) => {
@@ -11762,6 +12058,8 @@ function prepackWorkspaceHtml(queue) {
                 ${medicationActions}
                 ${labelGroupButton}
                 <button type="button" onclick="editPrepackDateRange('${escapeHtml(queue.id)}')">Edit Date Range</button>
+                <button type="button" onclick="removePrepackDay('${escapeHtml(queue.id)}','${escapeHtml(day.date)}')">Remove This Day</button>
+                <button type="button" onclick="reprintPrepackLabels('${escapeHtml(queue.id)}')">Reprint Labels</button>
                 <button type="button" onclick="printUpdatedPrepackLabels('${escapeHtml(queue.id)}')">${printButtonText}</button>
                 <button type="button" onclick="deletePrepackQueue('${escapeHtml(queue.id)}')">Delete Queue</button>
             </div>
@@ -11853,7 +12151,7 @@ function returnablePrepackItems() {
             (day.items || []).forEach(item => {
                 if (item.inventoryReturned) return;
                 if (item.inventoryWasted) return;
-                if (item.status !== 'correct' && item.inventoryDeducted !== true) return;
+                if (!isPreparedPrepackItem(item)) return;
                 const med = db.inventory.find(candidate => candidate.id === item.medId);
                 const schedule = prepackItemSchedule(item);
                 if (isReturnPrepackExcludedMedication(med, schedule, item)) return;
@@ -11905,7 +12203,7 @@ function returnPrepackEligibleItemCount(queue, day) {
     return (day?.items || []).filter(item => {
         if (item.inventoryReturned) return false;
         if (item.inventoryWasted) return false;
-        if (item.status !== 'correct' && item.inventoryDeducted !== true) return false;
+        if (!isPreparedPrepackItem(item)) return false;
         const med = db.inventory.find(candidate => candidate.id === item.medId);
         const schedule = prepackItemSchedule(item);
         const row = { queue, day, item, med, schedule };
@@ -12236,7 +12534,7 @@ window.schedulePrepackScan = function(queueId) {
         const nextItem = day?.items.find(candidate => candidate.status !== 'correct');
         const med = nextItem && db.inventory.find(candidate => candidate.id === nextItem.medId);
         const expectedCodes = med ? medicationCodes(med) : [normalizeMedicationCode(nextItem?.barcodeCode)].filter(Boolean);
-        const expectedLength = (expectedCodes[0] || '').length;
+        const expectedLength = Math.min(...[10, ...expectedCodes.map(code => code.length).filter(Boolean)]);
         const typedLength = normalizeMedicationCode(input?.value).length;
         if (typedLength >= Math.min(Math.max(expectedLength, 1), 4)) window.scanPrepackCode(queueId);
     }, 180);
@@ -12251,12 +12549,12 @@ window.scanPrepackCode = async function(queueId) {
     if (!scannedCode) return;
     const packageMatch = (db.prepackQueues || []).find(candidate =>
         !isInventoryUnitDoseQueue(candidate) &&
-        (candidate.days || []).some(day => normalizeMedicationCode(day.prepackCode) === scannedCode)
+        (candidate.days || []).some(day => prepackDayCodeMatches(day, scannedCode))
     );
     if (packageMatch) {
         ensurePrepackDayCodes(packageMatch);
         activePrepackQueueId = packageMatch.id;
-        packageMatch.currentDayIndex = Math.max(0, packageMatch.days.findIndex(day => normalizeMedicationCode(day.prepackCode) === scannedCode));
+        packageMatch.currentDayIndex = Math.max(0, packageMatch.days.findIndex(day => prepackDayCodeMatches(day, scannedCode)));
         input.value = '';
         renderPrepackageQueues();
         return;
@@ -12270,13 +12568,17 @@ window.scanPrepackCode = async function(queueId) {
     item.scannedAt = new Date().toISOString();
     const correctScan = expectedCodes.includes(scannedCode);
     if (correctScan) {
-        if (!applyPrepackItemStock(queue, item, 'scan')) {
-            input.value = '';
-            await appAlert(`${med?.name || item.medName} does not have enough stock to prepack ${item.time}.`);
-            return;
-        }
         item.status = 'correct';
         item.verificationMethod = 'scan';
+        if (!applyPrepackStockForReadyGroup(queue, day, item, 'scan')) {
+            item.status = 'pending';
+            item.verificationMethod = '';
+            item.scannedCode = '';
+            item.scannedAt = '';
+            input.value = '';
+            await appAlert(`${med?.name || item.medName} and its linked prepack group do not have enough stock to prepare ${item.time}.`);
+            return;
+        }
     } else {
         item.status = 'wrong';
     }
@@ -12490,15 +12792,18 @@ window.markPrepackDayManual = async function(queueId) {
         await appAlert(`This package was not marked prepacked because inventory is short:\n\n${shortages.join('\n')}`, 'Prepack Stock Check');
         return;
     }
+    const manualTimestamp = new Date().toISOString();
+    day.items.forEach(item => {
+        item.status = 'correct';
+        item.scannedCode = '';
+        item.scannedAt = manualTimestamp;
+        item.verificationMethod = 'manual';
+    });
     for (const item of day.items) {
-        if (!applyPrepackItemStock(queue, item, 'manual')) {
+        if (!applyPrepackStockForReadyGroup(queue, day, item, 'manual')) {
             await appAlert(`${item.medName} does not have enough stock to prepack ${item.time}.`);
             return;
         }
-        item.status = 'correct';
-        item.scannedCode = '';
-        item.scannedAt = new Date().toISOString();
-        item.verificationMethod = 'manual';
     }
     day.needsReprint = false;
     updatePrepackQueueStatus(queue);
@@ -12508,6 +12813,25 @@ window.markPrepackDayManual = async function(queueId) {
         const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
         if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
     }
+    await sync();
+};
+
+window.undoPrepackItem = async function(queueId, date, itemId) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    const day = queue?.days.find(item => item.date === date);
+    const item = day?.items.find(candidate => candidate.id === itemId);
+    if (!queue || !day || !item) return;
+    const groupItems = prepackTogetherGroupItems(day, item)
+        .filter(candidate => isPreparedPrepackItem(candidate) && !candidate.inventoryReturned && !candidate.inventoryWasted);
+    const targets = groupItems.length ? groupItems : [item];
+    const groupText = targets.length > 1
+        ? ` This medication is linked as "must take together", so ${targets.length} prepared linked items will be undone together.`
+        : '';
+    if (!await appConfirm(`Undo prepack verification for ${item.medName} at ${item.time}? Any deducted stock will be returned to inventory.${groupText}`, 'Undo Prepack')) return;
+    targets.forEach(target => undoPrepackItemStock(queue, target));
+    day.needsReprint = queue.labelsPrinted;
+    updatePrepackQueueStatus(queue);
+    activePrepackQueueId = queue.id;
     await sync();
 };
 
@@ -12582,6 +12906,34 @@ window.removePrepackItem = async function(queueId, date, itemId) {
     }
     reconcilePrepackQueue(queue);
     activePrepackQueueId = queue.id;
+    await sync();
+};
+
+window.removePrepackDay = async function(queueId, date) {
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    const day = queue?.days.find(item => item.date === date);
+    if (!queue || !day) return;
+    const preparedCount = (day.items || []).filter(item => isPreparedPrepackItem(item) && item.inventoryDeducted && !item.inventoryReturned).length;
+    const message = preparedCount
+        ? `Remove the entire ${date} prepack day? Stock already deducted for ${preparedCount} item${preparedCount === 1 ? '' : 's'} will be returned to inventory.`
+        : `Remove the entire ${date} prepack day from this queue?`;
+    if (!await appConfirm(message, 'Remove Prepack Day')) return;
+    (day.items || []).forEach(item => reversePrepackItemStock(queue, item, 'removed prepack day'));
+    queue.selection = queue.selection || {};
+    queue.selection.excludedPrepackDates = Array.from(new Set([
+        ...(queue.selection.excludedPrepackDates || []),
+        firstDateInPrepackDay(day) || date
+    ]));
+    queue.days = (queue.days || []).filter(item => item.date !== date);
+    if (queue.days.length === 0) {
+        db.prepackQueues = db.prepackQueues.filter(item => item.id !== queue.id);
+        activePrepackQueueId = nextActivePrepackQueueId(queue.id);
+        await sync();
+        return;
+    }
+    if (queue.currentDayIndex >= queue.days.length) queue.currentDayIndex = Math.max(0, queue.days.length - 1);
+    updatePrepackQueueStatus(queue);
+    activePrepackQueueId = queue.days.length ? queue.id : nextActivePrepackQueueId(queue.id);
     await sync();
 };
 
@@ -12783,7 +13135,8 @@ window.addLastMinutePrepackItem = async function(queueId) {
 
 function prepackDayLabelHtml(queue, day) {
     ensurePrepackDayCodes(queue);
-    const qrDataUrl = medicationQrDataUrl(day.prepackCode);
+    const printableCode = day.prepackScanCode || day.prepackCode;
+    const barcodeDataUrl = aztecBarcodeDataUrl(printableCode) || code128DataUrl(printableCode);
     const labelClass = getLabelClass(
         day.items.map(item => `${item.time} ${item.medName} ${item.dose || item.strength} ${item.quantity}`),
         day.items.length + 1
@@ -12791,21 +13144,26 @@ function prepackDayLabelHtml(queue, day) {
     const rows = day.items.length
         ? day.items.map(item => `<div class="label-med-row"><b>${escapeHtml(item.time)}</b>: ${escapeHtml(item.medName)} ${escapeHtml(item.dose || item.strength || '')} (${escapeHtml(item.quantity)})</div>`).join('')
         : '<div class="label-med-row">No medications in this prepack</div>';
-    return `<div class="${labelClass} prepack-day-label">
-        <div class="label-date label-date-with-icon">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}${labelShiftIconHtml(queue.selection?.prepackShift)}${qrDataUrl ? `<img class="prepack-label-qr" src="${qrDataUrl}" alt="Prepack QR code">` : ''}</div>
+    return `<div class="${labelClass} prepack-day-label${barcodeDataUrl ? ' prepack-coded-label' : ''}">
+        <div class="label-date label-date-with-icon">${escapeHtml(day.date)} - ${escapeHtml(queue.memberName || '')}${labelShiftIconHtml(queue.selection?.prepackShift)}</div>
         ${rows}
+        ${barcodeDataUrl ? `<img class="prepack-label-code" src="${barcodeDataUrl}" alt="Prepack barcode">` : ''}
     </div>`;
 }
 
-window.printUpdatedPrepackLabels = async function(queueId) {
+window.reprintPrepackLabels = async function(queueId) {
+    return printUpdatedPrepackLabels(queueId, { forceAll: true, reprintOnly: true });
+};
+
+window.printUpdatedPrepackLabels = async function(queueId, options = {}) {
     const queue = db.prepackQueues.find(item => item.id === queueId);
     if (!queue) return;
-    if (!isInventoryUnitDoseQueue(queue)) reconcilePrepackQueue(queue);
-    const days = queue.labelsPrinted
-        ? queue.days.filter(day => day.needsReprint)
-        : queue.days;
+    if (!options.reprintOnly && !isInventoryUnitDoseQueue(queue)) reconcilePrepackQueue(queue);
+    const days = options.forceAll
+        ? queue.days
+        : (queue.labelsPrinted ? queue.days.filter(day => day.needsReprint) : queue.days);
     if (days.length === 0) {
-        await appAlert('No prepack days currently require updated labels.');
+        await appAlert(options.forceAll ? 'No labels are available for this prepack queue.' : 'No prepack days currently require updated labels.');
         return;
     }
     let labelHtml = isInventoryUnitDoseQueue(queue)
@@ -12815,7 +13173,12 @@ window.printUpdatedPrepackLabels = async function(queueId) {
         const schedule = db.schedules.find(item => item.id === queue.selection.scheduleIds?.[0]);
         const med = schedule && db.inventory.find(item => item.id === schedule.medId);
         const member = db.family.find(item => item.id === queue.memberId);
-        let instances = prepackRowsForSelection(queue.selection).map(row => row.instance);
+        const prepackRows = prepackRowsForSelection(queue.selection);
+        const prepackScheduleIds = new Set(prepackRows.map(row => row.schedule?.id).filter(Boolean));
+        let instances = prepackRows.map(row => row.instance);
+        if (prepackScheduleIds.size > 1) {
+            instances = [];
+        }
         if (queue.selection.labelLayout !== 'range') {
             const dayDates = new Set(days.map(day => day.date));
             instances = instances.filter(instance => dayDates.has(instance.date));
@@ -12828,7 +13191,8 @@ window.printUpdatedPrepackLabels = async function(queueId) {
                 queue.selection.startDate,
                 queue.selection.endDate,
                 instances,
-                queue.selection.prepackShift || 'all'
+                queue.selection.prepackShift || 'all',
+                days[0]?.prepackScanCode || days[0]?.prepackCode || queue.days?.[0]?.prepackScanCode || queue.days?.[0]?.prepackCode || ''
             );
         } else if (schedule && med && member && instances.length > 0) {
             const byDate = instances.reduce((acc, instance) => {
@@ -12837,18 +13201,33 @@ window.printUpdatedPrepackLabels = async function(queueId) {
                 return acc;
             }, {});
             labelHtml = Object.entries(byDate).map(([date, times]) =>
-                medicationLabelHtml(schedule, med, member, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), queue.selection.prepackShift || 'all')
+                medicationLabelHtml(
+                    schedule,
+                    med,
+                    member,
+                    date,
+                    times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)),
+                    queue.selection.prepackShift || 'all',
+                    queue.days?.find(day => day.date === date)?.prepackScanCode || queue.days?.find(day => day.date === date)?.prepackCode || ''
+                )
             ).join('');
         }
     }
     previewLabelHtml(
         labelHtml,
-        { existingQueueId: queue.id, reprintedDates: days.map(day => day.date) }
+        { existingQueueId: queue.id, reprintedDates: days.map(day => day.date), reprintOnly: options.reprintOnly === true }
     );
 };
 
 window.deletePrepackQueue = async function(queueId) {
-    if (!await appConfirm('Delete this prepack queue?', 'Delete Prepack Queue')) return;
+    const queue = db.prepackQueues.find(item => item.id === queueId);
+    const preparedCount = queue?.days?.reduce((count, day) =>
+        count + (day.items || []).filter(item => isPreparedPrepackItem(item)).length, 0
+    ) || 0;
+    const message = preparedCount
+        ? 'Delete this prepack queue? This removes the queue record only. It will not return stock that was already scanned or manually prepacked. Use Return/Waste Prepacked Dose(s) first if the medication is physically back in hand.'
+        : 'Delete this prepack queue? Inventory has not been reduced unless items were scanned or manually prepacked.';
+    if (!await appConfirm(message, 'Delete Prepack Queue')) return;
     db.prepackQueues = db.prepackQueues.filter(item => item.id !== queueId);
     if (activePrepackQueueId === queueId) activePrepackQueueId = null;
     await sync();
@@ -13829,7 +14208,7 @@ function memberScheduleGridHtml(memberId) {
         const todayClass = dateKey === localDateKey() ? ' member-grid-today' : '';
         return `<th class="${todayClass}">${date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}</th>`;
     }).join('');
-    const rows = schedules.map(schedule => {
+    const gridRowHtml = (schedule) => {
         const med = db.inventory.find(item => item.id === schedule.medId);
         const medName = med ? `${med.name} ${formatMedStrength(med)}` : 'Unknown medication';
         const instructions = schedule.instructions ? `<details class="member-grid-instructions" onclick="event.stopPropagation()">
@@ -13876,7 +14255,10 @@ function memberScheduleGridHtml(memberId) {
             </td>
             ${cells}
         </tr>`;
-    }).join('');
+    };
+    const scheduledRows = schedules.filter(schedule => schedule.freq !== 'PRN').map(gridRowHtml).join('');
+    const prnRows = schedules.filter(schedule => schedule.freq === 'PRN').map(gridRowHtml).join('');
+    const rows = `${scheduledRows}${prnRows ? `<tr class="member-grid-section-row"><td colspan="${dayKeys.length + 1}">As needed</td></tr>${prnRows}` : ''}`;
     return `<div class="member-schedule-grid-note">Date-grid view is for quick review/documentation. Use timeline cards below for full regimen controls, audit, hold, waste, and discontinue actions.</div>
         <table class="member-schedule-grid">
             <thead><tr><th>Medications</th>${headerCells}</tr></thead>
@@ -13917,7 +14299,7 @@ window.setMemberScheduleViewMode = async function(mode) {
     db.settings = db.settings || {};
     db.settings.memberScheduleViewMode = mode === 'grid' ? 'grid' : 'timeline';
     renderMemberScheduleGrid();
-    await saveData();
+    await sync();
 };
 
 function renderVitalDashboard() {
@@ -19727,9 +20109,10 @@ window.updateIndividualLabelOptions = function() {
     if (timeRow) timeRow.style.display = doseMode === 'specific' ? 'flex' : 'none';
 };
 
-function medicationLabelHtml(schedule, med, member, doseDate, doseTimes, prepackShift = 'all') {
+function medicationLabelHtml(schedule, med, member, doseDate, doseTimes, prepackShift = 'all', packageCode = '') {
     const times = doseTimes.length > 0 ? doseTimes.join(', ') : 'As Needed';
     const header = schedule.freq === 'PRN' ? 'As Needed' : `${doseDate} | ${times}`;
+    const packageBarcode = aztecBarcodeDataUrl(packageCode) || code128DataUrl(packageCode);
     const instructionLine = schedule.instructions
         ? `<div class="label-small"><b>Instructions:</b> ${escapeHtml(schedule.instructions)}</div>`
         : '';
@@ -19743,18 +20126,20 @@ function medicationLabelHtml(schedule, med, member, doseDate, doseTimes, prepack
     ], schedule.instructions ? 6 : 5);
 
     return `
-        <div class="${labelClass}">
+        <div class="${labelClass}${packageBarcode ? ' single-prepack-coded-label' : ''}">
             <div class="label-date label-date-with-icon">${escapeHtml(header)}${labelShiftIconHtml(prepackShift)}</div>
             <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
             <div class="label-small">Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</div>
             <div class="label-small"><b>Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}</b></div>
             <div class="label-small">Member: ${escapeHtml(`${member.firstName} ${member.lastName}`)}</div>
             ${instructionLine}
+            ${packageBarcode ? `<img class="single-prepack-label-code" src="${packageBarcode}" alt="Prepack barcode">` : ''}
         </div>`;
 }
 
-function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances, prepackShift = 'all') {
+function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances, prepackShift = 'all', packageCode = '') {
     const totalQuantity = instances.reduce((sum) => sum + parseAmount(schedule.doseQty, 0), 0);
+    const packageBarcode = aztecBarcodeDataUrl(packageCode) || code128DataUrl(packageCode);
     const scheduledTimes = Array.from(new Set(instances.map(instance => instance.time)))
         .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
     const instructionLine = schedule.instructions
@@ -19773,7 +20158,7 @@ function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, ins
         memberDisplayName(member),
         schedule.instructions
     ], schedule.instructions ? 7 : 6);
-    return `<div class="${labelClass}">
+    return `<div class="${labelClass}${packageBarcode ? ' single-prepack-coded-label' : ''}">
         <div class="label-date label-date-with-icon">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}${labelShiftIconHtml(prepackShift)}</div>
         <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
         <div class="label-small">Strength: ${escapeHtml(formatStrengthWithPerDoseQty(schedule, med))}</div>
@@ -19781,6 +20166,7 @@ function medicationRangeLabelHtml(schedule, med, member, startDate, endDate, ins
         <div class="label-small">${escapeHtml(scheduleText)}</div>
         <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>
         ${instructionLine}
+        ${packageBarcode ? `<img class="single-prepack-label-code" src="${packageBarcode}" alt="Prepack barcode">` : ''}
     </div>`;
 }
 
@@ -19794,6 +20180,10 @@ function linkedMedicationLabelLine(schedule, med, date, requestedTimes = [], pre
         ? matchingInstances.map(instance => instance.time).sort((a, b) => timeToMinutes(a) - timeToMinutes(b)).join(', ')
         : (date ? 'not scheduled this date' : formatFrequency(schedule));
     return `${prefix}${med.name} ${formatLabelMedStrength(med)} Dose ${formatPrescribedDose(med, schedule.doseQty)} Qty ${formatQtyForSchedule(schedule, med)} ${times}`;
+}
+
+function linkedMedicationLabelLineHtml(line) {
+    return `<div class="label-small linked-label-line">${escapeHtml(line)}</div>`;
 }
 
 function linkedMedicationInstructionLines(schedules) {
@@ -19814,9 +20204,10 @@ function linkedMedicationGroupNote(schedule, linkedSchedules) {
     return 'Linked medications';
 }
 
-function linkedMedicationGroupLabelHtml(schedule, med, member, date, doseTimes, linkedSchedules, prepackShift = 'all') {
+function linkedMedicationGroupLabelHtml(schedule, med, member, date, doseTimes, linkedSchedules, prepackShift = 'all', packageCode = '') {
     const primaryLine = `${med.name} ${formatLabelMedStrength(med)}`;
     const primaryDetails = `Dose ${formatPrescribedDose(med, schedule.doseQty)} | Qty ${formatQtyForSchedule(schedule, med)}`;
+    const packageBarcode = aztecBarcodeDataUrl(packageCode) || code128DataUrl(packageCode);
     const linkedLines = linkedSchedules.map(linked => {
         const linkedMed = db.inventory.find(item => item.id === linked.medId);
         if (!linkedMed) return '';
@@ -19836,21 +20227,23 @@ function linkedMedicationGroupLabelHtml(schedule, med, member, date, doseTimes, 
         ...linkedLines,
         ...instructionLines
     ], 4 + linkedLines.length + instructionLines.length);
-    return `<div class="${labelClass}">
+    return `<div class="${labelClass}${packageBarcode ? ' single-prepack-coded-label' : ''}">
         <div class="label-date label-date-with-icon">${escapeHtml(header)}${labelShiftIconHtml(prepackShift)}</div>
         <div class="label-title">${escapeHtml(primaryLine)}</div>
         <div class="label-small">${escapeHtml(primaryDetails)}</div>
         <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>
-        <div class="label-small"><b>${escapeHtml(groupNote)}</b></div>
-        ${linkedLines.map(line => `<div class="label-small">${escapeHtml(line)}</div>`).join('')}
+        <div class="label-small linked-label-heading"><b>${escapeHtml(groupNote)}:</b></div>
+        ${linkedLines.map(linkedMedicationLabelLineHtml).join('')}
         ${instructionLines.map(line => `<div class="label-small"><b>Instructions:</b> ${escapeHtml(line)}</div>`).join('')}
+        ${packageBarcode ? `<img class="single-prepack-label-code" src="${packageBarcode}" alt="Prepack barcode">` : ''}
     </div>`;
 }
 
-function linkedMedicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances, linkedSchedules, prepackShift = 'all') {
+function linkedMedicationRangeLabelHtml(schedule, med, member, startDate, endDate, instances, linkedSchedules, prepackShift = 'all', packageCode = '') {
     const selectedTimes = Array.from(new Set(instances.map(instance => instance.time))).sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
     const primaryLine = `${med.name} ${formatLabelMedStrength(med)}`;
     const primaryDetails = `Dose ${formatPrescribedDose(med, schedule.doseQty)} | ${formatFrequency(schedule)}${selectedTimes.length ? ` ${selectedTimes.join(', ')}` : ''}`;
+    const packageBarcode = aztecBarcodeDataUrl(packageCode) || code128DataUrl(packageCode);
     const linkedLines = linkedSchedules.map(linked => {
         const linkedMed = db.inventory.find(item => item.id === linked.medId);
         if (!linkedMed) return '';
@@ -19869,14 +20262,15 @@ function linkedMedicationRangeLabelHtml(schedule, med, member, startDate, endDat
         ...linkedLines,
         ...instructionLines
     ], 4 + linkedLines.length + instructionLines.length);
-    return `<div class="${labelClass}">
+    return `<div class="${labelClass}${packageBarcode ? ' single-prepack-coded-label' : ''}">
         <div class="label-date label-date-with-icon">${escapeHtml(startDate === endDate ? startDate : `${startDate} - ${endDate}`)}${labelShiftIconHtml(prepackShift)}</div>
         <div class="label-title">${escapeHtml(primaryLine)}</div>
         <div class="label-small">${escapeHtml(primaryDetails)}</div>
         <div class="label-small">Member: ${escapeHtml(memberDisplayName(member))}</div>
-        <div class="label-small"><b>${escapeHtml(groupNote)}</b></div>
-        ${linkedLines.map(line => `<div class="label-small">${escapeHtml(line)}</div>`).join('')}
+        <div class="label-small linked-label-heading"><b>${escapeHtml(groupNote)}:</b></div>
+        ${linkedLines.map(linkedMedicationLabelLineHtml).join('')}
         ${instructionLines.map(line => `<div class="label-small"><b>Instructions:</b> ${escapeHtml(line)}</div>`).join('')}
+        ${packageBarcode ? `<img class="single-prepack-label-code" src="${packageBarcode}" alt="Prepack barcode">` : ''}
     </div>`;
 }
 
@@ -20012,12 +20406,34 @@ window.printSingleLabel = async function(scheduleId) {
         return;
     }
 
-    let labels = [];
     const includeLinkedMedications = linkedForLabel.length > 0 && result.includeLinkedMedications === 'yes';
+    const prepackSelection = {
+        kind: 'schedule-list',
+        scheduleIds: [s.id],
+        startDate,
+        endDate,
+        specificTime: result.labelDoseMode === 'specific' ? result.labelSpecificTime : '',
+        labelLayout: result.labelLayout || 'daily',
+        singleMedication: true,
+        prepackShift
+    };
+    const matchingQueue = (db.prepackQueues || []).find(queue =>
+        queue.status !== 'completed' &&
+        prepackSelectionFingerprint(queue.selection) === prepackSelectionFingerprint(prepackSelection)
+    );
+    const previewQueueId = matchingQueue?.id || prepackQueueId();
+    prepackSelection.prepackQueueId = previewQueueId;
+    const packageCodeForDate = (date) => {
+        const existingDay = matchingQueue?.days?.find(day => firstDateInPrepackDay(day) === date || day.date === date);
+        return existingDay?.prepackScanCode || prepackPackageScanCode(s.memberId, date, prepackShift, previewQueueId);
+    };
+
+    let labels = [];
     if (result.labelLayout === 'range') {
+        const rangePackageCode = packageCodeForDate(startDate);
         labels = [includeLinkedMedications
-            ? linkedMedicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, linkedForLabel, prepackShift)
-            : medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, prepackShift)];
+            ? linkedMedicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, linkedForLabel, prepackShift, rangePackageCode)
+            : medicationRangeLabelHtml(s, med, mem, startDate, endDate, instances, prepackShift, rangePackageCode)];
     } else if (result.labelDoseMode === 'all') {
         const byDate = instances.reduce((acc, instance) => {
             if (!acc[instance.date]) acc[instance.date] = [];
@@ -20026,13 +20442,13 @@ window.printSingleLabel = async function(scheduleId) {
         }, {});
         labels = Object.entries(byDate).map(([date, times]) =>
             includeLinkedMedications
-                ? linkedMedicationGroupLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), linkedForLabel, prepackShift)
-                : medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), prepackShift)
+                ? linkedMedicationGroupLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), linkedForLabel, prepackShift, packageCodeForDate(date))
+                : medicationLabelHtml(s, med, mem, date, times.slice().sort((a, b) => timeToMinutes(a) - timeToMinutes(b)), prepackShift, packageCodeForDate(date))
         );
     } else {
         labels = instances.map(instance => includeLinkedMedications
-            ? linkedMedicationGroupLabelHtml(s, med, mem, instance.date, [instance.time], linkedForLabel, prepackShift)
-            : medicationLabelHtml(s, med, mem, instance.date, [instance.time], prepackShift));
+            ? linkedMedicationGroupLabelHtml(s, med, mem, instance.date, [instance.time], linkedForLabel, prepackShift, packageCodeForDate(instance.date))
+            : medicationLabelHtml(s, med, mem, instance.date, [instance.time], prepackShift, packageCodeForDate(instance.date)));
     }
 
     if (labels.length > 100 && !await appConfirm(`This will create ${labels.length} labels. Continue?`, 'Large Label Print Job')) {
@@ -20057,16 +20473,7 @@ window.printSingleLabel = async function(scheduleId) {
             s.memberId,
             `Individual medication labels: ${med.name}`,
             prepackRows,
-            {
-                kind: 'schedule-list',
-                scheduleIds: [s.id],
-                startDate,
-                endDate,
-                specificTime: result.labelDoseMode === 'specific' ? result.labelSpecificTime : '',
-                labelLayout: result.labelLayout || 'daily',
-                singleMedication: true,
-                prepackShift
-            }
+            prepackSelection
         )
     );
 };
@@ -20279,6 +20686,20 @@ window.printDateRangeLabels = async function(memberId, startDate, endDate) {
             !includedScheduleIds.has(schedule.id)
         )
         .map(schedule => schedule.id);
+    const selectionForPreview = {
+        kind: 'member-range',
+        memberId,
+        startDate: localDateKey(start),
+        endDate: localDateKey(end),
+        excludedScheduleIds,
+        prepackShift
+    };
+    const matchingQueue = (db.prepackQueues || []).find(queue =>
+        queue.status !== 'completed' &&
+        prepackSelectionFingerprint(queue.selection) === prepackSelectionFingerprint(selectionForPreview)
+    );
+    const previewQueueId = matchingQueue?.id || prepackQueueId();
+    selectionForPreview.prepackQueueId = previewQueueId;
 
     let labelCount = 0;
     let labelsHtml = '';
@@ -20305,12 +20726,15 @@ window.printDateRangeLabels = async function(memberId, startDate, endDate) {
             }).join('')
             : '<div class="label-med-row">No included medications scheduled</div>';
         const prepackCode = prepackPackageCode(memberId, yyyymmdd, prepackShift || 'all');
-        const prepackQr = medicationQrDataUrl(prepackCode);
+        const existingDay = matchingQueue?.days?.find(day => day.date === yyyymmdd);
+        const prepackScanCode = existingDay?.prepackScanCode || prepackPackageScanCode(memberId, yyyymmdd, prepackShift || 'all', previewQueueId);
+        const prepackBarcode = aztecBarcodeDataUrl(prepackScanCode) || code128DataUrl(prepackScanCode) || medicationQrDataUrl(prepackScanCode) || code128DataUrl(prepackCode) || medicationQrDataUrl(prepackCode);
 
             labelsHtml += `
-                <div class="${labelClass} prepack-day-label">
-                    <div class="label-date label-date-with-icon">${cursor.toLocaleDateString()} - ${mem.firstName}${labelShiftIconHtml(prepackShift)}${prepackQr ? `<img class="prepack-label-qr" src="${prepackQr}" alt="Prepack QR code">` : ''}</div>
+                <div class="${labelClass} prepack-day-label${prepackBarcode ? ' prepack-coded-label' : ''}">
+                    <div class="label-date label-date-with-icon">${cursor.toLocaleDateString()} - ${mem.firstName}${labelShiftIconHtml(prepackShift)}</div>
                     ${medRowsHtml}
+                    ${prepackBarcode ? `<img class="prepack-label-code" src="${prepackBarcode}" alt="Prepack barcode">` : ''}
                 </div>`;
         cursor.setDate(cursor.getDate() + 1);
     }
@@ -20322,14 +20746,7 @@ window.printDateRangeLabels = async function(memberId, startDate, endDate) {
                 memberId,
                 `Daily labels: ${localDateKey(start)} - ${localDateKey(end)}`,
                 prepackRows,
-                {
-                    kind: 'member-range',
-                    memberId,
-                    startDate: localDateKey(start),
-                    endDate: localDateKey(end),
-                    excludedScheduleIds,
-                    prepackShift
-                }
+                selectionForPreview
             )
         );
     } else {

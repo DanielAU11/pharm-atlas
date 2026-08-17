@@ -1488,6 +1488,33 @@ button {
     align-items: start;
 }
 
+.member-profile-window.diary-workbench {
+    width: min(98vw, 1780px);
+}
+
+.diary-workbench .profile-diary-layout {
+    grid-template-columns: minmax(370px, 0.8fr) minmax(390px, 0.9fr) minmax(500px, 1fr);
+    align-items: stretch;
+}
+
+.diary-workbench .profile-diary-editor {
+    order: 3;
+    padding: 8px;
+    border: 2px outset #ffffff;
+    background: #eaf6ff;
+    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #808080;
+    min-height: 620px;
+}
+
+.diary-workbench .profile-diary-header {
+    padding-bottom: 5px;
+    border-bottom: 2px solid #008080;
+}
+
+.diary-workbench .rich-text-editor {
+    min-height: 340px;
+}
+
 .profile-diary-editor,
 .profile-diary-list {
     min-width: 0;
@@ -1637,6 +1664,34 @@ button {
     min-height: 26px;
     white-space: nowrap;
     flex: 0 0 auto;
+}
+
+.profile-diary-ratings-off-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 7px;
+    border: 2px outset #ffffff;
+    background: #f2f2f2;
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.profile-diary-ratings-off-toggle input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    appearance: auto;
+    opacity: 1;
+    position: static;
+}
+
+.profile-diary-ratings-off-toggle:has(input:checked) {
+    background: #fff0d6;
+    color: #804000;
+    border-style: inset;
 }
 
 .profile-diary-scale-toggle-row .form-help {
@@ -5952,15 +6007,45 @@ button {
 .container-state-choice {
     display: grid;
     grid-template-columns: 18px 1fr;
-    gap: 2px 6px;
-    padding: 8px;
+    grid-template-rows: auto auto;
+    align-items: start;
+    gap: 4px 7px;
+    min-height: 68px;
+    padding: 9px;
     border: 2px outset #ffffff;
     background: #f5f5f5;
+    cursor: pointer;
+    line-height: 1.2;
+    box-sizing: border-box;
+}
+
+.container-state-choice input {
+    grid-row: 1 / span 2;
+    margin-top: 2px;
+    width: 13px;
+    height: 13px;
+    appearance: auto;
+    opacity: 1;
+    position: static;
+}
+
+.container-state-choice strong {
+    display: block;
+    font-size: 13px;
+    line-height: 1.1;
 }
 
 .container-state-choice span {
     grid-column: 2;
     font-size: 11px;
+    line-height: 1.2;
+    max-width: 100%;
+    overflow-wrap: break-word;
+}
+
+.container-state-choice:has(input:checked) {
+    border-style: inset;
+    outline: 2px solid #000080;
 }
 
 .container-state-choice.unopened {
@@ -6171,6 +6256,17 @@ button {
 .prepack-item-copy {
     flex: 1;
     min-width: 0;
+}
+
+.prepack-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+}
+
+.prepack-item-actions button {
+    min-width: 58px;
 }
 
 .prepack-mark {
@@ -6744,6 +6840,16 @@ button {
     color: #004000;
 }
 
+.member-grid-section-row td {
+    background: #fff3c4 !important;
+    color: #804000;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    border-top: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+}
+
 .member-grid-med-cell strong {
     color: #0000a0;
     display: block;
@@ -7158,31 +7264,99 @@ button {
     position: relative;
 }
 
-.prepack-day-label .label-date,
-.prepack-day-label .label-med-row {
-    padding-right: 24px;
+.prepack-day-label .label-date {
+    min-height: auto;
+    padding-right: 0;
 }
 
-.prepack-label-qr {
+#label-preview-content .prepack-day-label,
+#print-area .prepack-day-label,
+#label-preview-content .single-prepack-coded-label,
+#print-area .single-prepack-coded-label {
+    padding-right: 0.04in !important;
+}
+
+#label-preview-content .label-page.prepack-day-label,
+#print-area .label-page.prepack-day-label,
+#label-preview-content .label-page.single-prepack-coded-label,
+#print-area .label-page.single-prepack-coded-label {
+    padding-right: 0.04in !important;
+}
+
+.prepack-label-code,
+.single-prepack-label-code {
     position: absolute;
-    top: 1px;
-    right: 1px;
-    width: 20px;
-    height: 20px;
+    top: 0.025in;
+    right: 0.025in;
+    width: 0.24in;
+    height: 0.24in;
+    object-fit: contain;
+    background: #ffffff;
     image-rendering: pixelated;
+    z-index: 1;
+}
+
+.prepack-coded-label .label-date-with-icon,
+.single-prepack-coded-label .label-date-with-icon {
+    padding-right: 0.48in !important;
+}
+
+.prepack-coded-label .label-shift-icon,
+.single-prepack-coded-label .label-shift-icon {
+    right: 0.29in !important;
+    top: 0;
+    z-index: 2;
+}
+
+.prepack-coded-label .label-date,
+.prepack-coded-label .label-title,
+.prepack-coded-label .label-med-row,
+.single-prepack-coded-label .label-date,
+.single-prepack-coded-label .label-title,
+.single-prepack-coded-label .label-small {
+    padding-right: 0.29in;
+}
+
+.single-prepack-coded-label {
+    position: relative;
+}
+
+.single-prepack-coded-label .label-date {
+    min-height: auto;
+}
+
+#label-preview-content .linked-label-heading,
+#print-area .linked-label-heading {
+    margin-top: 2px;
+    line-height: 0.95;
+}
+
+#label-preview-content .linked-label-line,
+#print-area .linked-label-line {
+    padding-left: 0.08in;
+    text-indent: -0.05in;
+    line-height: 0.92;
+}
+
+#label-preview-content .linked-label-line::before,
+#print-area .linked-label-line::before {
+    content: "\2022 ";
 }
 
 .inventory-return-label {
     position: relative;
-    padding-right: 0.48in;
+    padding-bottom: 0.26in;
 }
 
-.inventory-return-label-qr {
+.inventory-return-label-code {
     position: absolute;
-    right: 0.03in;
+    left: 50%;
     bottom: 0.03in;
-    width: 0.38in;
-    height: 0.38in;
+    width: min(1.45in, calc(100% - 0.08in));
+    height: 0.22in;
+    transform: translateX(-50%);
+    object-fit: fill;
+    background: #ffffff;
     image-rendering: pixelated;
 }
 

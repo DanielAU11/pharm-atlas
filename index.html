@@ -1432,7 +1432,7 @@
                             </div>
                             <div class="profile-diary-scale-toggle-row">
                                 <button type="button" onclick="toggleProgressNoteScales()">Add ratings</button>
-                                <label><input id="m-progress-note-disable-ratings" type="checkbox" onchange="toggleProgressNoteRatingsDisabled(this.checked)"> Ratings off for this entry</label>
+                                <label class="profile-diary-ratings-off-toggle"><input id="m-progress-note-disable-ratings" type="checkbox" onchange="toggleProgressNoteRatingsDisabled(this.checked)"><span>Ratings off for this entry</span></label>
                                 <span class="form-help">Optional subjective diary ratings: pain/nausea 0 none to 10 worst; mood/sleep/energy 1 low to 5 best.</span>
                             </div>
                             <div id="m-progress-note-scales-panel" class="profile-diary-scale-panel" style="display:none;">
@@ -1739,6 +1739,7 @@
         </div>
     </div>
     <script src="vendor/qrcode.js"></script>
+    <script src="node_modules/bwip-js/dist/bwip-js-min.js"></script>
     <script src="mobile-api.js"></script>
     <script src="renderer.js"></script>
 </body>
