@@ -51,10 +51,24 @@
                                     <strong id="dashboard-calendar-range"></strong>
                                     <button type="button" onclick="shiftDashboardCalendar(7)">Next 7 Days</button>
                                     <button type="button" onclick="resetDashboardCalendar()">Today</button>
+                                    <span id="dashboard-calendar-view-toggle" class="calendar-view-toggle"></span>
                                 </div>
                                 <div id="calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: #808080; border: 2px inset white; padding: 2px;">
                                     <!-- Calendar headers and days will be injected here -->
                                 </div>
+                            </fieldset>
+
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Custom Tasks &amp; Events</legend>
+                                <div class="calendar-controls">
+                                    <button type="button" onclick="openCustomEventEditor()">+ Add Event</button>
+                                    <button type="button" onclick="shiftCustomEventCalendar(-7)">Previous</button>
+                                    <strong id="custom-event-calendar-range"></strong>
+                                    <button type="button" onclick="shiftCustomEventCalendar(7)">Next</button>
+                                    <button type="button" onclick="resetCustomEventCalendar()">Today</button>
+                                    <span id="custom-event-calendar-view-toggle" class="calendar-view-toggle"></span>
+                                </div>
+                                <div id="custom-event-calendar-grid" class="custom-event-calendar-grid"></div>
                             </fieldset>
 
                             <fieldset style="margin-top: 10px;">
@@ -93,6 +107,7 @@
                             <button type="button" onclick="runDataHealthCheck()">Data Health Check</button>
                             <button type="button" onclick="repairDataHealthIssues()">Repair Safe Issues</button>
                             <button type="button" onclick="viewAuditTrail()">Audit Trail</button>
+                            <button type="button" onclick="archiveOldData()">Archive Old Data</button>
                             <button type="button" onclick="openFirstRunSetupGuide()">Setup Guide</button>
                             <button type="button" onclick="openPrinterCalibration()">Printer Calibration</button>
                             <button id="guided-help-toggle-button" type="button" class="guided-help-toggle" onclick="toggleGuidedHelp()">Hover help</button>
@@ -1561,6 +1576,7 @@
                     <strong id="member-calendar-range"></strong>
                     <button type="button" onclick="shiftMemberCalendar(7)">Next 7 Days</button>
                     <button type="button" onclick="resetMemberCalendar()">Today</button>
+                    <span id="member-calendar-view-toggle" class="calendar-view-toggle"></span>
                 </div>
                 <div id="member-calendar-grid" class="member-calendar-grid"></div>
             </fieldset>

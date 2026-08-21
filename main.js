@@ -450,6 +450,23 @@ ipcMain.handle('backup-data', async (event, data) => {
     return result.filePath;
 });
 
+ipcMain.handle('archive-data', async (event, payload) => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const result = await dialog.showSaveDialog(win, {
+        title: 'Save PharmAtlas Archive',
+        defaultPath: path.join(dataDir, safeJsonFileName(`PharmAtlas_Archive_${stamp}.json`)),
+        filters: [{ name: 'PharmAtlas Archive', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    fs.writeFileSync(result.filePath, JSON.stringify({
+        app: 'PharmAtlas',
+        archiveVersion: 1,
+        createdAt: new Date().toISOString(),
+        payload
+    }, null, 2));
+    return result.filePath;
+});
+
 ipcMain.handle('restore-data', async () => {
     const result = await dialog.showOpenDialog(win, {
         title: 'Restore PharmAtlas Backup',

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
     savePdfReport: (details) => ipcRenderer.invoke('save-pdf-report', details),
     emailPdfReport: (details) => ipcRenderer.invoke('email-pdf-report', details),
     backupData: (data) => ipcRenderer.invoke('backup-data', data),
+    archiveData: (payload) => ipcRenderer.invoke('archive-data', payload),
     restoreData: () => ipcRenderer.invoke('restore-data'),
     getDataLocation: () => ipcRenderer.invoke('get-data-location'),
     chooseSyncFolder: () => ipcRenderer.invoke('choose-sync-folder'),

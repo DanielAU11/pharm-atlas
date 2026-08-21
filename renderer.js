@@ -16,6 +16,7 @@ const emptyDb = {
     formularyItems: [],
     inventoryOrders: [],
     medKits: [],
+    customEvents: [],
     auditTrail: [],
     settings: {}
 };
@@ -23,6 +24,7 @@ let db = { ...emptyDb };
 let currentEditingMedId = null;
 let currentEditingMemberId = null;
 const notifiedDoseKeys = new Set();
+const pendingReminderKeys = new Set();
 const componentUnitOptions = ['mg', 'mL', 'mg/mL', 'mg/g', 'mEq', 'IU', 'mcg', 'g', 'g/g', '%', 'units', 'U/mL', 'CFU'];
 const componentPerUnitOptions = ['', 'mL', 'g', 'mg', 'tablet', 'capsule', 'lozenge', 'packet', 'spray', 'drop', 'inhalation', 'patch', 'suppository', 'vial', 'syringe', 'film', 'unit'];
 const formulationDoseUnits = {
@@ -181,8 +183,13 @@ if (document.readyState === 'loading') {
 }
 let memberTimelineStart = null;
 let dashboardCalendarStart = localDateKey();
+let customEventCalendarStart = localDateKey();
 let memberCalendarStart = localDateKey();
+let dashboardCalendarView = localStorage.getItem('pharmAtlasDashboardCalendarView') || 'week';
+let customEventCalendarView = localStorage.getItem('pharmAtlasCustomEventCalendarView') || 'week';
+let memberCalendarView = localStorage.getItem('pharmAtlasMemberCalendarView') || 'week';
 let activePrepackQueueId = null;
+let checkSchedulesRunning = false;
 let activeMedKitId = null;
 let activeCompoundRecipeId = null;
 let prepackScanTimer = null;
@@ -195,6 +202,8 @@ let orderSetRowCounter = 0;
 let lastDataConflictBackup = '';
 let activeProgressNotePreviewId = null;
 let pendingProgressNoteAttachments = [];
+const memberProfileSessionStates = new Map();
+let progressNoteSidePanelMemberId = '';
 
 window.addEventListener('DOMContentLoaded', async () => {
     const loadedData = await window.api.load();
@@ -1012,6 +1021,7 @@ function scheduleEndDateTime(schedule) {
 function scheduleHasFinished(schedule, now = new Date()) {
     if (!schedule || schedule.status === 'discontinued') return false;
     if (schedule.status === 'completed') return true;
+    if (schedule.freq === 'ONCE' || schedule.isOneTime) return false;
     const end = scheduleEndDateTime(schedule);
     return !!end && end < now;
 }
@@ -3385,7 +3395,7 @@ window.updateCombinationPreview = function(prefix = 'med') {
     preview.textContent = `${previewLabel}: ${formatCombinationStrength(comboMed, components.length > 1)}`;
 };
 
-function formatMedStrength(med, includeNames = false, includeSolidDenominator = true) {
+function formatMedStrength(med, includeNames = false, includeSolidDenominator = false) {
     if (!med) return '';
     if (med.isCombination && med.components && med.components.length > 0) {
         return formatCombinationStrength(med, includeNames, includeSolidDenominator);
@@ -4234,7 +4244,7 @@ function kitSourceSelectHtml(medId) {
 }
 
 function consumeFromKitSource(sourceValue, med, qty) {
-    if (!sourceValue || sourceValue === 'main') return { sourceLabel: 'Main inventory', kitItem: null };
+    if (!sourceValue || sourceValue === 'main') return { sourceLabel: 'Main inventory', kitItem: null, stockSource: 'main' };
     const [kitId, itemId] = String(sourceValue).split('|');
     const kit = db.medKits.find(candidate => candidate.id === kitId);
     const item = kit?.items?.find(candidate => candidate.id === itemId && candidate.medId === med.id);
@@ -4245,7 +4255,71 @@ function consumeFromKitSource(sourceValue, med, qty) {
     item.qty = parseAmount(item.qty, 0) - qty;
     if (item.qty <= 0) kit.items = kit.items.filter(candidate => candidate.id !== item.id);
     kit.updatedAt = new Date().toISOString();
-    return { sourceLabel: `Med Kit (${medKitName(kit)})`, kitItem: item };
+    return { sourceLabel: `Med Kit (${medKitName(kit)})`, kitItem: item, kitId, kitItemId: itemId, stockSource: 'kit' };
+}
+
+function restoreQuantityToKit(entry, med, qty) {
+    if (!entry?.kitId || !med || !Number.isFinite(qty) || qty <= 0) return false;
+    ensureMedKits();
+    const kit = db.medKits.find(candidate => candidate.id === entry.kitId);
+    if (!kit) return false;
+    kit.items = Array.isArray(kit.items) ? kit.items : [];
+    let item = kit.items.find(candidate => candidate.id === entry.kitItemId && candidate.medId === med.id)
+        || kit.items.find(candidate => candidate.medId === med.id && String(candidate.expiry || '') === String(entry.kitExpiry || med.expiry || ''));
+    if (!item) {
+        item = {
+            id: entry.kitItemId || medKitItemId(),
+            medId: med.id,
+            qty: 0,
+            unit: inventoryUnitFor(med),
+            expiry: entry.kitExpiry || med.expiry || '',
+            addedAt: new Date().toISOString()
+        };
+        kit.items.push(item);
+    }
+    item.qty = parseAmount(item.qty, 0) + qty;
+    item.updatedAt = new Date().toISOString();
+    kit.updatedAt = new Date().toISOString();
+    return true;
+}
+
+function medKitSourceFromValue(sourceValue, medId = '') {
+    if (!sourceValue || sourceValue === 'main') return null;
+    const [kitId, itemId] = String(sourceValue).split('|');
+    const kit = db.medKits?.find(candidate => candidate.id === kitId);
+    const item = kit?.items?.find(candidate => candidate.id === itemId && (!medId || candidate.medId === medId));
+    return kit && item ? { kit, item, kitId, itemId } : null;
+}
+
+function prepackItemSourceSelectHtml(queueId, item) {
+    const sources = kitSourceOptionsForMed(item?.medId);
+    if (!sources.length) return '';
+    const current = item.inventorySource || 'main';
+    const options = sources.map(({ kit, item: kitItem }) => {
+        const med = kitItemMed(kitItem);
+        const unit = med ? inventoryUnitFor(med) : kitItem.unit || 'unit';
+        const value = `${kit.id}|${kitItem.id}`;
+        return `<option value="${escapeHtml(value)}" ${current === value ? 'selected' : ''}>${escapeHtml(`${medKitName(kit)} (${formatAmount(parseAmount(kitItem.qty))} ${unit})`)}</option>`;
+    }).join('');
+    return `<label class="prepack-source-select">Source:
+        <select onchange="setPrepackItemSource('${escapeHtml(queueId)}','${escapeHtml(item.id)}',this.value)" ${isPreparedPrepackItem(item) ? 'disabled' : ''}>
+            <option value="main" ${current === 'main' ? 'selected' : ''}>Main inventory</option>
+            ${options}
+        </select>
+    </label>`;
+}
+
+window.setPrepackItemSource = async function(queueId, itemId, sourceValue) {
+    const queue = db.prepackQueues.find(candidate => candidate.id === queueId);
+    const item = queue?.days?.flatMap(day => day.items || []).find(candidate => candidate.id === itemId);
+    if (!queue || !item) return;
+    if (isPreparedPrepackItem(item)) {
+        await appAlert('This item has already been prepared. Undo it before changing the inventory source.');
+        renderPrepackageQueues();
+        return;
+    }
+    item.inventorySource = sourceValue || 'main';
+    await sync();
 }
 
 function returnKitItemToInventory(kit, item) {
@@ -4413,10 +4487,10 @@ function renderMedicationAssignmentControls(prefix, selectedIds = null) {
             .sort((a, b) => memberDisplayName(a).localeCompare(memberDisplayName(b), undefined, { sensitivity: 'base' }))
             .map(member => {
                 const inputId = `${prefix}-assigned-${member.id}`;
-                return `<span class="member-assignment-option">
+                return `<label class="member-assignment-option" for="${escapeHtml(inputId)}">
                     <input id="${escapeHtml(inputId)}" type="checkbox" value="${escapeHtml(member.id)}" ${currentSelected.includes(member.id) ? 'checked' : ''}>
-                    <label for="${escapeHtml(inputId)}">${escapeHtml(memberDisplayName(member))}</label>
-                </span>`;
+                    <span>${escapeHtml(memberDisplayName(member))}</span>
+                </label>`;
             }).join('')
         : '<span class="form-help">Add members before assigning inventory.</span>';
     container.style.display = mode.value === 'selected' ? 'flex' : 'none';
@@ -4657,6 +4731,7 @@ function defaultCurrentMedicationListForMember(memberId) {
 }
 
 window.switchMemberProfileTab = function(tab = 'main') {
+    captureMemberProfileState(currentEditingMemberId, { activeTab: tab });
     document.querySelectorAll('.member-profile-tab').forEach(button => {
         button.classList.toggle('active', button.dataset.memberProfileTab === tab);
     });
@@ -4668,6 +4743,7 @@ window.switchMemberProfileTab = function(tab = 'main') {
     if (rail) {
         rail.style.display = tab === 'main' ? '' : 'none';
     }
+    updateProgressNoteSidePanel();
     renderMemberContextRail(currentEditingMemberId);
 };
 
@@ -5319,6 +5395,7 @@ window.updateProgressNoteFlagVisuals = function() {
         const input = label.querySelector('input[type="checkbox"]');
         label.classList.toggle('selected', !!input?.checked);
     });
+    updateProgressNoteSidePanel();
 };
 
 window.toggleProgressNoteScales = function(forceOpen = null) {
@@ -5341,6 +5418,9 @@ window.toggleProgressNoteRatingsDisabled = function(disabled) {
     }
     const button = document.querySelector('.profile-diary-scale-toggle-row button');
     if (button) button.disabled = !!disabled;
+    const label = document.querySelector('.profile-diary-ratings-off-toggle');
+    if (label) label.classList.toggle('selected', !!disabled);
+    updateProgressNoteSidePanel();
 };
 
 function progressNoteFlagBadgesHtml(note = {}) {
@@ -6019,6 +6099,7 @@ window.formatProgressNote = function(command) {
     if (!editor) return;
     editor.focus();
     document.execCommand(command, false, null);
+    updateProgressNoteSidePanel();
 };
 
 window.applyProgressNoteColor = function(color) {
@@ -6027,7 +6108,234 @@ window.applyProgressNoteColor = function(color) {
     if (!editor || !safeColor) return;
     editor.focus();
     document.execCommand('foreColor', false, safeColor);
+    updateProgressNoteSidePanel();
 };
+
+function ensureProgressNoteSidePanel() {
+    let panel = document.getElementById('progress-note-side-panel');
+    const host = document.querySelector('#member-modal .member-profile-window') || document.body;
+    if (panel) {
+        if (panel.parentElement !== host) host.appendChild(panel);
+        return panel;
+    }
+    panel = document.createElement('aside');
+    panel.id = 'progress-note-side-panel';
+    panel.className = 'progress-note-side-panel';
+    panel.innerHTML = `
+        <div class="title-bar">
+            <div class="title-bar-text">Draft Note</div>
+            <div class="title-bar-controls"><button type="button" aria-label="Close" onclick="closeProgressNoteSidePanel()"></button></div>
+        </div>
+        <div class="progress-note-side-body"></div>
+    `;
+    host.appendChild(panel);
+    return panel;
+}
+
+function progressNoteEditorElement() {
+    return document.querySelector('.profile-diary-editor');
+}
+
+function progressNoteSideEditorSlot() {
+    const panel = ensureProgressNoteSidePanel();
+    const body = panel.querySelector('.progress-note-side-body');
+    if (!body) return null;
+    let slot = body.querySelector('#progress-note-side-editor-slot');
+    if (!slot) {
+        body.innerHTML = `
+            <div class="progress-note-side-helper">Draft stays open while you move around this member profile. Save Entry closes the dock.</div>
+            <div id="progress-note-side-editor-slot"></div>
+        `;
+        slot = body.querySelector('#progress-note-side-editor-slot');
+    }
+    return slot;
+}
+
+function dockProgressNoteEditorToSidePanel() {
+    const editor = progressNoteEditorElement();
+    const slot = progressNoteSideEditorSlot();
+    if (!editor || !slot || slot.contains(editor)) return;
+    let home = document.getElementById('progress-note-editor-home');
+    if (!home) {
+        home = document.createElement('div');
+        home.id = 'progress-note-editor-home';
+        home.className = 'progress-note-editor-home';
+        home.innerHTML = `
+            <strong>Draft note docked on the right</strong>
+            <span>Keep writing while you move through this profile.</span>
+            <button type="button" onclick="closeProgressNoteSidePanel()">Return editor here</button>
+        `;
+        editor.parentNode?.insertBefore(home, editor);
+    }
+    editor.classList.add('docked-progress-note-editor');
+    slot.appendChild(editor);
+}
+
+function restoreProgressNoteEditorHome() {
+    const editor = progressNoteEditorElement();
+    const home = document.getElementById('progress-note-editor-home');
+    if (!editor || !home) return;
+    editor.classList.remove('docked-progress-note-editor');
+    home.replaceWith(editor);
+}
+
+function progressNoteDraftHasContent() {
+    const html = sanitizeProgressNoteHtml(document.getElementById('m-progress-note-editor')?.innerHTML || '');
+    return !!(
+        progressNotePlainText(html) ||
+        String(document.getElementById('m-progress-note-title')?.value || '').trim() ||
+        String(document.getElementById('m-progress-note-tags')?.value || '').trim()
+    );
+}
+
+function memberProfileStateKey(memberId = currentEditingMemberId) {
+    return memberId || 'new';
+}
+
+function currentProgressNoteDraftSnapshot() {
+    return {
+        date: document.getElementById('m-progress-note-date')?.value || localDateKey(),
+        time: document.getElementById('m-progress-note-time')?.value || defaultProgressNoteTime(),
+        title: document.getElementById('m-progress-note-title')?.value || '',
+        tags: document.getElementById('m-progress-note-tags')?.value || '',
+        editId: document.getElementById('m-progress-note-edit-id')?.value || '',
+        linkType: document.getElementById('m-progress-note-link-type')?.value || '',
+        linkId: document.getElementById('m-progress-note-link-id')?.value || '',
+        html: sanitizeProgressNoteHtml(document.getElementById('m-progress-note-editor')?.innerHTML || ''),
+        flags: ['pinned', 'important', 'followup', 'provider', 'private', 'resolved'].reduce((acc, key) => {
+            acc[key] = !!document.getElementById(`m-progress-note-${key}`)?.checked;
+            return acc;
+        }, {}),
+        scales: ['pain', 'mood', 'sleep', 'nausea', 'energy'].reduce((acc, key) => {
+            acc[key] = document.getElementById(`m-progress-note-${key}`)?.value || '';
+            return acc;
+        }, {}),
+        ratingsDisabled: !!document.getElementById('m-progress-note-disable-ratings')?.checked,
+        color: document.getElementById('m-progress-note-color')?.value || '#000000',
+        attachments: pendingProgressNoteAttachments.slice(),
+        hasContent: progressNoteDraftHasContent()
+    };
+}
+
+function restoreProgressNoteDraft(draft) {
+    if (!draft || !draft.hasContent) return false;
+    const safeSet = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value || '';
+    };
+    safeSet('m-progress-note-date', draft.date || localDateKey());
+    safeSet('m-progress-note-time', draft.time || defaultProgressNoteTime());
+    safeSet('m-progress-note-title', draft.title || '');
+    safeSet('m-progress-note-tags', draft.tags || '');
+    safeSet('m-progress-note-edit-id', draft.editId || '');
+    safeSet('m-progress-note-link-type', draft.linkType || '');
+    renderProgressNoteLinkOptions(draft.linkId || '');
+    const editor = document.getElementById('m-progress-note-editor');
+    if (editor) editor.innerHTML = sanitizeProgressNoteHtml(draft.html || '');
+    ['pinned', 'important', 'followup', 'provider', 'private', 'resolved'].forEach(key => {
+        const input = document.getElementById(`m-progress-note-${key}`);
+        if (input) input.checked = !!draft.flags?.[key];
+    });
+    ['pain', 'mood', 'sleep', 'nausea', 'energy'].forEach(key => {
+        const input = document.getElementById(`m-progress-note-${key}`);
+        if (input) input.value = draft.scales?.[key] || '';
+    });
+    const disableRatings = document.getElementById('m-progress-note-disable-ratings');
+    if (disableRatings) disableRatings.checked = !!draft.ratingsDisabled;
+    const color = document.getElementById('m-progress-note-color');
+    if (color) color.value = draft.color || '#000000';
+    pendingProgressNoteAttachments = Array.isArray(draft.attachments) ? draft.attachments.slice() : [];
+    updateProgressNoteFlagVisuals();
+    renderProgressNoteAttachmentList();
+    refreshProgressNoteTagSuggestions();
+    toggleProgressNoteScales(!draft.ratingsDisabled && Object.values(draft.scales || {}).some(Boolean));
+    const saveButton = document.getElementById('m-progress-note-save-button');
+    if (saveButton) saveButton.innerHTML = '<span class="button-plus-sign">+</span>Save Entry';
+    return true;
+}
+
+function captureMemberProfileState(memberId = currentEditingMemberId, updates = {}) {
+    if (!memberId) return;
+    const modal = document.getElementById('member-modal');
+    if (modal?.style.display !== 'flex') {
+        const previous = memberProfileSessionStates.get(memberProfileStateKey(memberId)) || {};
+        memberProfileSessionStates.set(memberProfileStateKey(memberId), { ...previous, ...updates });
+        return;
+    }
+    const activeTab = document.querySelector('.member-profile-tab.active')?.dataset.memberProfileTab || 'main';
+    const body = document.querySelector('.member-profile-body');
+    const previous = memberProfileSessionStates.get(memberProfileStateKey(memberId)) || {};
+    memberProfileSessionStates.set(memberProfileStateKey(memberId), {
+        ...previous,
+        activeTab,
+        scrollTop: body?.scrollTop || 0,
+        noteDraft: currentProgressNoteDraftSnapshot(),
+        notePanelOpen: document.getElementById('progress-note-side-panel')?.classList.contains('open') || progressNoteSidePanelMemberId === memberId,
+        ...updates
+    });
+}
+
+function restoreMemberProfileState(memberId = currentEditingMemberId, preferredTab = null) {
+    const state = memberProfileSessionStates.get(memberProfileStateKey(memberId)) || {};
+    const tab = preferredTab || state.activeTab || 'main';
+    const draftRestored = restoreProgressNoteDraft(state.noteDraft);
+    window.switchMemberProfileTab(tab);
+    const body = document.querySelector('.member-profile-body');
+    if (body && Number.isFinite(state.scrollTop)) {
+        window.requestAnimationFrame(() => { body.scrollTop = state.scrollTop || 0; });
+    }
+    if ((draftRestored || state.notePanelOpen) && state.notePanelOpen) {
+        progressNoteSidePanelMemberId = memberId || 'new';
+        updateProgressNoteSidePanel(true);
+    }
+}
+
+function hideProgressNoteSidePanel(preserveOwner = true, restoreEditor = false) {
+    const panel = document.getElementById('progress-note-side-panel');
+    if (panel) panel.classList.remove('open');
+    document.getElementById('member-modal')?.classList.remove('note-dock-open');
+    if (restoreEditor) restoreProgressNoteEditorHome();
+    if (!preserveOwner) progressNoteSidePanelMemberId = '';
+}
+
+window.closeProgressNoteSidePanel = function(clearDraftOwner = false) {
+    hideProgressNoteSidePanel(!clearDraftOwner, true);
+};
+
+window.updateProgressNoteSidePanel = function(forceOpen = false) {
+    const memberModal = document.getElementById('member-modal');
+    const hasContent = progressNoteDraftHasContent();
+    const panel = ensureProgressNoteSidePanel();
+    const ownerId = currentEditingMemberId || 'new';
+    if (forceOpen) progressNoteSidePanelMemberId = ownerId;
+    if (!forceOpen && hasContent && !progressNoteSidePanelMemberId) progressNoteSidePanelMemberId = ownerId;
+    const isCurrentOwner = !progressNoteSidePanelMemberId || progressNoteSidePanelMemberId === ownerId;
+    const alreadyOpenForOwner = panel.classList.contains('open') && isCurrentOwner;
+    if (!forceOpen && (memberModal?.style.display !== 'flex' || (!hasContent && !alreadyOpenForOwner) || !isCurrentOwner)) {
+        panel.classList.remove('open');
+        memberModal?.classList.remove('note-dock-open');
+        return;
+    }
+    const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    const title = panel.querySelector('.title-bar-text');
+    if (title) title.textContent = member ? `Draft Note - ${memberDisplayName(member)}` : 'Draft Note';
+    dockProgressNoteEditorToSidePanel();
+    panel.classList.add('open');
+    memberModal?.classList.add('note-dock-open');
+};
+
+document.addEventListener('focusin', event => {
+    if (event.target?.id === 'm-progress-note-editor' || event.target?.closest?.('.profile-diary-editor')) {
+        progressNoteSidePanelMemberId = currentEditingMemberId || 'new';
+        updateProgressNoteSidePanel(true);
+    }
+});
+
+document.addEventListener('input', event => {
+    if (event.target?.id?.startsWith('m-progress-note-') || event.target?.id === 'm-progress-note-editor') {
+        updateProgressNoteSidePanel();
+    }
+});
 
 window.previewMemberProgressNote = function(noteId) {
     activeProgressNotePreviewId = noteId;
@@ -6087,6 +6395,8 @@ window.editMemberProgressNote = function(noteId) {
 
 window.clearMemberProgressNoteEditor = function() {
     resetProgressNoteEditor();
+    closeProgressNoteSidePanel(true);
+    captureMemberProfileState(currentEditingMemberId, { noteDraft: currentProgressNoteDraftSnapshot(), notePanelOpen: false });
 };
 
 window.saveMemberProgressNote = async function() {
@@ -6139,6 +6449,8 @@ window.saveMemberProgressNote = async function() {
     activeProgressNotePreviewId = note.id;
     resetProgressNoteEditor();
     renderMemberProgressNotes();
+    closeProgressNoteSidePanel(true);
+    captureMemberProfileState(currentEditingMemberId, { noteDraft: currentProgressNoteDraftSnapshot(), notePanelOpen: false });
 };
 
 window.deleteMemberProgressNote = async function(noteId) {
@@ -6150,7 +6462,10 @@ window.deleteMemberProgressNote = async function(noteId) {
         member.progressNotes = notes;
         await sync();
     }
-    if (document.getElementById('m-progress-note-edit-id')?.value === noteId) resetProgressNoteEditor();
+    if (document.getElementById('m-progress-note-edit-id')?.value === noteId) {
+        resetProgressNoteEditor();
+        closeProgressNoteSidePanel(true);
+    }
     if (activeProgressNotePreviewId === noteId) activeProgressNotePreviewId = null;
     renderMemberProgressNotes();
 };
@@ -7202,6 +7517,13 @@ function applyDashboardCommandPanelState() {
 }
 
 window.switchTab = function(tabName) {
+    const memberModal = document.getElementById('member-modal');
+    if (memberModal?.style.display === 'flex') {
+        captureMemberProfileState(currentEditingMemberId);
+        memberModal.style.display = 'none';
+        hideProgressNoteSidePanel(true);
+        if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+    }
     const tabs = defaultTabOrder;
     tabs.forEach(t => {
         const tabElement = document.getElementById(`tab-${t}`);
@@ -7235,6 +7557,7 @@ async function sync() {
         renderMemberMonitoringProfiles(currentEditingMemberId);
         renderMemberCareReminders(currentEditingMemberId);
         renderMemberPrnMedicationOrders(currentEditingMemberId);
+        renderCompletedMedicationOrders(currentEditingMemberId);
         renderMemberCurrentMedicationList();
         renderMemberLabDocuments();
         renderMemberMedicationReview(currentEditingMemberId);
@@ -7296,8 +7619,11 @@ function renderMemberPrnMedicationOrders(memberId) {
     }).join('');
 }
 
-function completedScheduleSummaryHtml(schedule, candidates = null) {
+function completedScheduleSummaryHtml(schedule, candidates = null, showRegimenSource = false) {
     const med = db.inventory.find(item => item.id === schedule.medId);
+    const sourceRegimen = showRegimenSource && schedule.orderSetId
+        ? db.orderSets.find(item => item.id === schedule.orderSetId)
+        : null;
     const statusText = schedule.status === 'discontinued' ? 'Discontinued' : 'Completed';
     const linked = linkedSchedulesFor(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId));
     const reorderAction = `<button type="button" class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>`;
@@ -7309,6 +7635,7 @@ function completedScheduleSummaryHtml(schedule, candidates = null) {
             <div class="completed-med-main">
                 <strong>${escapeHtml(med?.name || 'Unknown medication')} ${escapeHtml(med ? formatMedStrength(med) : '')}</strong><br>
                 <small class="completed-med-summary">${escapeHtml(statusText)} | ${escapeHtml(schedule.startDate || '')} - ${escapeHtml(schedule.endDate || 'Ongoing')} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : escapeHtml(schedule.doseQty || '')} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}</small>
+                ${sourceRegimen ? `<br><small class="completed-med-summary">From regimen: ${escapeHtml(sourceRegimen.name || schedule.orderSetName || 'Regimen')}</small>` : ''}
                 ${linkedDetailsHtml(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId))}
             </div>
             <div class="completed-med-actions">
@@ -7328,6 +7655,10 @@ function renderCompletedMedicationOrders(memberId) {
     if (!container) return;
     const completedSets = db.orderSets
         .filter(set => set.memberId === memberId && set.status === 'completed')
+        .sort((a, b) => String(b.completedAt || b.endDate || '').localeCompare(String(a.completedAt || a.endDate || '')));
+    const completedSetIds = new Set(completedSets.map(set => set.id));
+    const completedRegimenMeds = db.schedules
+        .filter(schedule => schedule.memberId === memberId && schedule.orderSetId && !completedSetIds.has(schedule.orderSetId) && isScheduleArchived(schedule))
         .sort((a, b) => String(b.completedAt || b.endDate || '').localeCompare(String(a.completedAt || a.endDate || '')));
     const completedSingles = db.schedules
         .filter(schedule => schedule.memberId === memberId && !schedule.orderSetId && isScheduleArchived(schedule))
@@ -7356,8 +7687,9 @@ function renderCompletedMedicationOrders(memberId) {
     }).join('');
 
     const singlesHtml = completedSingles.map(schedule => completedScheduleSummaryHtml(schedule, completedCandidates)).join('');
-    container.innerHTML = setHtml || singlesHtml
-        ? `${setHtml}${singlesHtml}`
+    const regimenMedHtml = completedRegimenMeds.map(schedule => completedScheduleSummaryHtml(schedule, completedCandidates, true)).join('');
+    container.innerHTML = setHtml || regimenMedHtml || singlesHtml
+        ? `${setHtml}${regimenMedHtml}${singlesHtml}`
         : '<div class="empty-state">No completed medications.</div>';
 }
 
@@ -7553,11 +7885,14 @@ async function autosaveVisibleMemberBeforeSwitch(nextTaskId) {
     return saved;
 }
 
-window.openMemberModal = async function(id = null, initialTab = 'main') {
+window.openMemberModal = async function(id = null, initialTab = null) {
     const modal = document.getElementById('member-modal');
     const title = document.getElementById('member-modal-title');
     const requestedTaskId = memberTaskIdFor(id);
+    const previousMemberId = currentEditingMemberId;
+    if (previousMemberId) captureMemberProfileState(previousMemberId);
     if (!await autosaveVisibleMemberBeforeSwitch(requestedTaskId)) return;
+    if (previousMemberId !== id) closeProgressNoteSidePanel(true);
     currentEditingMemberId = id;
 
 
@@ -7841,6 +8176,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
     }
 
     if (modal) {
+        modal.classList.add('member-profile-workspace-shell');
         modal.style.display = 'flex';
         const taskMember = id ? db.family.find(member => member.id === id) : null;
         if (taskMember) registerMemberTask(taskMember);
@@ -7852,7 +8188,7 @@ window.openMemberModal = async function(id = null, initialTab = 'main') {
         });
         activeMemberTaskId = requestedTaskId;
         enhanceButtonIcons(modal);
-        switchMemberProfileTab(initialTab || 'main');
+        restoreMemberProfileState(id, initialTab);
     }
 };
 
@@ -8036,8 +8372,10 @@ window.saveMember = async function() {
 window.minimizeMemberModal = async function() {
     const modal = document.getElementById('member-modal');
     if (!modal) return;
+    captureMemberProfileState(currentEditingMemberId);
     if (!currentEditingMemberId && !memberFormHasAnyInput()) {
         modal.style.display = 'none';
+        closeProgressNoteSidePanel(true);
         if (activeMemberTaskId) removeWorkspaceTask(activeMemberTaskId);
         return;
     }
@@ -8046,10 +8384,13 @@ window.minimizeMemberModal = async function() {
         if (!saved) return;
     }
     modal.style.display = 'none';
+    hideProgressNoteSidePanel(true);
     if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
 };
 
 window.closeMemberModal = () => {
+    closeProgressNoteSidePanel(true);
+    if (currentEditingMemberId) memberProfileSessionStates.delete(memberProfileStateKey(currentEditingMemberId));
     document.getElementById('member-modal').style.display = 'none';
     if (activeMemberTaskId) removeWorkspaceTask(activeMemberTaskId);
 };
@@ -8232,6 +8573,10 @@ window.takeDose = async function(medId) {
         return;
     }
     let stockSourceLabel = 'Main inventory';
+    let stockSource = usesContainerTracking(med) ? 'container' : 'main';
+    let kitId = '';
+    let kitItemId = '';
+    let kitExpiry = '';
     if (!usesContainerTracking(med)) {
         if (result.inventorySource && result.inventorySource !== 'main') {
             const kitResult = consumeFromKitSource(result.inventorySource, med, amountTaken);
@@ -8240,6 +8585,10 @@ window.takeDose = async function(medId) {
                 return;
             }
             stockSourceLabel = kitResult.sourceLabel;
+            stockSource = 'kit';
+            kitId = kitResult.kitId || '';
+            kitItemId = kitResult.kitItemId || '';
+            kitExpiry = kitResult.kitItem?.expiry || med.expiry || '';
         } else {
             if (parseAmount(med.stock) < amountTaken) {
                 await appAlert("Insufficient stock.");
@@ -8255,6 +8604,12 @@ window.takeDose = async function(medId) {
         memberName: memberDisplayName(member),
         medId: med.id,
         medName: med.name,
+        stockSource,
+        inventorySource: result.inventorySource || 'main',
+        kitId,
+        kitItemId,
+        kitExpiry,
+        stockDelta: usesContainerTracking(med) ? 0 : amountTaken,
         details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}; Source: ${stockSourceLabel}${usesContainerTracking(med) ? `; ${inventoryUnitFor(med)} inventory unchanged until a container is marked finished` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
     });
     addAudit('Manual dose documented', med.name, `${memberDisplayName(member)} | ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}`);
@@ -10846,12 +11201,15 @@ function rangePrepackGivenQty(queue, day, item) {
     const med = db.inventory.find(candidate => candidate.id === item.medId);
     const range = prepackItemRangeBounds(day, item);
     return db.history.reduce((sum, entry) => {
-        if (entry.scheduleId !== item.scheduleId) return sum;
-        if (queue?.memberId && entry.memberId && entry.memberId !== queue.memberId) return sum;
-        if (item.medId && entry.medId && entry.medId !== item.medId) return sum;
-        if (!isGivenStatus(entry.doseStatus || 'given')) return sum;
-        const entryDate = String(entry.scheduledDate || historyEntryDateKey(entry) || '').slice(0, 10);
-        if (!entryDate || (range.start && entryDate < range.start) || (range.end && entryDate > range.end)) return sum;
+        if (!isGivenAdministrationHistory(entry)) return sum;
+        const exactPrepackMatch = entry.prepackQueueId === queue?.id && entry.prepackItemId === item.id;
+        if (!exactPrepackMatch) {
+            if (entry.scheduleId !== item.scheduleId) return sum;
+            if (queue?.memberId && entry.memberId && entry.memberId !== queue.memberId) return sum;
+            if (item.medId && entry.medId && entry.medId !== item.medId) return sum;
+            const entryDate = String(entry.scheduledDate || historyEntryDateKey(entry) || '').slice(0, 10);
+            if (!entryDate || (range.start && entryDate < range.start) || (range.end && entryDate > range.end)) return sum;
+        }
         const qty = parseAmount(entry.stockDelta, NaN);
         if (Number.isFinite(qty) && qty > 0) return sum + qty;
         return sum + parseAmount(schedule?.doseQty ?? item.dose ?? 0, 0);
@@ -10885,12 +11243,17 @@ function prepackStockShortagesForItems(queue, items = []) {
             shortages.push(`${med.name} does not have a valid prepack quantity.`);
             return;
         }
-        const remaining = stockLedger.has(med.id) ? stockLedger.get(med.id) : parseAmount(med.stock, 0);
+        const sourceValue = item.inventorySource || 'main';
+        const kitSource = medKitSourceFromValue(sourceValue, med.id);
+        const sourceKey = kitSource ? `kit|${kitSource.kitId}|${kitSource.itemId}` : `main|${med.id}`;
+        const sourceQty = kitSource ? parseAmount(kitSource.item.qty, 0) : parseAmount(med.stock, 0);
+        const sourceLabel = kitSource ? medKitName(kitSource.kit) : 'main inventory';
+        const remaining = stockLedger.has(sourceKey) ? stockLedger.get(sourceKey) : sourceQty;
         if (remaining < qty) {
-            shortages.push(`${med.name} needs ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}, but only ${formatAmount(Math.max(0, remaining))} is available.`);
+            shortages.push(`${med.name} needs ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from ${sourceLabel}, but only ${formatAmount(Math.max(0, remaining))} is available.`);
             return;
         }
-        stockLedger.set(med.id, remaining - qty);
+        stockLedger.set(sourceKey, remaining - qty);
     });
     return shortages;
 }
@@ -10966,10 +11329,41 @@ function applyPrepackItemStock(queue, item, method = 'scan') {
     }
     const qty = prepackItemDoseQty(queue, item);
     if (!Number.isFinite(qty) || qty <= 0) return false;
+    if (item.inventorySource && item.inventorySource !== 'main') {
+        const kitResult = consumeFromKitSource(item.inventorySource, med, qty);
+        if (kitResult.error) return false;
+        item.inventoryDeducted = true;
+        item.stockDelta = qty;
+        item.stockSource = 'kit';
+        item.kitId = kitResult.kitId || '';
+        item.kitItemId = kitResult.kitItemId || '';
+        item.kitExpiry = kitResult.kitItem?.expiry || med.expiry || '';
+        item.stockDeductedAt = new Date().toISOString();
+        item.stockDeductionMethod = method;
+        item.stockLogDetail = `Prepacked ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from ${kitResult.sourceLabel}.`;
+        db.history.unshift({
+            id: Date.now().toString(),
+            timestamp: new Date().toLocaleString(),
+            memberId: queue.memberId || '',
+            memberName: queue.memberName || '',
+            medId: med.id,
+            medName: med.name,
+            scheduleId: item.scheduleId || '',
+            prepackQueueId: queue.id,
+            prepackItemId: item.id,
+            stockSource: 'kit',
+            kitId: item.kitId,
+            kitItemId: item.kitItemId,
+            details: `${item.time} prepacked by ${method}; -${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from ${kitResult.sourceLabel}.`
+        });
+        addAudit('Prepack kit stock deducted', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | -${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from ${kitResult.sourceLabel}.`);
+        return true;
+    }
     if (parseAmount(med.stock, 0) < qty) return false;
     med.stock = Math.max(0, parseAmount(med.stock, 0) - qty);
     item.inventoryDeducted = true;
     item.stockDelta = qty;
+    item.stockSource = 'main';
     item.stockDeductedAt = new Date().toISOString();
     item.stockDeductionMethod = method;
     item.stockLogDetail = `Prepacked ${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} from inventory.`;
@@ -11004,7 +11398,11 @@ function reversePrepackItemStock(queue, item, reason = 'returned', quantityOverr
     const qty = Number.isFinite(requestedQty) && requestedQty > 0
         ? Math.min(requestedQty, Math.max(0, maxQty - alreadyReturned))
         : Math.max(0, maxQty - alreadyReturned);
-    if (med && qty > 0) med.stock = parseAmount(med.stock, 0) + qty;
+    if (item.stockSource === 'kit' || item.kitId) {
+        if (med && qty > 0) restoreQuantityToKit(item, med, qty);
+    } else if (med && qty > 0) {
+        med.stock = parseAmount(med.stock, 0) + qty;
+    }
     item.returnedQuantity = alreadyReturned + qty;
     item.inventoryReturned = !isRangePrepackItem(item) || item.returnedQuantity >= maxQty - 0.000001;
     item.returnReason = reason;
@@ -11019,9 +11417,9 @@ function reversePrepackItemStock(queue, item, reason = 'returned', quantityOverr
         scheduleId: item.scheduleId || '',
         prepackQueueId: queue.id,
         prepackItemId: item.id,
-        details: `Prepacked dose returned to inventory (${reason}); +${formatAmount(qty)} ${med?.administrationUnit || (med ? inventoryUnitFor(med) : 'units')}.`
+        details: `Prepacked dose returned to ${item.stockSource === 'kit' || item.kitId ? 'med kit' : 'inventory'} (${reason}); +${formatAmount(qty)} ${med?.administrationUnit || (med ? inventoryUnitFor(med) : 'units')}.`
     });
-    if (med) addAudit('Prepack stock returned', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | ${reason} | +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)}.`);
+    if (med) addAudit('Prepack stock returned', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | ${reason} | +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} to ${item.stockSource === 'kit' || item.kitId ? 'med kit' : 'main inventory'}.`);
     return qty;
 }
 
@@ -11036,7 +11434,22 @@ function undoPrepackItemStock(queue, item, reason = 'prepack undone') {
     } else if (item.inventoryDeducted && !item.inventoryReturned && !item.inventoryWasted) {
         const med = db.inventory.find(candidate => candidate.id === item.medId);
         qty = parseAmount(item.stockDelta, 0);
-        if (med && qty > 0) {
+        if (med && qty > 0 && (item.stockSource === 'kit' || item.kitId)) {
+            restoreQuantityToKit(item, med, qty);
+            db.history.unshift({
+                id: Date.now().toString(),
+                timestamp: new Date().toLocaleString(),
+                memberId: queue.memberId || '',
+                memberName: queue.memberName || '',
+                medId: med.id,
+                medName: med.name,
+                scheduleId: item.scheduleId || '',
+                prepackQueueId: queue.id,
+                prepackItemId: item.id,
+                details: `Prepack undone; +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} returned to med kit.`
+            });
+            addAudit('Prepack undone', med.name, `${queue.memberName || 'Prepack'} | ${item.time} | +${formatAmount(qty)} ${med.administrationUnit || inventoryUnitFor(med)} to med kit.`);
+        } else if (med && qty > 0) {
             med.stock = parseAmount(med.stock, 0) + qty;
             db.history.unshift({
                 id: Date.now().toString(),
@@ -11059,6 +11472,10 @@ function undoPrepackItemStock(queue, item, reason = 'prepack undone') {
     item.verificationMethod = '';
     item.inventoryDeducted = false;
     item.stockDelta = 0;
+    item.stockSource = '';
+    item.kitId = '';
+    item.kitItemId = '';
+    item.kitExpiry = '';
     item.stockDeductedAt = '';
     item.stockDeductionMethod = '';
     item.stockLogDetail = '';
@@ -11125,18 +11542,28 @@ function prepackItemSchedule(item) {
 function prepackItemHasDocumentedGivenDose(queue, day, item) {
     if (!item?.scheduleId) return false;
     if (isRangePrepackItem(item)) return false;
+    if ((db.history || []).some(entry =>
+        entry.prepackQueueId === queue?.id &&
+        entry.prepackItemId === item.id &&
+        isGivenAdministrationHistory(entry)
+    )) return true;
+    const sameScheduleItemsThisDay = (day?.items || []).filter(candidate =>
+        candidate.scheduleId === item.scheduleId &&
+        candidate.medId === item.medId &&
+        !isRangePrepackItem(candidate)
+    ).length;
     const exactKey = item.instanceKey && !String(item.instanceKey).startsWith('range|')
         ? item.instanceKey
         : (day?.date && item.time && !String(day.date).includes(' - ') && !String(item.time).includes(' - ')
             ? scheduleInstanceKey(item.scheduleId, day.date, item.time)
             : '');
     if (exactKey) {
-        if (db.history.some(entry => entry.scheduleInstanceKey === exactKey && isGivenStatus(entry.doseStatus || 'given'))) return true;
+        if (db.history.some(entry => entry.scheduleInstanceKey === exactKey && isGivenAdministrationHistory(entry))) return true;
     }
     const fallbackStart = firstDateInPrepackDay(day);
     const fallbackEnd = lastDateInPrepackDay(day) || fallbackStart;
     return db.history.some(entry => {
-        if (!isGivenStatus(entry.doseStatus || 'given')) return false;
+        if (!isGivenAdministrationHistory(entry)) return false;
         if (item.scheduleId) {
             if (entry.scheduleId && entry.scheduleId !== item.scheduleId) return false;
             if (!entry.scheduleId && entry.scheduleInstanceKey && !String(entry.scheduleInstanceKey).startsWith(`${item.scheduleId}|`)) return false;
@@ -11148,6 +11575,7 @@ function prepackItemHasDocumentedGivenDose(queue, day, item) {
         if (!entryDate || (fallbackStart && entryDate < fallbackStart) || (fallbackEnd && entryDate > fallbackEnd)) return false;
         const entryTime = String(entry.scheduledTime || '').slice(0, 5);
         const itemTime = String(item.time || '').slice(0, 5);
+        if (sameScheduleItemsThisDay <= 1) return true;
         return !itemTime || String(item.time || '').includes(' - ') || !entryTime || entryTime === itemTime;
     });
 }
@@ -11186,7 +11614,7 @@ function returnPrepackUnitLabel(row, qtyReturned) {
     const med = row.med || db.inventory.find(candidate => candidate.id === row.item?.medId);
     if (!med) return '';
     const labelCode = medicationCodes(med)[0] || row.item?.barcodeCode || '';
-    const barcodeDataUrl = code128DataUrl(labelCode) || medicationQrDataUrl(labelCode);
+    const barcodeDataUrl = medicationQrDataUrl(labelCode);
     const unit = med.administrationUnit || inventoryUnitFor(med);
     const returnedDate = localDateKey();
     const qtyText = `${formatAmount(qtyReturned)} ${unit || 'unit(s)'}`;
@@ -11195,15 +11623,36 @@ function returnPrepackUnitLabel(row, qtyReturned) {
         formatLabelMedStrength(med),
         qtyText,
         med.expiry || '',
-        returnedDate
-    ], 5);
+        returnedDate,
+        med.storage || '',
+        med.instructions || med.notes || ''
+    ], med.instructions || med.notes ? 7 : 6);
     return `<div class="${labelClass} inventory-return-label">
         <div class="label-title">${escapeHtml(med.name)} ${escapeHtml(formatLabelMedStrength(med))}</div>
         <div class="label-small"><b>Qty returned:</b> ${escapeHtml(qtyText)}</div>
         <div class="label-small"><b>Exp:</b> ${escapeHtml(med.expiry || 'N/A')}</div>
         <div class="label-small"><b>Returned:</b> ${escapeHtml(returnedDate)}</div>
-        ${barcodeDataUrl ? `<img class="inventory-return-label-code" src="${barcodeDataUrl}" alt="Inventory barcode">` : ''}
+        <div class="label-small"><b>Storage:</b> ${escapeHtml(med.storage || 'N/A')}</div>
+        ${med.instructions ? `<div class="label-small"><b>Instructions:</b> ${escapeHtml(med.instructions)}</div>` : ''}
+        ${!med.instructions && med.notes ? `<div class="label-small"><b>Notes:</b> ${escapeHtml(med.notes)}</div>` : ''}
+        ${barcodeDataUrl ? `<img class="inventory-return-label-code" src="${barcodeDataUrl}" alt="Inventory QR code">` : ''}
     </div>`;
+}
+
+function aggregateReturnPrepackLabels(labelRows = []) {
+    const grouped = new Map();
+    labelRows.forEach(entry => {
+        const med = entry.row?.med || db.inventory.find(candidate => candidate.id === entry.row?.item?.medId);
+        if (!med) return;
+        const key = med.id || `${med.name}|${formatLabelMedStrength(med)}`;
+        const existing = grouped.get(key) || { row: { ...entry.row, med }, qty: 0 };
+        existing.qty += parseAmount(entry.qty, 0);
+        grouped.set(key, existing);
+    });
+    return [...grouped.values()]
+        .sort((a, b) => String(a.row.med?.name || '').localeCompare(String(b.row.med?.name || ''), undefined, { sensitivity: 'base' }))
+        .map(entry => returnPrepackUnitLabel(entry.row, entry.qty))
+        .join('');
 }
 
 function markPrepackItemWasted(row, reason = 'wasted', note = '') {
@@ -11476,10 +11925,14 @@ window.createBulkInventoryContainer = async function() {
         await appAlert('Add inventory items before creating a bulk bottle/container.');
         return;
     }
+    ensureMedKits();
     const inventory = sortByName(db.inventory, inventoryDisplayName);
     const medOptions = inventory.map(med =>
         `<option value="${escapeHtml(inventoryDisplayName(med))}">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</option>`
     ).join('');
+    const destinationOptions = (db.medKits || [])
+        .map(kit => `<option value="${escapeHtml(kit.id)}">Med Kit: ${escapeHtml(medKitName(kit))}</option>`)
+        .join('');
     const defaults = defaultActualDateTime();
     const result = await showActionModal('Bulk Bottle/Container From Inventory', `
         <div data-action-modal-size="wide" class="bulk-container-preview-shell">
@@ -11513,6 +11966,12 @@ window.createBulkInventoryContainer = async function() {
                     </label>
                     <label>Label name
                         <input name="labelName" type="text" placeholder="Leave blank to use medication name" oninput="updateBulkContainerPreview()">
+                    </label>
+                    <label>Destination
+                        <select name="destinationKitId">
+                            <option value="">Main inventory</option>
+                            ${destinationOptions}
+                        </select>
                     </label>
                 </div>
                 <div class="bulk-container-qr-row">
@@ -11571,12 +12030,31 @@ window.createBulkInventoryContainer = async function() {
     };
     sourceMed.stock = Math.max(0, parseAmount(sourceMed.stock, 0) - qtyPrepared);
     db.inventory.push(bulkMed);
+    if (result.destinationKitId) {
+        const kit = db.medKits.find(candidate => candidate.id === result.destinationKitId);
+        if (kit) {
+            kit.items = Array.isArray(kit.items) ? kit.items : [];
+            kit.items.push({
+                id: medKitItemId(),
+                medId: bulkMed.id,
+                qty: qtyPrepared,
+                unit: inventoryUnitFor(bulkMed),
+                expiry: bulkMed.expiry || '',
+                addedAt: new Date().toISOString()
+            });
+            kit.updatedAt = new Date().toISOString();
+            bulkMed.stock = 0;
+            bulkMed.maxCapacity = Math.max(parseAmount(bulkMed.maxCapacity, 0), qtyPrepared);
+            bulkMed.medKitDestinationId = kit.id;
+            bulkMed.notes += `\nPlaced into Med Kit: ${medKitName(kit)}.`;
+        }
+    }
     db.history.unshift({
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
         medId: sourceMed.id,
         medName: sourceMed.name,
-        details: `Bulk bottle/container created: ${bulkMed.name}; -${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)} source stock; new QR ${barcodeCode}.`
+        details: `Bulk bottle/container created: ${bulkMed.name}; -${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)} source stock${result.destinationKitId ? '; placed in med kit' : ''}; new QR ${barcodeCode}.`
     });
     addAudit('Bulk inventory container created', sourceMed.name, `${bulkMed.name} | -${formatAmount(qtyPrepared)} ${inventoryUnitFor(sourceMed)}.`);
     await sync();
@@ -11833,6 +12311,11 @@ function reconcilePrepackQueue(queue) {
                 item.verificationMethod = previous.verificationMethod;
                 item.inventoryDeducted = previous.inventoryDeducted;
                 item.stockDelta = previous.stockDelta;
+                item.stockSource = previous.stockSource;
+                item.inventorySource = previous.inventorySource;
+                item.kitId = previous.kitId;
+                item.kitItemId = previous.kitItemId;
+                item.kitExpiry = previous.kitExpiry;
                 item.stockDeductedAt = previous.stockDeductedAt;
                 item.stockDeductionMethod = previous.stockDeductionMethod;
                 item.stockLogDetail = previous.stockLogDetail;
@@ -12040,6 +12523,7 @@ function prepackWorkspaceHtml(queue) {
             <div class="prepack-item-copy">
                 <strong>${escapeHtml(item.time)} - ${escapeHtml(item.medName)} ${escapeHtml(item.strength || '')}</strong>${item.isPrepackAdded ? ' <span class="prepack-added-badge">Added</span>' : ''}<br>
                 <small>Qty: ${escapeHtml(item.quantity)} | Dose: ${escapeHtml(item.dose)}${item.expirationDate ? ` | Exp: ${escapeHtml(item.expirationDate)}` : ''}${item.inventoryReturned ? ` | Returned: ${escapeHtml(item.returnReason || 'returned')}` : ''}${escapeHtml(orderSetText)}</small>
+                ${inventoryUnitDose ? '' : prepackItemSourceSelectHtml(queue.id, item)}
                 ${item.status === 'wrong' ? `<div class="prepack-scan-error">Wrong scan: ${escapeHtml(item.scannedCode || 'Unknown code')}</div>` : ''}
             </div>
             <div class="prepack-item-actions">${undoButton}${removeButton}</div>
@@ -12278,6 +12762,7 @@ window.filterReturnPrepackList = function() {
     });
     const count = body.querySelector('#return-prepack-filter-count');
     if (count) count.textContent = `${visible} package${visible === 1 ? '' : 's'} shown`;
+    updateReturnPrepackLabelPreview(false);
 };
 
 window.toggleReturnPrepackPackage = function(input) {
@@ -12289,6 +12774,7 @@ window.toggleReturnPrepackPackage = function(input) {
         child.closest('.return-prepack-row')?.classList.toggle('selected', child.checked);
     });
     group.classList.toggle('selected', input.checked);
+    updateReturnPrepackLabelPreview(false);
 };
 
 window.updateReturnPrepackPackageState = function(input) {
@@ -12301,6 +12787,7 @@ window.updateReturnPrepackPackageState = function(input) {
     parent.checked = checked === children.length;
     parent.indeterminate = checked > 0 && checked < children.length;
     group.classList.toggle('selected', checked > 0);
+    updateReturnPrepackLabelPreview(false);
 };
 
 window.selectReturnPrepackByCode = function() {
@@ -12331,24 +12818,53 @@ window.selectReturnPrepackByCode = function() {
     }
     const status = body.querySelector('#return-prepack-scan-status');
     if (status) status.textContent = 'Package selected. Review items, then process the return or waste.';
+    updateReturnPrepackLabelPreview(false);
 };
 
-window.returnPrepackedDispense = async function() {
+function selectedReturnPrepackLabelRows(body = document.getElementById('action-modal-body')) {
+    if (!body) return [];
+    const result = collectNamedInputs(body);
+    if ((result.handling || 'return') === 'waste') return [];
     const rows = returnablePrepackItems();
-    if (rows.length === 0) {
-        await appAlert('No prepared prepack doses are available to return.');
+    const selected = Array.isArray(result.returnRows) ? result.returnRows : [result.returnRows].filter(value => value !== undefined);
+    return selected.map(value => {
+        const row = rows[parseInt(value, 10)];
+        if (!row) return null;
+        const max = prepackItemReturnableQty(row);
+        const rawQty = result[`returnQty_${row.returnIndex}`];
+        const qty = isRangePrepackItem(row.item)
+            ? parseAmount(rawQty, NaN)
+            : max;
+        if (!Number.isFinite(qty) || qty <= 0 || qty > max + 0.000001) return null;
+        return { row, qty };
+    }).filter(Boolean);
+}
+
+window.updateReturnPrepackLabelPreview = function(processed = false) {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const preview = body.querySelector('#return-prepack-label-preview');
+    const printButton = body.querySelector('#return-print-label-button');
+    if (!preview || !printButton) return;
+    const result = collectNamedInputs(body);
+    if (processed === false) printButton.dataset.returnProcessed = 'false';
+    if ((result.handling || 'return') === 'waste') {
+        preview.innerHTML = '<div class="return-label-preview-empty">Waste entries do not generate return labels.</div>';
+        printButton.disabled = true;
+        printButton.classList.remove('return-print-ready');
         return;
     }
-    const groups = returnPrepackGroups(rows);
-    const dates = groups.map(group => firstDateInPrepackDay(group.day)).filter(Boolean).sort();
-    const minDate = dates[0] || '';
-    const maxDate = dates[dates.length - 1] || '';
-    const memberOptions = [...new Map(groups.map(group => [group.queue.memberId, group.queue.memberName || group.queue.title || 'Unknown member']))]
-        .filter(([id]) => id)
-        .sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: 'base' }))
-        .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`)
-        .join('');
-    const choices = groups.map((group, groupIndex) => {
+    const labelRows = selectedReturnPrepackLabelRows(body);
+    const html = aggregateReturnPrepackLabels(labelRows);
+    preview.innerHTML = html || '<div class="return-label-preview-empty">Select returnable prepack items to preview their return labels. Printing unlocks after Process Selected.</div>';
+    fitLabelPages(preview);
+    const canPrint = printButton.dataset.returnProcessed === 'true' && !!html;
+    printButton.disabled = !canPrint;
+    printButton.classList.toggle('return-print-ready', canPrint);
+};
+
+function returnPrepackChoicesHtml(rows, groups) {
+    return groups.map((group, groupIndex) => {
         const packageId = `return-prepack-package-${groupIndex}`;
         const sourceLabel = returnPrepackSourceLabel(group.rows[0]);
         const itemText = `${group.rows.length} item${group.rows.length === 1 ? '' : 's'}`;
@@ -12363,16 +12879,16 @@ window.returnPrepackedDispense = async function() {
                 ? `${formatAmount(returnableQty || parseAmount(row.item.stockDelta))} ${unit}`
                 : (row.item.quantity || 'quantity not recorded');
             const stockText = row.item.inventoryDeducted
-                ? `Inventory return: ${qty}`
+                ? `${row.item.stockSource === 'kit' || row.item.kitId ? 'Med kit return' : 'Inventory return'}: ${qty}${isRangePrepackItem(row.item) ? ` (packed ${formatAmount(parseAmount(row.item.stockDelta, 0))}, given from this prepack ${formatAmount(rangePrepackGivenQty(row.queue, row.day, row.item))})` : ''}`
                 : 'Prepared record only: PharmAtlas did not record an inventory deduction marker for this item, so returning it documents the package without changing stock.';
             const rangeQtyInput = isRangePrepackItem(row.item)
                 ? `<label class="return-prepack-qty">Return qty
-                    <input name="returnQty_${row.returnIndex}" type="number" step="any" min="0" max="${escapeHtml(returnableQty)}" value="${escapeHtml(returnableQty)}">
+                    <input name="returnQty_${row.returnIndex}" type="number" step="any" min="0" max="${escapeHtml(returnableQty)}" value="${escapeHtml(returnableQty)}" oninput="updateReturnPrepackLabelPreview(false)">
                     <span>${escapeHtml(unit)}</span>
                 </label>`
                 : '';
             return `<label class="return-prepack-row" for="${inputId}">
-                <span class="return-prepack-check"><input id="${inputId}" name="returnRows" type="checkbox" value="${row.returnIndex}" onchange="updateReturnPrepackPackageState(this)"></span>
+                <span class="return-prepack-check"><input id="${inputId}" name="returnRows" type="checkbox" value="${row.returnIndex}" onchange="updateReturnPrepackPackageState(this); updateReturnPrepackActionUi();"></span>
                 <span class="return-prepack-main">
                     <span class="return-prepack-time">${escapeHtml(returnPrepackItemTimeLabel(row))}</span>
                     <strong>${escapeHtml(row.item.medName)} ${escapeHtml(row.item.strength || '')}</strong>
@@ -12384,7 +12900,7 @@ window.returnPrepackedDispense = async function() {
         ensurePrepackDayCodes(group.queue);
         return `<details class="return-prepack-group" data-member-id="${escapeHtml(group.queue.memberId || '')}" data-date="${escapeHtml(groupDate)}" data-prepack-code="${escapeHtml(group.day.prepackCode || '')}" data-package-status="${escapeHtml(groupStatus)}" data-stock-mode="${escapeHtml(stockMode)}">
             <summary class="return-prepack-package">
-                <span class="return-prepack-check"><input id="${packageId}" class="return-prepack-package-check" type="checkbox" onclick="event.stopPropagation()" onchange="toggleReturnPrepackPackage(this)"></span>
+                <span class="return-prepack-check"><input id="${packageId}" class="return-prepack-package-check" type="checkbox" onclick="event.stopPropagation()" onchange="toggleReturnPrepackPackage(this); updateReturnPrepackActionUi();"></span>
                 <span class="return-prepack-main">
                     <span class="return-prepack-time">${escapeHtml(group.day.date)}</span>
                     <strong>${escapeHtml(group.queue.memberName || group.queue.title || 'Prepack package')}</strong>
@@ -12395,8 +12911,38 @@ window.returnPrepackedDispense = async function() {
             <div class="return-prepack-children">${childRows}</div>
         </details>`;
     }).join('');
-    const result = await showActionModal('Return / Waste Prepacked Dose(s)', `
-        <div data-action-modal-size="wide" class="return-prepack-modal">
+}
+
+function returnPrepackModalContent(labelHtml = '', statusText = '') {
+    const rows = returnablePrepackItems();
+    if (rows.length === 0) {
+        return `<div data-action-modal-size="wide" class="return-prepack-modal return-prepack-modal-grid">
+            <div class="return-prepack-left">
+                ${statusText ? `<div id="return-prepack-status" class="return-prepack-status">${escapeHtml(statusText)}</div>` : ''}
+                <div class="form-help">No prepared prepack doses are currently available to return or waste.</div>
+            </div>
+            <div class="return-prepack-preview-panel">
+                <div class="return-preview-header">
+                    <strong>Return label preview</strong>
+                    <button id="return-print-label-button" type="button" class="${labelHtml ? 'return-print-ready' : ''}" data-return-processed="${labelHtml ? 'true' : 'false'}" onclick="printReturnPrepackLabels()" ${labelHtml ? '' : 'disabled'}>Print Return Labels</button>
+                </div>
+                <div id="return-prepack-label-preview" class="return-prepack-label-preview">${labelHtml || '<div class="return-label-preview-empty">Returned-medication labels appear here after processing a return.</div>'}</div>
+            </div>
+        </div>`;
+    }
+    const groups = returnPrepackGroups(rows);
+    const dates = groups.map(group => firstDateInPrepackDay(group.day)).filter(Boolean).sort();
+    const minDate = dates[0] || '';
+    const maxDate = dates[dates.length - 1] || '';
+    const memberOptions = [...new Map(groups.map(group => [group.queue.memberId, group.queue.memberName || group.queue.title || 'Unknown member']))]
+        .filter(([id]) => id)
+        .sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: 'base' }))
+        .map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`)
+        .join('');
+    const choices = returnPrepackChoicesHtml(rows, groups);
+    return `
+        <div data-action-modal-size="wide" class="return-prepack-modal return-prepack-modal-grid">
+            <div class="return-prepack-left">
             <div class="form-help" style="margin-bottom:8px;">Use this when a prepacked dose was missed, refused, held, broken, lost, or otherwise not used. Return adds eligible quantities back to inventory. Waste documents the loss and does not change inventory.</div>
             <div class="return-prepack-filter-panel">
                 <label>Scan package QR
@@ -12425,26 +12971,29 @@ window.returnPrepackedDispense = async function() {
                         <option value="mixed">Mixed stock + record</option>
                     </select>
                 </label>
-                <label>Return reason
-                    <select name="reason">
+                <label class="return-reason-field">Return reason
+                    <select name="returnReason">
                         <option value="missed dose">Missed dose</option>
                         <option value="refused dose">Refused dose</option>
                         <option value="held dose">Held dose</option>
                         <option value="packing error">Packing error</option>
-                        <option value="lost or broken">Lost or broken</option>
+                        <option value="other">Other</option>
+                    </select>
+                </label>
+                <label class="waste-reason-field" style="display:none;">Waste reason
+                    <select name="wasteReason">
+                        <option value="lost">Lost</option>
+                        <option value="broken">Broken</option>
+                        <option value="contaminated">Contaminated</option>
                         <option value="discarded">Discarded</option>
                         <option value="other">Other</option>
                     </select>
                 </label>
                 <label>Action
-                    <select name="handling">
+                    <select name="handling" onchange="updateReturnPrepackActionUi(); updateReturnPrepackLabelPreview(false)">
                         <option value="return">Return to inventory</option>
                         <option value="waste">Waste / do not return</option>
                     </select>
-                </label>
-                <label class="return-label-option">
-                    <input name="previewReturnLabels" type="checkbox" value="yes" checked>
-                    Preview return label
                 </label>
                 <span id="return-prepack-filter-count">${groups.length} package${groups.length === 1 ? '' : 's'} shown</span>
             </div>
@@ -12452,10 +13001,57 @@ window.returnPrepackedDispense = async function() {
             <div class="field-row-stacked" style="margin-top:8px;">
                 <label>Note:</label><textarea name="note" rows="2" style="width:100%; resize:none;" placeholder="Optional return note"></textarea>
             </div>
+            ${statusText ? `<div id="return-prepack-status" class="return-prepack-status">${escapeHtml(statusText)}</div>` : '<div id="return-prepack-status" class="return-prepack-status" style="display:none;"></div>'}
+            <div class="field-row" style="justify-content:flex-end; margin-top:8px;">
+                <button type="button" onclick="processReturnPrepackSelection()">Process Selected</button>
+            </div>
             <div class="sunken-panel label-selection-list return-prepack-list" style="margin-top:8px; max-height:330px;">${choices}</div>
+            </div>
+            <div class="return-prepack-preview-panel">
+                <div class="return-preview-header">
+                    <strong>Return label preview</strong>
+                    <button id="return-print-label-button" type="button" class="${labelHtml ? 'return-print-ready' : ''}" data-return-processed="${labelHtml ? 'true' : 'false'}" onclick="printReturnPrepackLabels()" ${labelHtml ? '' : 'disabled'}>Print Return Labels</button>
+                </div>
+                <div id="return-prepack-label-preview" class="return-prepack-label-preview">${labelHtml || '<div class="return-label-preview-empty">Returned-medication labels appear here after processing a return. Waste entries do not generate labels.</div>'}</div>
+            </div>
         </div>
-    `, 'Process Selected');
-    if (!result) return;
+    `;
+}
+
+window.returnPrepackedDispense = async function() {
+    const rows = returnablePrepackItems();
+    if (rows.length === 0) {
+        await appAlert('No prepared prepack doses are available to return.');
+        return;
+    }
+    await showActionModal('Return / Waste Prepacked Dose(s)', returnPrepackModalContent(), 'Close');
+};
+
+window.updateReturnPrepackActionUi = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const handling = body.querySelector('[name="handling"]')?.value || 'return';
+    body.querySelectorAll('.return-reason-field').forEach(el => { el.style.display = handling === 'return' ? '' : 'none'; });
+    body.querySelectorAll('.waste-reason-field').forEach(el => { el.style.display = handling === 'waste' ? '' : 'none'; });
+};
+
+window.printReturnPrepackLabels = function() {
+    const preview = document.getElementById('return-prepack-label-preview');
+    if (!preview || preview.querySelector('.return-label-preview-empty')) return;
+    pendingLabelHtml = preview.innerHTML;
+    const printArea = document.getElementById('print-area');
+    if (printArea) {
+        printArea.innerHTML = pendingLabelHtml;
+        fitLabelPages(printArea);
+    }
+    printPreparedArea();
+};
+
+window.processReturnPrepackSelection = async function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const result = collectNamedInputs(body);
+    const rows = returnablePrepackItems();
     const selected = Array.isArray(result.returnRows) ? result.returnRows : [result.returnRows].filter(value => value !== undefined);
     if (selected.length === 0) {
         await appAlert('Select at least one prepacked dose to return.');
@@ -12475,20 +13071,22 @@ window.returnPrepackedDispense = async function() {
             }
         }
         if (result.handling === 'waste') {
-            markPrepackItemWasted(row, result.reason || 'wasted', result.note || '');
+            markPrepackItemWasted(row, result.wasteReason || 'wasted', result.note || '');
         } else {
-            const returnedQty = markPrepackItemReturned(row, result.reason || 'returned', result.note || '', qtyOverride);
+            const returnedQty = markPrepackItemReturned(row, result.returnReason || 'returned', result.note || '', qtyOverride);
             const labelQty = returnedQty || parseAmount(qtyOverride, 0) || prepackItemReturnableQty(row);
             if (labelQty > 0) labelRows.push({ row, qty: labelQty });
         }
     }
     await sync();
-    await appAlert(`${selected.length} prepacked dose${selected.length === 1 ? '' : 's'} ${result.handling === 'waste' ? 'marked wasted' : 'returned to inventory'}.`, result.handling === 'waste' ? 'Prepack Waste Complete' : 'Prepack Return Complete');
-    const wantsLabels = Array.isArray(result.previewReturnLabels)
-        ? result.previewReturnLabels.includes('yes')
-        : result.previewReturnLabels === 'yes';
-    if (result.handling !== 'waste' && wantsLabels && labelRows.length) {
-        previewLabelHtml(labelRows.map(entry => returnPrepackUnitLabel(entry.row, entry.qty)).join(''));
+    const labelHtml = result.handling === 'waste' ? '' : aggregateReturnPrepackLabels(labelRows);
+    const status = `${selected.length} prepacked dose${selected.length === 1 ? '' : 's'} ${result.handling === 'waste' ? 'marked wasted. No return labels were generated.' : 'returned to inventory.'}`;
+    const actionBody = document.getElementById('action-modal-body');
+    if (actionBody) {
+        actionBody.innerHTML = returnPrepackModalContent(labelHtml, status);
+        enhanceButtonIcons(actionBody);
+        fitLabelPages(actionBody.querySelector('#return-prepack-label-preview'));
+        updateReturnPrepackActionUi();
     }
 };
 
@@ -14463,6 +15061,25 @@ function todayDoseRows() {
                 rows.push({ type: 'care-reminder', status, reminder, member, instance: { date: today, time }, minutes: minutes ?? 99999 });
             });
         });
+    ensureCustomEvents()
+        .filter(event => customEventOccursOn(event, today))
+        .forEach(event => {
+            const minutes = event.time ? timeToMinutes(event.time) : 99999;
+            const diff = minutes === null ? 99999 : minutes - currentMinutes;
+            const members = customEventMembers(event);
+            const status = event.status === 'completed'
+                ? 'given'
+                : (!event.time ? 'later' : (diff < 0 ? 'overdue' : (diff <= 60 ? 'soon' : 'later')));
+            rows.push({
+                type: 'custom-event',
+                status,
+                event,
+                members,
+                member: members[0] || null,
+                instance: { date: today, time: event.time || 'Anytime' },
+                minutes: minutes ?? 99999
+            });
+        });
     return rows.sort((a, b) => {
         const order = { overdue: 0, soon: 1, later: 2, exception: 3, given: 4, PRN: 5 };
         return (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.minutes - b.minutes;
@@ -14518,6 +15135,25 @@ function renderTodayViewDashboard() {
                 </div>
             </div>`;
         }
+        if (row.type === 'custom-event') {
+            const links = customEventLinkSummary(row.event);
+            const memberNames = row.members?.length ? row.members.map(memberDisplayName).join(', ') : 'General';
+            const urgentMarker = row.event.urgent ? '<span class="custom-event-urgent" title="Urgent">!</span>' : '';
+            return `<div class="today-dose-row today-custom-event ${statusClass}">
+                <div class="today-row-main">
+                    <span class="today-row-icon">${todayStatusIcon(row)}</span>
+                    <div>
+                        ${urgentMarker}<strong>${escapeHtml(time)}</strong> - ${escapeHtml(row.event.title || customEventTypeLabel(row.event.type))}
+                        <br><small>${escapeHtml(memberNames)} | ${escapeHtml(customEventTypeLabel(row.event.type))}${links ? ` | ${escapeHtml(links)}` : ''}${row.event.note ? ` | ${escapeHtml(row.event.note)}` : ''}</small>
+                    </div>
+                </div>
+                <div class="today-row-actions">
+                    <span class="today-status-pill">${escapeHtml(todayStatusLabel(row))}</span>
+                    <button type="button" class="today-primary-action" onclick="toggleCustomEventDone('${escapeHtml(row.event.id)}')">${row.status === 'given' ? 'Reopen' : 'Done'}</button>
+                    <button type="button" class="today-secondary-action" onclick="openCustomEventEditor('${escapeHtml(row.event.id)}')">Edit</button>
+                </div>
+            </div>`;
+        }
         return `<div class="today-dose-row ${statusClass}">
             <div class="today-row-main">
                 <span class="today-row-icon">${todayStatusIcon(row)}</span>
@@ -14562,10 +15198,20 @@ function renderDashboardRightPanel(rows = todayDoseRows(), counts = null) {
     const nextHtml = nextItems.length ? nextItems.map(row => {
         const title = row.type === 'care-reminder'
             ? careReminderTypeLabel(row.reminder.type, row.reminder.memberId)
+            : row.type === 'custom-event'
+                ? (row.event.title || customEventTypeLabel(row.event.type))
             : `${row.med.name} ${formatMedStrength(row.med)}`;
-        return `<button type="button" class="rail-list-button ${row.status === 'overdue' ? 'danger' : 'watch'}" onclick="${row.type === 'care-reminder' ? `openMemberModal('${escapeHtml(row.member.id)}', 'monitoring')` : `openMemberModal('${escapeHtml(row.member.id)}', 'orders')`}">
+        const action = row.type === 'care-reminder'
+            ? `openMemberModal('${escapeHtml(row.member.id)}', 'monitoring')`
+            : row.type === 'custom-event'
+                ? `openCustomEventEditor('${escapeHtml(row.event.id)}')`
+                : `openMemberModal('${escapeHtml(row.member.id)}', 'orders')`;
+        const memberLabel = row.type === 'custom-event'
+            ? (row.members?.length ? row.members.map(memberDisplayName).join(', ') : 'General')
+            : memberDisplayName(row.member);
+        return `<button type="button" class="rail-list-button ${row.status === 'overdue' ? 'danger' : 'watch'}" onclick="${action}">
             <strong>${escapeHtml(row.instance.time || 'PRN')} ${escapeHtml(title)}</strong>
-            <small>${escapeHtml(memberDisplayName(row.member))} | ${escapeHtml(todayStatusLabel(row))}</small>
+            <small>${escapeHtml(memberLabel)} | ${escapeHtml(todayStatusLabel(row))}</small>
         </button>`;
     }).join('') : '<div class="rail-empty">No overdue or due-soon items.</div>';
     const inventoryHtml = [
@@ -14821,6 +15467,117 @@ window.backupAppData = async function() {
     }
     const path = await window.api.backupData(db);
     if (path) await appAlert(`Backup saved:\n${path}`, 'Backup Complete');
+};
+
+function dateValueOlderThan(value, cutoffKey) {
+    if (!value || !cutoffKey) return false;
+    const match = String(value).match(/\d{4}-\d{2}-\d{2}/);
+    return !!match && match[0] < cutoffKey;
+}
+
+function archiveCompletedPrepackQueue(queue, cutoffKey) {
+    if (queue?.status !== 'completed') return false;
+    const latestDay = (queue.days || []).map(lastDateInPrepackDay).filter(Boolean).sort().pop() || '';
+    return !!latestDay && latestDay < cutoffKey;
+}
+
+function archiveReceivedOrder(order, cutoffKey) {
+    refreshInventoryOrderReceiptStatus(order);
+    return order.status === 'received' && dateValueOlderThan(order.receivedAt || order.createdAt, cutoffKey);
+}
+
+function buildArchivePayload(cutoffKey, includeVitals = false) {
+    const history = (db.history || []).filter(entry => dateValueOlderThan(entry.timestamp || entry.scheduledDate, cutoffKey));
+    const auditTrail = (db.auditTrail || []).filter(entry => dateValueOlderThan(entry.at || entry.timestamp, cutoffKey));
+    const compoundPreps = (db.compoundPreps || []).filter(prep => dateValueOlderThan(prep.preparedDate || prep.createdAt, cutoffKey));
+    const reminderLog = (db.reminderLog || []).filter(entry => dateValueOlderThan(entry, cutoffKey));
+    const prepackQueues = (db.prepackQueues || []).filter(queue => archiveCompletedPrepackQueue(queue, cutoffKey));
+    const inventoryOrders = (db.inventoryOrders || []).filter(order => archiveReceivedOrder(order, cutoffKey));
+    const vitals = includeVitals ? (db.vitals || []).filter(reading => dateValueOlderThan(reading.date || reading.timestamp, cutoffKey)) : [];
+    return {
+        cutoffDate: cutoffKey,
+        includeVitals,
+        archivedAt: new Date().toISOString(),
+        counts: {
+            history: history.length,
+            auditTrail: auditTrail.length,
+            compoundPreps: compoundPreps.length,
+            reminderLog: reminderLog.length,
+            prepackQueues: prepackQueues.length,
+            inventoryOrders: inventoryOrders.length,
+            vitals: vitals.length
+        },
+        data: { history, auditTrail, compoundPreps, reminderLog, prepackQueues, inventoryOrders, vitals }
+    };
+}
+
+function removeArchivedRecords(payload) {
+    const ids = (items, key = 'id') => new Set((items || []).map(item => item?.[key]).filter(Boolean));
+    const historyIds = ids(payload.data.history);
+    const auditIds = ids(payload.data.auditTrail);
+    const prepIds = ids(payload.data.compoundPreps);
+    const queueIds = ids(payload.data.prepackQueues);
+    const orderIds = ids(payload.data.inventoryOrders);
+    const vitalIds = ids(payload.data.vitals);
+    const reminderSet = new Set(payload.data.reminderLog || []);
+    db.history = (db.history || []).filter(entry => !historyIds.has(entry.id));
+    db.auditTrail = (db.auditTrail || []).filter(entry => !auditIds.has(entry.id));
+    db.compoundPreps = (db.compoundPreps || []).filter(prep => !prepIds.has(prep.id));
+    db.prepackQueues = (db.prepackQueues || []).filter(queue => !queueIds.has(queue.id));
+    db.inventoryOrders = (db.inventoryOrders || []).filter(order => !orderIds.has(order.id));
+    db.reminderLog = (db.reminderLog || []).filter(entry => !reminderSet.has(entry));
+    if (payload.includeVitals) db.vitals = (db.vitals || []).filter(reading => !vitalIds.has(reading.id));
+    db.settings = { ...(db.settings || {}), lastArchiveAt: payload.archivedAt, lastArchiveCutoff: payload.cutoffDate };
+}
+
+window.archiveOldData = async function() {
+    if (!window.api?.archiveData) {
+        await appAlert('Archive support is not available in this build. Restart the desktop app and try again.');
+        return;
+    }
+    const today = localDateKey();
+    const defaultCutoff = addDaysKey(today, -180);
+    const result = await showActionModal('Archive Old Data', `
+        <div data-action-modal-size="wide">
+            <div class="archive-intro"><strong>Archive old logs so screens stay fast.</strong><br>PharmAtlas saves an archive JSON first, then removes old records from the active database.</div>
+            <div class="field-row" style="margin-top:8px;">
+                <label>Archive records before:</label>
+                <input name="cutoffDate" type="date" value="${escapeHtml(defaultCutoff)}">
+                <label><input name="includeVitals" type="checkbox" value="yes"> include old monitoring/vital readings</label>
+            </div>
+            <div class="form-help">Active medications, members, inventory, regimens, open/partial orders, and unfinished prepack queues stay in the live database.</div>
+        </div>
+    `, 'Preview Archive', body => ({
+        cutoffDate: body.querySelector('[name="cutoffDate"]')?.value || defaultCutoff,
+        includeVitals: body.querySelector('[name="includeVitals"]')?.checked ? 'yes' : ''
+    }));
+    if (!result) return;
+    if (!result.cutoffDate || result.cutoffDate >= today) {
+        await appAlert('Choose a cutoff date before today.');
+        return;
+    }
+    const payload = buildArchivePayload(result.cutoffDate, result.includeVitals === 'yes');
+    const total = Object.values(payload.counts).reduce((sum, count) => sum + count, 0);
+    if (!total) {
+        await appAlert('No old records matched that archive date.');
+        return;
+    }
+    const countsText = Object.entries(payload.counts)
+        .filter(([, count]) => count > 0)
+        .map(([label, count]) => `${label}: ${count}`)
+        .join('\n');
+    if (!await appConfirm(`Archive ${total} old record(s) before ${payload.cutoffDate}?\n\n${countsText}\n\nThe live database is only trimmed after the archive file is saved.`, 'Confirm Archive')) return;
+    try {
+        const archivePath = await window.api.archiveData(payload);
+        if (!archivePath) return;
+        removeArchivedRecords(payload);
+        addAudit('Old data archived', 'Maintenance', `${total} records archived before ${payload.cutoffDate}.`);
+        await sync();
+        await appAlert(`Archive saved:\n${archivePath}\n\n${total} old record(s) removed from the active database.`, 'Archive Complete');
+    } catch (error) {
+        console.error(error);
+        await appAlert('Unable to archive old data. No active data was removed.', 'Archive Failed');
+    }
 };
 
 window.restoreAppData = async function() {
@@ -15750,13 +16507,50 @@ window.updateScheduleMedicationPreview = function() {
 
 // Scheduler checks every minute to see if medications or monitoring parameters are due.
 function reminderWasSent(key) {
-    return notifiedDoseKeys.has(key) || (Array.isArray(db.reminderLog) && db.reminderLog.includes(key));
+    return pendingReminderKeys.has(key) || notifiedDoseKeys.has(key) || (Array.isArray(db.reminderLog) && db.reminderLog.includes(key));
 }
 
 function recordReminderSent(key) {
+    pendingReminderKeys.add(key);
     notifiedDoseKeys.add(key);
     if (!Array.isArray(db.reminderLog)) db.reminderLog = [];
     if (!db.reminderLog.includes(key)) db.reminderLog.push(key);
+}
+
+async function dispatchReminderOnce(key, sendFn) {
+    if (!key || reminderWasSent(key)) return false;
+    recordReminderSent(key);
+    try {
+        await Promise.resolve(sendFn());
+    } catch (error) {
+        console.error('Reminder delivery failed:', key, error);
+    }
+    return true;
+}
+
+function reminderIdentityPart(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function medicationReminderGroupKey(schedule, med, member, dateKey, time) {
+    return [
+        dateKey,
+        'med',
+        member?.id || schedule?.memberId || '',
+        med?.id || reminderIdentityPart(`${med?.name || ''} ${med ? formatMedStrength(med) : ''}`),
+        reminderIdentityPart(formatQtyForSchedule(schedule, med || {})),
+        time
+    ].join('|');
+}
+
+function careReminderGroupKey(reminder, member, dateKey, time) {
+    return [
+        dateKey,
+        'care',
+        member?.id || reminder?.memberId || '',
+        reminder?.type || '',
+        time
+    ].join('|');
 }
 
 function pruneReminderLog(todayKey) {
@@ -15767,80 +16561,123 @@ function pruneReminderLog(todayKey) {
     db.reminderLog = db.reminderLog.filter(key => String(key).slice(0, 10) >= cutoffKey);
     notifiedDoseKeys.clear();
     db.reminderLog.forEach(key => notifiedDoseKeys.add(key));
+    Array.from(pendingReminderKeys).forEach(key => {
+        if (String(key).slice(0, 10) < cutoffKey) pendingReminderKeys.delete(key);
+    });
 }
 
 async function checkSchedules() {
+    if (checkSchedulesRunning) return;
+    checkSchedulesRunning = true;
     const now = new Date();
     const todayKey = localDateKey(now);
     const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     pruneReminderLog(todayKey);
     let reminderLogChanged = false;
 
-    for (const s of db.schedules) {
-        if (!isScheduleDueOnDate(s, todayKey) ||
-            !getScheduleTimes(s).includes(currentTime) ||
-            isScheduleInstanceDocumented(s.id, todayKey, currentTime)) continue;
+    try {
+        const dueMedicationReminders = new Map();
+        for (const s of db.schedules) {
+            if (!isScheduleDueOnDate(s, todayKey) ||
+                !getScheduleTimes(s).includes(currentTime) ||
+                isScheduleInstanceDocumented(s.id, todayKey, currentTime)) continue;
 
-        const med = db.inventory.find(m => m.id === s.medId);
-        const member = db.family.find(f => f.id === s.memberId);
-        if (!med || !member) continue;
-
-        const notificationPrefs = member.notificationPrefs || {};
-        const reminderBaseKey = `${todayKey}|${member.id}|${med.id}|${currentTime}`;
-        const desktopKey = `${reminderBaseKey}|desktop`;
-        const emailKey = `${reminderBaseKey}|email`;
-
-        if (notificationPrefs.medicationReminders !== false && !reminderWasSent(desktopKey)) {
-            await Promise.resolve(window.api.notify("Medication Due!", `${member.firstName} needs ${med.name} at ${currentTime}`));
-            recordReminderSent(desktopKey);
-            reminderLogChanged = true;
+            const med = db.inventory.find(m => m.id === s.medId);
+            const member = db.family.find(f => f.id === s.memberId);
+            if (!med || !member) continue;
+            const groupKey = medicationReminderGroupKey(s, med, member, todayKey, currentTime);
+            if (!dueMedicationReminders.has(groupKey)) {
+                dueMedicationReminders.set(groupKey, { schedule: s, med, member });
+            }
         }
 
-        if (member.email && notificationPrefs.emailReminders === true && !reminderWasSent(emailKey)) {
-            await Promise.resolve(window.api.sendEmail({
-                to: member.email,
-                subject: `PharmAtlas: Medication Reminder for ${member.firstName}`,
-                body: `Hello, this is a reminder to take ${formatQtyForSchedule(s, med)} of ${med.name} (${formatMedStrength(med, true)}) at ${currentTime}.\nInstructions: ${s.instructions || 'None'}`
-            }));
-            recordReminderSent(emailKey);
-            reminderLogChanged = true;
+        for (const { schedule: s, med, member } of dueMedicationReminders.values()) {
+            const notificationPrefs = member.notificationPrefs || {};
+            const reminderBaseKey = medicationReminderGroupKey(s, med, member, todayKey, currentTime);
+            const desktopKey = `${reminderBaseKey}|desktop`;
+            const emailKey = `${reminderBaseKey}|email`;
+
+            if (notificationPrefs.medicationReminders !== false) {
+                const sent = await dispatchReminderOnce(desktopKey, () => window.api.notify("Medication Due!", `${member.firstName} needs ${med.name} at ${currentTime}`));
+                reminderLogChanged = reminderLogChanged || sent;
+            }
+
+            if (member.email && notificationPrefs.emailReminders === true) {
+                const sent = await dispatchReminderOnce(emailKey, () => window.api.sendEmail({
+                    to: member.email,
+                    subject: `PharmAtlas: Medication Reminder for ${member.firstName}`,
+                    body: `Hello, this is a reminder to take ${formatQtyForSchedule(s, med)} of ${med.name} (${formatMedStrength(med, true)}) at ${currentTime}.\nInstructions: ${s.instructions || 'None'}`
+                }));
+                reminderLogChanged = reminderLogChanged || sent;
+            }
         }
+
+        const dueCareReminders = new Map();
+        for (const reminder of ensureCareReminderStore()) {
+            if (reminder.enabled === false ||
+                !isScheduleDueOnDate(reminder, todayKey) ||
+                !getScheduleTimes(reminder).includes(currentTime) ||
+                careReminderReadingLoggedForInstance(reminder, todayKey, currentTime)) continue;
+
+            const member = db.family.find(f => f.id === reminder.memberId);
+            if (!member) continue;
+            const groupKey = careReminderGroupKey(reminder, member, todayKey, currentTime);
+            if (!dueCareReminders.has(groupKey)) {
+                dueCareReminders.set(groupKey, { reminder, member });
+            }
+        }
+
+        for (const { reminder, member } of dueCareReminders.values()) {
+            const notificationPrefs = member.notificationPrefs || {};
+            const reminderLabel = careReminderTypeLabel(reminder.type, reminder.memberId);
+            const note = reminder.note ? ` (${reminder.note})` : '';
+            const reminderBaseKey = careReminderGroupKey(reminder, member, todayKey, currentTime);
+            const desktopKey = `${reminderBaseKey}|desktop`;
+            const emailKey = `${reminderBaseKey}|email`;
+
+            if (notificationPrefs.medicationReminders !== false) {
+                const sent = await dispatchReminderOnce(desktopKey, () => window.api.notify("Monitoring Reminder", `${member.firstName}: ${reminderLabel} at ${currentTime}${note}`));
+                reminderLogChanged = reminderLogChanged || sent;
+            }
+
+            if (member.email && notificationPrefs.emailReminders === true) {
+                const sent = await dispatchReminderOnce(emailKey, () => window.api.sendEmail({
+                    to: member.email,
+                    subject: `PharmAtlas: Monitoring Reminder for ${member.firstName}`,
+                    body: `Hello, this is a reminder to ${reminderLabel.toLowerCase()} for ${memberDisplayName(member)} at ${currentTime}.\n${reminder.note ? `Note: ${reminder.note}` : ''}`
+                }));
+                reminderLogChanged = reminderLogChanged || sent;
+            }
+        }
+
+        for (const event of ensureCustomEvents()) {
+            const eventReminder = customEventReminderMatch(event, todayKey, currentTime);
+            if (!eventReminder) continue;
+
+            const linkedMembers = customEventMembers(event);
+            const memberNames = linkedMembers.map(memberDisplayName).join(', ');
+            const eventBaseKey = `${eventReminder.occurrenceDate}|event|${event.id}|${todayKey}|${currentTime}`;
+            const desktopKey = `${eventBaseKey}|desktop`;
+            const desktopSent = await dispatchReminderOnce(desktopKey, () => window.api.notify("PharmAtlas Task Due", `${event.title || customEventTypeLabel(event.type)} at ${event.time}${memberNames ? ` for ${memberNames}` : ''}`));
+            reminderLogChanged = reminderLogChanged || desktopSent;
+
+            for (const member of linkedMembers) {
+                const notificationPrefs = member.notificationPrefs || {};
+                const emailKey = `${eventBaseKey}|${member.id}|email`;
+                if (!member.email || notificationPrefs.emailReminders !== true) continue;
+                const emailSent = await dispatchReminderOnce(emailKey, () => window.api.sendEmail({
+                    to: member.email,
+                    subject: `PharmAtlas: Task Reminder for ${member.firstName}`,
+                    body: `Hello, this is a reminder for: ${event.title || customEventTypeLabel(event.type)}.\nEvent time: ${eventReminder.occurrenceDate} ${event.time}\nReminder sent: ${todayKey} ${currentTime}\n${event.note ? `Note: ${event.note}\n` : ''}${customEventLinkSummary(event) ? `Linked items: ${customEventLinkSummary(event)}` : ''}`
+                }));
+                reminderLogChanged = reminderLogChanged || emailSent;
+            }
+        }
+
+        if (reminderLogChanged) await window.api.save(db);
+    } finally {
+        checkSchedulesRunning = false;
     }
-
-    for (const reminder of ensureCareReminderStore()) {
-        if (reminder.enabled === false ||
-            !isScheduleDueOnDate(reminder, todayKey) ||
-            !getScheduleTimes(reminder).includes(currentTime) ||
-            careReminderReadingLoggedForInstance(reminder, todayKey, currentTime)) continue;
-
-        const member = db.family.find(f => f.id === reminder.memberId);
-        if (!member) continue;
-
-        const notificationPrefs = member.notificationPrefs || {};
-        const reminderLabel = careReminderTypeLabel(reminder.type, reminder.memberId);
-        const note = reminder.note ? ` (${reminder.note})` : '';
-        const reminderBaseKey = `${todayKey}|care|${reminder.id}|${currentTime}`;
-        const desktopKey = `${reminderBaseKey}|desktop`;
-        const emailKey = `${reminderBaseKey}|email`;
-
-        if (notificationPrefs.medicationReminders !== false && !reminderWasSent(desktopKey)) {
-            await Promise.resolve(window.api.notify("Monitoring Reminder", `${member.firstName}: ${reminderLabel} at ${currentTime}${note}`));
-            recordReminderSent(desktopKey);
-            reminderLogChanged = true;
-        }
-
-        if (member.email && notificationPrefs.emailReminders === true && !reminderWasSent(emailKey)) {
-            await Promise.resolve(window.api.sendEmail({
-                to: member.email,
-                subject: `PharmAtlas: Monitoring Reminder for ${member.firstName}`,
-                body: `Hello, this is a reminder to ${reminderLabel.toLowerCase()} for ${memberDisplayName(member)} at ${currentTime}.\n${reminder.note ? `Note: ${reminder.note}` : ''}`
-            }));
-            recordReminderSent(emailKey);
-            reminderLogChanged = true;
-        }
-    }
-
-    if (reminderLogChanged) await window.api.save(db);
 }
 
 setInterval(checkSchedules, 60 * 1000); // Check every minute
@@ -16275,6 +17112,8 @@ async function getAdministrationStockPlan(med, sched, actual = {}) {
     if (usesContainerTracking(med)) {
         return {
             qtyToSubtract: 0,
+            stockDelta: 0,
+            stockSource: 'container',
             logDetail: `${formatAmount(parseAmount(sched.doseQty, 0))} ${doseUnit}; ${inventoryUnitFor(med)} inventory is reduced only when a container is marked finished`
         };
     }
@@ -16286,6 +17125,10 @@ async function getAdministrationStockPlan(med, sched, actual = {}) {
     if (prepacked) {
         return {
             qtyToSubtract: 0,
+            stockDelta: 0,
+            stockSource: 'prepack',
+            prepackQueueId: prepacked.queue?.id || '',
+            prepackItemId: prepacked.item?.id || '',
             logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from prepared prepack (${prepacked.day.date})`
         };
     }
@@ -16297,6 +17140,12 @@ async function getAdministrationStockPlan(med, sched, actual = {}) {
         }
         return {
             qtyToSubtract: 0,
+            stockDelta: qtyToSubtract,
+            stockSource: 'kit',
+            inventorySource: actual.inventorySource,
+            kitId: kitResult.kitId || '',
+            kitItemId: kitResult.kitItemId || '',
+            kitExpiry: kitResult.kitItem?.expiry || med.expiry || '',
             logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from ${kitResult.sourceLabel}`
         };
     }
@@ -16306,7 +17155,9 @@ async function getAdministrationStockPlan(med, sched, actual = {}) {
     }
     return {
         qtyToSubtract,
-        logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from Main inventory`
+        stockDelta: qtyToSubtract,
+        stockSource: 'main',
+        logDetail: `${formatAmount(qtyToSubtract)} ${doseUnit} from Main inventory; no prepared prepack found${sched.freq === 'PRN' ? ' for this PRN dose' : ''}`
     };
 }
 
@@ -16374,12 +17225,82 @@ function medicationHoldRules(schedule) {
         .filter(rule => selectedTypes.length === 0 || selectedTypes.includes(rule.parameterType));
 }
 
+function manualHoldUntilDate(hold) {
+    if (!hold?.untilAt) return null;
+    const until = new Date(hold.untilAt);
+    return Number.isNaN(until.getTime()) ? null : until;
+}
+
+function manualHoldIsActive(hold, now = new Date()) {
+    if (!hold?.active) return false;
+    const until = manualHoldUntilDate(hold);
+    return !until || until > now;
+}
+
+function manualHoldUntilText(hold) {
+    const until = manualHoldUntilDate(hold);
+    return until ? ` until ${until.toLocaleString()}` : ' indefinitely';
+}
+
+function manualHoldResultPayload(result) {
+    const untilDate = String(result?.untilDate || '').trim();
+    const untilTime = String(result?.untilTime || '').trim();
+    const untilAt = untilDate && untilTime ? new Date(`${untilDate}T${untilTime}`).toISOString() : '';
+    return {
+        active: true,
+        startedAt: new Date().toISOString(),
+        reason: result.reason,
+        untilDate,
+        untilTime,
+        untilAt
+    };
+}
+
+async function promptManualHoldDetails(title, entityName, description, confirmText) {
+    const result = await showActionModal(title, `
+        <div class="hold-warning-box">
+            <strong>${escapeHtml(entityName || 'Medication')}</strong>
+            <p>${escapeHtml(description)}</p>
+        </div>
+        <div class="field-row-stacked">
+            <label>Hold reason:</label>
+            <textarea name="reason" rows="3" placeholder="Required: why this is being held"></textarea>
+        </div>
+        <div class="field-grid-2" style="margin-top:8px;">
+            <label>Hold until date (optional)<input name="untilDate" type="date"></label>
+            <label>Hold until time (optional)<input name="untilTime" type="time"></label>
+        </div>
+        <div class="form-help">Leave both date and time blank to hold indefinitely. If either field is entered, both are required.</div>
+    `, confirmText, body => ({
+        reason: body.querySelector('[name="reason"]')?.value.trim() || '',
+        untilDate: body.querySelector('[name="untilDate"]')?.value || '',
+        untilTime: body.querySelector('[name="untilTime"]')?.value || ''
+    }));
+    if (!result) return null;
+    if (!result.reason) {
+        await appAlert('Enter a reason before placing this hold.');
+        return null;
+    }
+    if ((result.untilDate && !result.untilTime) || (!result.untilDate && result.untilTime)) {
+        await appAlert('Enter both an unhold date and time, or leave both blank for an indefinite hold.');
+        return null;
+    }
+    if (result.untilDate && result.untilTime) {
+        const until = new Date(`${result.untilDate}T${result.untilTime}`);
+        if (Number.isNaN(until.getTime()) || until <= new Date()) {
+            await appAlert('The unhold date/time must be in the future.');
+            return null;
+        }
+    }
+    return manualHoldResultPayload(result);
+}
+
 function manualMedicationHoldInfo(schedule) {
-    if (!schedule?.manualHold?.active) return null;
+    if (!manualHoldIsActive(schedule?.manualHold)) return null;
     return {
         active: true,
         manual: true,
-        text: `Medication manually on hold${schedule.manualHold.reason ? `: ${schedule.manualHold.reason}` : ''}`
+        text: `Medication manually on hold${manualHoldUntilText(schedule.manualHold)}${schedule.manualHold.reason ? `: ${schedule.manualHold.reason}` : ''}`
     };
 }
 
@@ -16472,7 +17393,7 @@ function orderSetHoldInfo(orderSetId) {
 
 function removeActiveHoldFromSchedule(schedule, reason = '') {
     const activeHold = activeMedicationHoldInfo(schedule);
-    if (schedule.manualHold?.active) {
+    if (manualHoldIsActive(schedule.manualHold)) {
         schedule.manualHold = { active: false, endedAt: new Date().toISOString(), reason };
     } else if (activeHold?.active) {
         schedule.autoHoldOverride = {
@@ -16535,7 +17456,7 @@ window.toggleMedicationHold = async function(scheduleId) {
     if (!schedule) return;
     const med = db.inventory.find(item => item.id === schedule.medId);
     const activeHold = activeMedicationHoldInfo(schedule);
-    if (schedule.manualHold?.active) {
+    if (manualHoldIsActive(schedule.manualHold)) {
         if (!await appConfirm(`Remove hold for ${med?.name || 'this medication'}?`, 'Remove Hold')) return;
         schedule.manualHold = { active: false, endedAt: new Date().toISOString() };
         addAudit('Medication hold removed', med?.name || 'Medication', memberDisplayName(db.family.find(member => member.id === schedule.memberId)), {
@@ -16571,27 +17492,15 @@ window.toggleMedicationHold = async function(scheduleId) {
             memberId: schedule.memberId
         });
     } else {
-        const result = await showActionModal('Place Medication On Hold', `
-            <div class="hold-warning-box">
-                <strong>${escapeHtml(med?.name || 'Medication')}</strong>
-                <p>This manually marks the medication as held. The member profile and calendar will show a red pause marker until the hold is removed.</p>
-            </div>
-            <div class="field-row-stacked">
-                <label>Hold reason:</label>
-                <textarea name="reason" rows="3" placeholder="e.g. low blood pressure, low heart rate, pending provider instruction"></textarea>
-            </div>
-        `, 'Hold Medication', body => ({ reason: body.querySelector('[name="reason"]')?.value.trim() || '' }));
-        if (!result) return;
-        if (!result.reason) {
-            await appAlert('Enter a reason before placing this medication on hold.');
-            return;
-        }
-        schedule.manualHold = {
-            active: true,
-            startedAt: new Date().toISOString(),
-            reason: result.reason
-        };
-        addAudit('Medication placed on hold', med?.name || 'Medication', `${memberDisplayName(db.family.find(member => member.id === schedule.memberId))} | ${result.reason}`, {
+        const hold = await promptManualHoldDetails(
+            'Place Medication On Hold',
+            med?.name || 'Medication',
+            'This manually marks the medication as held. The member profile and calendar will show a red pause marker until the hold is removed or until the optional unhold time passes.',
+            'Hold Medication'
+        );
+        if (!hold) return;
+        schedule.manualHold = hold;
+        addAudit('Medication placed on hold', med?.name || 'Medication', `${memberDisplayName(db.family.find(member => member.id === schedule.memberId))} | ${hold.reason}${manualHoldUntilText(hold)}`, {
             scheduleId: schedule.id,
             medId: schedule.medId,
             memberId: schedule.memberId
@@ -16636,29 +17545,17 @@ window.toggleOrderSetHold = async function(orderSetId) {
             scheduleIds: schedules.map(schedule => schedule.id)
         });
     } else {
-        const result = await showActionModal('Place Regimen On Hold', `
-            <div class="hold-warning-box">
-                <strong>${escapeHtml(set.name || 'Regimen')}</strong>
-                <p>This places every active medication in the regimen on hold. The member profile and calendar will show the red pause marker until the hold is removed.</p>
-            </div>
-            <div class="field-row-stacked">
-                <label>Hold reason:</label>
-                <textarea name="reason" rows="3" placeholder="e.g. provider instruction, acute illness, pending lab result"></textarea>
-            </div>
-        `, 'Hold Regimen', body => ({ reason: body.querySelector('[name="reason"]')?.value.trim() || '' }));
-        if (!result) return;
-        if (!result.reason) {
-            await appAlert('Enter a reason before placing the regimen on hold.');
-            return;
-        }
+        const hold = await promptManualHoldDetails(
+            'Place Regimen On Hold',
+            set.name || 'Regimen',
+            'This places every active medication in the regimen on hold. The member profile and calendar will show the red pause marker until the hold is removed or until the optional unhold time passes.',
+            'Hold Regimen'
+        );
+        if (!hold) return;
         schedules.forEach(schedule => {
-            schedule.manualHold = {
-                active: true,
-                startedAt: new Date().toISOString(),
-                reason: result.reason
-            };
+            schedule.manualHold = { ...hold };
         });
-        addAudit('Regimen placed on hold', set.name || 'Regimen', `${memberDisplayName(member)} | ${result.reason}`, {
+        addAudit('Regimen placed on hold', set.name || 'Regimen', `${memberDisplayName(member)} | ${hold.reason}${manualHoldUntilText(hold)}`, {
             orderSetId,
             memberId: set.memberId,
             scheduleIds: schedules.map(schedule => schedule.id)
@@ -16727,7 +17624,14 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         prnLimitOverride: !!actual.prnLimitOverride,
         holdOverride: !!actual.holdOverride,
         sourceLabel,
-        stockDelta: isGivenDose ? stockPlan.qtyToSubtract : (usesContainerTracking(med) ? 0 : parseAmount(sched.doseQty, 0)),
+        stockSource: stockPlan.stockSource || (stockPlan.qtyToSubtract > 0 ? 'main' : ''),
+        inventorySource: stockPlan.inventorySource || actual.inventorySource || '',
+        kitId: stockPlan.kitId || '',
+        kitItemId: stockPlan.kitItemId || '',
+        kitExpiry: stockPlan.kitExpiry || '',
+        prepackQueueId: stockPlan.prepackQueueId || '',
+        prepackItemId: stockPlan.prepackItemId || '',
+        stockDelta: isGivenDose ? (Number.isFinite(stockPlan.stockDelta) ? stockPlan.stockDelta : stockPlan.qtyToSubtract) : (usesContainerTracking(med) ? 0 : parseAmount(sched.doseQty, 0)),
         stockLogDetail: stockPlan.logDetail,
         details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${overrideText}${holdOverrideText}${noteText}`
     };
@@ -16882,6 +17786,12 @@ function isGivenStatus(status) {
     return !['skipped', 'missed', 'refused', 'held', 'wasted'].includes(status);
 }
 
+function isGivenAdministrationHistory(entry) {
+    if (!entry) return false;
+    if (!entry.doseStatus || !isGivenStatus(entry.doseStatus)) return false;
+    return !!(entry.scheduledDate || entry.scheduledTime || entry.scheduleInstanceKey || entry.isPrnAdministration);
+}
+
 function administrationStockDelta(entry, med, schedule) {
     const saved = parseAmount(entry.stockDelta, NaN);
     if (Number.isFinite(saved) && (saved > 0 || isGivenStatus(entry.doseStatus) || usesContainerTracking(med))) return saved;
@@ -16967,11 +17877,27 @@ window.editAdministration = async function(entryId) {
             await appAlert('The inventory medication for this administration could not be found. Stock was not changed.');
             return;
         }
-        if (willBeGiven && parseAmount(med.stock) < stockDelta) {
+        const fromKit = entry.stockSource === 'kit' || !!entry.kitId;
+        if (willBeGiven && !fromKit && parseAmount(med.stock) < stockDelta) {
             await appAlert(`Insufficient stock. You need ${formatAmount(stockDelta)}, but only have ${formatAmount(parseAmount(med.stock))} left.`);
             return;
         }
-        med.stock = parseAmount(med.stock) + (willBeGiven ? -stockDelta : stockDelta);
+        if (fromKit) {
+            if (!willBeGiven) {
+                if (!restoreQuantityToKit(entry, med, stockDelta)) {
+                    await appAlert('The original med kit could not be found. Stock was not changed; please adjust the kit manually.');
+                    return;
+                }
+            } else {
+                const kitResult = consumeFromKitSource(`${entry.kitId}|${entry.kitItemId}`, med, stockDelta);
+                if (kitResult.error) {
+                    await appAlert(kitResult.error);
+                    return;
+                }
+            }
+        } else {
+            med.stock = parseAmount(med.stock) + (willBeGiven ? -stockDelta : stockDelta);
+        }
     }
 
     const noteText = result.doseNote ? `; Note: ${result.doseNote}` : '';
@@ -17122,21 +18048,23 @@ window.setScheduleContainerOpenState = async function(scheduleId) {
     if (!schedule || !med || !requiresExplicitUnopenedForPrepackReturn(med)) return;
     const current = schedule.containerOpened;
     const result = await showActionModal(`Container Status: ${med.name}`, `
-        <div class="form-help" style="margin-bottom:8px;">
-            Use this for whole-container items such as creams, nasal sprays, eye/ear drops, inhalers, tubes, jars, bottles, and similar products.
-            Unopened prepacked containers can be returned to stock if held, skipped, refused, or missed. Opened containers stay out of return inventory.
-        </div>
-        <div class="container-state-choices">
-            <label class="container-state-choice unopened">
-                <input type="radio" name="containerOpened" value="no" ${current === false ? 'checked' : ''}>
-                <strong>Unopened</strong>
-                <span>Eligible for prepack return if the dose was not used.</span>
-            </label>
-            <label class="container-state-choice opened">
-                <input type="radio" name="containerOpened" value="yes" ${current === true ? 'checked' : ''}>
-                <strong>Opened</strong>
-                <span>Not returnable to inventory; use Waste if it was prepared and cannot be used.</span>
-            </label>
+        <div data-action-modal-size="wide" class="container-status-editor">
+            <div class="form-help" style="margin-bottom:8px;">
+                Use this for whole-container items such as creams, nasal sprays, eye/ear drops, inhalers, tubes, jars, bottles, and similar products.
+                Unopened prepacked containers can be returned to stock if held, skipped, refused, or missed. Opened containers stay out of return inventory.
+            </div>
+            <div class="container-state-choices">
+                <label class="container-state-choice unopened">
+                    <input type="radio" name="containerOpened" value="no" ${current === false ? 'checked' : ''}>
+                    <strong>Unopened</strong>
+                    <span>Eligible for prepack return if the dose was not used.</span>
+                </label>
+                <label class="container-state-choice opened">
+                    <input type="radio" name="containerOpened" value="yes" ${current === true ? 'checked' : ''}>
+                    <strong>Opened</strong>
+                    <span>Not returnable to inventory; use Waste if it was prepared and cannot be used.</span>
+                </label>
+            </div>
         </div>
     `, 'Save Status');
     if (!result) return;
@@ -18026,12 +18954,83 @@ function renderRecipes() {
 
 
 // --- RENDERING ---
-function formatCalendarRange(startDate) {
-    const start = parseLocal(startDate);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 6);
-    return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
+function normalizeCalendarView(view) {
+    return ['week', 'month', 'day'].includes(view) ? view : 'week';
 }
+
+function calendarRangeForView(startDate, view = 'week') {
+    const mode = normalizeCalendarView(view);
+    const anchor = parseLocal(startDate) || parseLocal(localDateKey());
+    if (mode === 'day') return { start: anchor, end: new Date(anchor), mode };
+    if (mode === 'month') {
+        const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+        const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+        const start = new Date(first);
+        start.setDate(start.getDate() - start.getDay());
+        const end = new Date(last);
+        end.setDate(end.getDate() + (6 - end.getDay()));
+        return { start, end, month: first.getMonth(), year: first.getFullYear(), mode };
+    }
+    const end = new Date(anchor);
+    end.setDate(end.getDate() + 6);
+    return { start: anchor, end, mode };
+}
+
+function formatCalendarRange(startDate, view = 'week') {
+    const range = calendarRangeForView(startDate, view);
+    if (range.mode === 'day') return range.start.toLocaleDateString();
+    if (range.mode === 'month') {
+        return new Date(range.year, range.month, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    }
+    return `${range.start.toLocaleDateString()} - ${range.end.toLocaleDateString()}`;
+}
+
+function calendarStepForView(view) {
+    const mode = normalizeCalendarView(view);
+    if (mode === 'month') return { unit: 'month', amount: 1 };
+    if (mode === 'day') return { unit: 'day', amount: 1 };
+    return { unit: 'day', amount: 7 };
+}
+
+function moveCalendarAnchor(dateKey, direction, view) {
+    const date = parseLocal(dateKey) || parseLocal(localDateKey());
+    const step = calendarStepForView(view);
+    if (step.unit === 'month') date.setMonth(date.getMonth() + (direction * step.amount));
+    else date.setDate(date.getDate() + (direction * step.amount));
+    return localDateKey(date);
+}
+
+function renderCalendarViewToggle(containerId, scope, activeView) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const modes = [
+        ['week', 'Week'],
+        ['month', 'Month'],
+        ['day', 'Day / Hour']
+    ];
+    container.innerHTML = modes.map(([mode, label]) =>
+        `<button type="button" class="${normalizeCalendarView(activeView) === mode ? 'active' : ''}" onclick="setCalendarView('${scope}', '${mode}')">${label}</button>`
+    ).join('');
+}
+
+window.setCalendarView = function(scope, view) {
+    const mode = normalizeCalendarView(view);
+    if (scope === 'member') {
+        memberCalendarView = mode;
+        localStorage.setItem('pharmAtlasMemberCalendarView', mode);
+        if (currentEditingMemberId) renderMemberCalendar(currentEditingMemberId);
+        return;
+    }
+    if (scope === 'events') {
+        customEventCalendarView = mode;
+        localStorage.setItem('pharmAtlasCustomEventCalendarView', mode);
+        renderCustomEventCalendar();
+        return;
+    }
+    dashboardCalendarView = mode;
+    localStorage.setItem('pharmAtlasDashboardCalendarView', mode);
+    renderCalendar();
+};
 
 function calendarMedicationColor(schedule, dateStr, time) {
     if (activeMedicationHoldInfo(schedule)?.active) return '#b00000';
@@ -18051,17 +19050,64 @@ function calendarMedicationColor(schedule, dateStr, time) {
     return minutesUntilDue <= 60 ? '#d26a00' : '#000000';
 }
 
-function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarStart, memberId = null, rangeLabelId = 'dashboard-calendar-range') {
+function scheduledDosesForCalendarDate(dateStr, memberId = null) {
+    const todaysMeds = [];
+    db.schedules.forEach(schedule => {
+        if (!isScheduleArchived(schedule) && (!memberId || schedule.memberId === memberId) && isScheduleDueOnDate(schedule, dateStr)) {
+            getScheduleTimes(schedule).forEach(time => todaysMeds.push({ ...schedule, specificTime: time }));
+        }
+    });
+    return todaysMeds.sort((a, b) => a.specificTime.localeCompare(b.specificTime));
+}
+
+function calendarDoseHtml(schedule, dateStr, memberId = null) {
+    const med = db.inventory.find(m => m.id === schedule.medId);
+    const member = db.family.find(f => f.id === schedule.memberId);
+    if (!med || !member) return '';
+    const memberColor = member.calendarColor || (member.sex === 'Female' ? '#8b1558' : '#000080');
+    const medicationColor = calendarMedicationColor(schedule, dateStr, schedule.specificTime);
+    const memberText = memberId ? '' : ` - <b style="color:${escapeHtml(memberColor)};">${escapeHtml(member.firstName)}</b>`;
+    return `<div class="calendar-dose" onclick="openOrderModifier('${schedule.id}')">
+        <i>${escapeHtml(schedule.specificTime)}</i>${memberText}<span style="color:${medicationColor};">: ${holdIndicatorHtml(schedule)}${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} ${escapeHtml(formatQtyForSchedule(schedule, med))}</span>
+    </div>`;
+}
+
+function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarStart, memberId = null, rangeLabelId = 'dashboard-calendar-range', view = null) {
     const grid = document.getElementById(gridId);
     if (!grid) return;
+    const activeView = normalizeCalendarView(view || (gridId === 'member-calendar-grid' ? memberCalendarView : dashboardCalendarView));
     const start = parseLocal(startDate) || parseLocal(localDateKey());
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     grid.innerHTML = '';
+    grid.classList.toggle('calendar-month-view', activeView === 'month');
+    grid.classList.toggle('calendar-day-view', activeView === 'day');
+    grid.style.gridTemplateColumns = activeView === 'day' ? '1fr' : 'repeat(7, minmax(0, 1fr))';
     const rangeLabel = document.getElementById(rangeLabelId);
-    if (rangeLabel) rangeLabel.textContent = formatCalendarRange(localDateKey(start));
+    if (rangeLabel) rangeLabel.textContent = formatCalendarRange(localDateKey(start), activeView);
+    if (gridId === 'member-calendar-grid') renderCalendarViewToggle('member-calendar-view-toggle', 'member', activeView);
+    else renderCalendarViewToggle('dashboard-calendar-view-toggle', 'dashboard', activeView);
 
+    if (activeView === 'day') {
+        const dateStr = localDateKey(start);
+        const doses = scheduledDosesForCalendarDate(dateStr, memberId);
+        const dayCell = document.createElement('div');
+        dayCell.className = 'calendar-day calendar-hourly-day';
+        dayCell.innerHTML = `<div class="calendar-day-title">${days[start.getDay()]} ${start.toLocaleDateString()}</div>`;
+        for (let hour = 0; hour < 24; hour++) {
+            const hourItems = doses.filter(schedule => timeToMinutes(schedule.specificTime) !== null && Math.floor(timeToMinutes(schedule.specificTime) / 60) === hour);
+            const hourLabel = `${String(hour).padStart(2, '0')}:00`;
+            dayCell.innerHTML += `<div class="calendar-hour-row">
+                <div class="calendar-hour-label">${hourLabel}</div>
+                <div class="calendar-hour-items">${hourItems.length ? hourItems.map(item => calendarDoseHtml(item, dateStr, memberId)).join('') : '<span class="calendar-hour-empty">-</span>'}</div>
+            </div>`;
+        }
+        grid.appendChild(dayCell);
+        return;
+    }
+
+    const range = calendarRangeForView(localDateKey(start), activeView);
     for (let i = 0; i < 7; i++) {
-        const d = new Date(start);
+        const d = new Date(range.start);
         d.setDate(d.getDate() + i);
         grid.innerHTML += `
             <div class="calendar-header">
@@ -18069,45 +19115,515 @@ function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarS
             </div>`;
     }
 
-    for (let i = 0; i < 7; i++) {
-        const d = new Date(start);
+    const dayCount = Math.max(1, Math.round((range.end - range.start) / 86400000) + 1);
+    for (let i = 0; i < dayCount; i++) {
+        const d = new Date(range.start);
         d.setDate(d.getDate() + i);
         const dateStr = localDateKey(d);
         const cell = document.createElement('div');
         cell.className = 'calendar-day';
+        if (activeView === 'month' && d.getMonth() !== range.month) cell.classList.add('calendar-outside-month');
+        if (dateStr === localDateKey()) cell.classList.add('calendar-today-cell');
+        if (activeView === 'month') {
+            cell.innerHTML = `<div class="calendar-month-date">${d.getDate()}</div>`;
+        }
 
-        const todaysMeds = [];
-        db.schedules.forEach(schedule => {
-            if (!isScheduleArchived(schedule) && (!memberId || schedule.memberId === memberId) && isScheduleDueOnDate(schedule, dateStr)) {
-                getScheduleTimes(schedule).forEach(time => todaysMeds.push({ ...schedule, specificTime: time }));
-            }
-        });
-        todaysMeds.sort((a, b) => a.specificTime.localeCompare(b.specificTime));
-
-        todaysMeds.forEach(schedule => {
-            const med = db.inventory.find(m => m.id === schedule.medId);
-            const member = db.family.find(f => f.id === schedule.memberId);
-            if (!med || !member) return;
-            const memberColor = member.calendarColor || (member.sex === 'Female' ? '#8b1558' : '#000080');
-            const medicationColor = calendarMedicationColor(schedule, dateStr, schedule.specificTime);
-            const memberText = memberId ? '' : ` - <b style="color:${escapeHtml(memberColor)};">${escapeHtml(member.firstName)}</b>`;
-            cell.innerHTML += `
-                <div class="calendar-dose" onclick="openOrderModifier('${schedule.id}')">
-                    <i>${escapeHtml(schedule.specificTime)}</i>${memberText}<span style="color:${medicationColor};">: ${holdIndicatorHtml(schedule)}${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))} ${escapeHtml(formatQtyForSchedule(schedule, med))}</span>
-                </div>`;
+        scheduledDosesForCalendarDate(dateStr, memberId).forEach(schedule => {
+            cell.innerHTML += calendarDoseHtml(schedule, dateStr, memberId);
         });
         grid.appendChild(cell);
     }
 }
 
+function ensureCustomEvents() {
+    if (!Array.isArray(db.customEvents)) db.customEvents = [];
+    return db.customEvents;
+}
+
+function customEventTypeLabel(type) {
+    const labels = {
+        task: 'Task',
+        appointment: 'Appointment',
+        supply: 'Supply',
+        lab: 'Lab',
+        call: 'Call',
+        note: 'Note'
+    };
+    return labels[type] || 'Task';
+}
+
+function customEventMemberName(event) {
+    const member = db.family.find(item => item.id === event.memberId);
+    return member ? memberDisplayName(member) : 'General';
+}
+
+function customEventMembers(event) {
+    const members = new Map();
+    const addMember = memberId => {
+        const member = db.family.find(item => item.id === memberId);
+        if (member) members.set(member.id, member);
+    };
+    addMember(event?.memberId);
+    asArray(event?.scheduleIds).forEach(id => {
+        const schedule = db.schedules.find(item => item.id === id);
+        if (schedule) addMember(schedule.memberId);
+    });
+    asArray(event?.reminderIds).forEach(id => {
+        const reminder = ensureCareReminderStore().find(item => item.id === id);
+        if (reminder) addMember(reminder.memberId);
+    });
+    return [...members.values()];
+}
+
+function customEventMedicationLinks(event) {
+    return asArray(event.scheduleIds).map(id => {
+        const schedule = db.schedules.find(item => item.id === id);
+        const med = schedule ? db.inventory.find(item => item.id === schedule.medId) : null;
+        return med ? med.name : '';
+    }).filter(Boolean);
+}
+
+function customEventMonitoringLinks(event) {
+    return asArray(event.reminderIds).map(id => {
+        const reminder = ensureCareReminderStore().find(item => item.id === id);
+        return reminder ? careReminderTypeLabel(reminder.type, reminder.memberId) : '';
+    }).filter(Boolean);
+}
+
+function customEventLinkSummary(event) {
+    const meds = customEventMedicationLinks(event);
+    const reminders = customEventMonitoringLinks(event);
+    const parts = [];
+    if (meds.length) parts.push(`Meds: ${meds.join(', ')}`);
+    if (reminders.length) parts.push(`Monitoring: ${reminders.join(', ')}`);
+    return parts.join(' | ');
+}
+
+function customEventColorClass(event) {
+    if (event.status === 'completed') return 'custom-event-completed';
+    if (event.type === 'appointment') return 'custom-event-appointment';
+    if (event.type === 'lab') return 'custom-event-lab';
+    if (event.type === 'supply') return 'custom-event-supply';
+    if (event.type === 'call') return 'custom-event-call';
+    return 'custom-event-task';
+}
+
+function customEventEndDate(event) {
+    if (event?.repeatEndMode === 'on' && event.repeatEndDate) return event.repeatEndDate;
+    if (event?.endDate) return event.endDate;
+    return event?.date || localDateKey();
+}
+
+function customEventOccursOn(event, dateKey) {
+    if (!event || event.archived === true) return false;
+    const eventDate = event.date || localDateKey();
+    if (dateKey < eventDate) return false;
+    const repeat = event.repeat || 'none';
+    const endDate = customEventEndDate(event);
+    if (event.repeatEndMode === 'on' && endDate && dateKey > endDate) return false;
+    if (repeat === 'none') return dateKey >= eventDate && dateKey <= endDate;
+    const every = Math.max(1, parseInt(event.repeatEvery || 1, 10) || 1);
+    const dayDelta = daysBetween(dateKey, eventDate);
+    if (dayDelta < 0) return false;
+    if (event.repeatEndMode === 'after') {
+        const max = Math.max(1, parseInt(event.repeatOccurrences || 1, 10) || 1);
+        if (repeat === 'daily' && Math.floor(dayDelta / every) >= max) return false;
+        if (repeat === 'weekly' && Math.floor(dayDelta / (7 * every)) >= max) return false;
+        if (repeat === 'monthly') {
+            const start = parseLocal(eventDate);
+            const current = parseLocal(dateKey);
+            const months = (current.getFullYear() - start.getFullYear()) * 12 + current.getMonth() - start.getMonth();
+            if (Math.floor(months / every) >= max) return false;
+        }
+    }
+    if (repeat === 'daily') return dayDelta % every === 0;
+    if (repeat === 'hourly') return dateKey === eventDate || dayDelta >= 0;
+    if (repeat === 'weekly') {
+        const current = parseLocal(dateKey);
+        const selectedDays = asArray(event.repeatWeekdays).map(Number);
+        const weekdayAllowed = selectedDays.length ? selectedDays.includes(current.getDay()) : current.getDay() === parseLocal(eventDate).getDay();
+        return weekdayAllowed && Math.floor(dayDelta / 7) % every === 0;
+    }
+    if (repeat === 'monthly') {
+        const start = parseLocal(eventDate);
+        const current = parseLocal(dateKey);
+        const months = (current.getFullYear() - start.getFullYear()) * 12 + current.getMonth() - start.getMonth();
+        return months >= 0 && months % every === 0 && current.getDate() === start.getDate();
+    }
+    return dateKey === eventDate;
+}
+
+function customEventReminderMatch(event, todayKey, currentTime) {
+    if (!event || event.archived === true || event.status === 'completed' || !event.time || event.allDay) return null;
+    const leadAmount = Math.max(0, parseInt(event.notificationAmount || 0, 10) || 0);
+    const leadUnit = event.notificationUnit || 'minutes';
+    const leadMinutes = leadAmount * (leadUnit === 'days' ? 1440 : leadUnit === 'hours' ? 60 : 1);
+    for (let offset = 0; offset <= 14; offset++) {
+        const occurrenceDate = addDaysKey(todayKey, offset);
+        if (!customEventOccursOn(event, occurrenceDate)) continue;
+        const occurrence = new Date(`${occurrenceDate}T${event.time}`);
+        occurrence.setMinutes(occurrence.getMinutes() - leadMinutes);
+        if (localDateKey(occurrence) === todayKey && minutesToTime(occurrence.getHours() * 60 + occurrence.getMinutes()) === currentTime) {
+            return { occurrenceDate };
+        }
+    }
+    return null;
+}
+
+function customEventsForDate(dateKey) {
+    return ensureCustomEvents()
+        .filter(event => customEventOccursOn(event, dateKey))
+        .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')) || String(a.title || '').localeCompare(String(b.title || '')));
+}
+
+function customEventCardHtml(event, dateKey) {
+    const links = customEventLinkSummary(event);
+    const repeatBadge = event.repeat && event.repeat !== 'none' ? `<span class="custom-event-repeat-badge">${escapeHtml(event.repeatEvery && event.repeatEvery !== '1' ? `Every ${event.repeatEvery} ${event.repeat}` : event.repeat)}</span>` : '';
+    const urgentMarker = event.urgent ? '<span class="custom-event-urgent" title="Urgent">!</span>' : '';
+    return `<div class="custom-event-card ${customEventColorClass(event)}" onclick="openCustomEventActionMenu('${escapeHtml(event.id)}')">
+        <div class="custom-event-title">${urgentMarker}<b>${escapeHtml(event.allDay ? 'All day' : (event.time || 'Anytime'))}</b> ${escapeHtml(event.title || customEventTypeLabel(event.type))} ${repeatBadge}</div>
+        <div class="custom-event-meta">${escapeHtml(customEventMemberName(event))} | ${escapeHtml(customEventTypeLabel(event.type))}${event.location ? ` | ${escapeHtml(event.location)}` : ''}</div>
+        ${links ? `<div class="custom-event-links">${escapeHtml(links)}</div>` : ''}
+        ${event.note ? `<div class="custom-event-note">${escapeHtml(event.note)}</div>` : ''}
+    </div>`;
+}
+
+window.openCustomEventActionMenu = async function(eventId) {
+    const event = ensureCustomEvents().find(item => item.id === eventId);
+    if (!event) return;
+    const canComplete = String(event.type || 'task') === 'task';
+    const statusText = event.status === 'completed' ? 'Reopen task' : 'Done';
+    const result = await showActionModal('Task / Event Actions', `
+        <div class="custom-event-action-menu">
+            <div class="custom-event-action-summary ${customEventColorClass(event)}">
+                <strong>${event.urgent ? '<span class="custom-event-urgent">!</span>' : ''}${escapeHtml(event.title || customEventTypeLabel(event.type))}</strong>
+                <span>${escapeHtml(customEventMemberName(event))} | ${escapeHtml(customEventTypeLabel(event.type))} | ${escapeHtml(event.date || '')}${event.time ? ` ${escapeHtml(event.time)}` : ''}</span>
+            </div>
+            <div class="custom-event-action-buttons">
+                <button type="button" onclick="this.closest('#action-modal-body').dataset.action='edit'; document.getElementById('action-modal-ok').click()">Edit</button>
+                ${canComplete ? `<button type="button" class="event-action-done" onclick="this.closest('#action-modal-body').dataset.action='done'; document.getElementById('action-modal-ok').click()">&#10003; ${escapeHtml(statusText)}</button>` : ''}
+                <button type="button" class="event-action-delete" onclick="this.closest('#action-modal-body').dataset.action='delete'; document.getElementById('action-modal-ok').click()">Delete</button>
+            </div>
+        </div>
+    `, 'Close', body => body.dataset.action || '');
+    if (result === 'edit') {
+        await window.openCustomEventEditor(eventId);
+    } else if (result === 'done' && canComplete) {
+        await window.toggleCustomEventDone(eventId);
+    } else if (result === 'delete') {
+        await window.deleteCustomEvent(eventId);
+    }
+};
+
+function renderCustomEventCalendar(startDate = customEventCalendarStart, view = customEventCalendarView) {
+    const grid = document.getElementById('custom-event-calendar-grid');
+    if (!grid) return;
+    ensureCustomEvents();
+    const activeView = normalizeCalendarView(view);
+    const start = parseLocal(startDate) || parseLocal(localDateKey());
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const rangeLabel = document.getElementById('custom-event-calendar-range');
+    if (rangeLabel) rangeLabel.textContent = formatCalendarRange(localDateKey(start), activeView);
+    renderCalendarViewToggle('custom-event-calendar-view-toggle', 'events', activeView);
+    grid.innerHTML = '';
+    grid.classList.toggle('calendar-month-view', activeView === 'month');
+    grid.classList.toggle('calendar-day-view', activeView === 'day');
+    grid.style.gridTemplateColumns = activeView === 'day' ? '1fr' : 'repeat(7, minmax(0, 1fr))';
+    if (activeView === 'day') {
+        const dateKey = localDateKey(start);
+        const events = customEventsForDate(dateKey);
+        const cell = document.createElement('div');
+        cell.className = 'custom-event-day custom-event-day-hourly';
+        cell.innerHTML = `<div class="calendar-day-title">${days[start.getDay()]} ${start.toLocaleDateString()}</div>`;
+        for (let hour = 0; hour < 24; hour++) {
+            const hourEvents = events.filter(event => {
+                if (event.allDay && hour === 0) return true;
+                const minutes = timeToMinutes(event.time || '');
+                return minutes !== null && Math.floor(minutes / 60) === hour;
+            });
+            cell.innerHTML += `<div class="calendar-hour-row">
+                <div class="calendar-hour-label">${String(hour).padStart(2, '0')}:00</div>
+                <div class="calendar-hour-items">${hourEvents.length ? hourEvents.map(event => customEventCardHtml(event, dateKey)).join('') : '<span class="calendar-hour-empty">-</span>'}</div>
+            </div>`;
+        }
+        grid.appendChild(cell);
+        return;
+    }
+    const range = calendarRangeForView(localDateKey(start), activeView);
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(range.start);
+        d.setDate(d.getDate() + i);
+        grid.innerHTML += `<div class="calendar-header">${days[d.getDay()]}<br>${d.getMonth() + 1}/${d.getDate()}</div>`;
+    }
+    const dayCount = Math.max(1, Math.round((range.end - range.start) / 86400000) + 1);
+    for (let i = 0; i < dayCount; i++) {
+        const d = new Date(range.start);
+        d.setDate(d.getDate() + i);
+        const date = localDateKey(d);
+        const cell = document.createElement('div');
+        cell.className = 'custom-event-day';
+        if (activeView === 'month' && d.getMonth() !== range.month) cell.classList.add('calendar-outside-month');
+        if (date === localDateKey()) cell.classList.add('calendar-today-cell');
+        const events = customEventsForDate(date);
+        cell.innerHTML = events.length
+            ? `${activeView === 'month' ? `<div class="calendar-month-date">${d.getDate()}</div>` : ''}${events.map(event => customEventCardHtml(event, date)).join('')}`
+            : `${activeView === 'month' ? `<div class="calendar-month-date">${d.getDate()}</div>` : ''}<div class="custom-event-empty">No tasks</div>`;
+        grid.appendChild(cell);
+    }
+}
+
+function customEventLinkedOptions(values = {}) {
+    const selectedSchedules = new Set(asArray(values.scheduleIds));
+    const selectedReminders = new Set(asArray(values.reminderIds));
+    const filterMemberId = values.memberId || '';
+    const scheduleOptions = db.schedules
+        .filter(schedule => !isScheduleArchived(schedule))
+        .map(schedule => {
+            const med = db.inventory.find(item => item.id === schedule.medId);
+            const member = db.family.find(item => item.id === schedule.memberId);
+            if (!med || !member) return '';
+            const selected = selectedSchedules.has(schedule.id);
+            const hidden = filterMemberId && schedule.memberId !== filterMemberId && !selected;
+            return `<label class="event-link-row ${selected ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}" data-member-id="${escapeHtml(schedule.memberId || '')}" data-link-kind="med" data-search-text="${escapeHtml(`${med.name} ${formatMedStrength(med)} ${memberDisplayName(member)} ${formatFrequency(schedule)}`.toLowerCase())}">
+                <input name="scheduleIds" type="checkbox" value="${escapeHtml(schedule.id)}" ${selected ? 'checked' : ''} onchange="this.closest('.event-link-row')?.classList.toggle('selected', this.checked)">
+                <span class="event-link-copy"><b>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</b><small>${escapeHtml(memberDisplayName(member))} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'as needed')}</small></span>
+            </label>`;
+        }).join('');
+    const reminderOptions = ensureCareReminderStore()
+        .filter(reminder => reminder.archived !== true)
+        .map(reminder => {
+            const member = db.family.find(item => item.id === reminder.memberId);
+            const memberId = reminder.memberId || '';
+            const selected = selectedReminders.has(reminder.id);
+            const hidden = filterMemberId && memberId !== filterMemberId && !selected;
+            const memberName = member ? memberDisplayName(member) : 'General';
+            return `<label class="event-link-row ${selected ? 'selected' : ''} ${hidden ? 'is-hidden' : ''}" data-member-id="${escapeHtml(memberId)}" data-link-kind="reminder" data-search-text="${escapeHtml(`${careReminderTypeLabel(reminder.type, reminder.memberId)} ${memberName} ${formatFrequency(reminder)}`.toLowerCase())}">
+                <input name="reminderIds" type="checkbox" value="${escapeHtml(reminder.id)}" ${selected ? 'checked' : ''} onchange="this.closest('.event-link-row')?.classList.toggle('selected', this.checked)">
+                <span class="event-link-copy"><b>${escapeHtml(careReminderTypeLabel(reminder.type, reminder.memberId))}</b><small>${escapeHtml(memberName)} | ${escapeHtml(formatFrequency(reminder))} ${escapeHtml(getScheduleTimes(reminder).join(', ') || '')}</small></span>
+            </label>`;
+        }).join('');
+    return { scheduleOptions, reminderOptions };
+}
+
+window.filterCustomEventLinks = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const memberId = body.querySelector('[name="memberId"]')?.value || '';
+    const medSearch = String(body.querySelector('[name="eventMedicationSearch"]')?.value || '').toLowerCase();
+    const reminderSearch = String(body.querySelector('[name="eventReminderSearch"]')?.value || '').toLowerCase();
+    body.querySelectorAll('.event-link-row').forEach(row => {
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        const kind = row.dataset.linkKind || '';
+        const search = kind === 'reminder' ? reminderSearch : medSearch;
+        const memberMatch = !memberId || row.dataset.memberId === memberId || checkbox?.checked;
+        const textMatch = !search || String(row.dataset.searchText || row.textContent || '').toLowerCase().includes(search);
+        row.classList.toggle('is-hidden', !(memberMatch && textMatch));
+    });
+};
+
+window.toggleCustomEventAllDay = function() {
+    const body = document.getElementById('action-modal-body');
+    const allDay = !!body?.querySelector('[name="allDay"]')?.checked;
+    body?.querySelectorAll('[data-event-time-field]').forEach(input => {
+        input.disabled = allDay;
+    });
+};
+
+window.updateCustomEventRecurrenceControls = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const repeat = body.querySelector('[name="repeat"]')?.value || 'none';
+    const endMode = body.querySelector('[name="repeatEndMode"]')?.value || 'never';
+    body.querySelector('[data-custom-repeat-details]')?.classList.toggle('is-hidden', repeat === 'none');
+    body.querySelector('[data-custom-weekday-row]')?.classList.toggle('is-hidden', repeat !== 'weekly');
+    body.querySelector('[data-custom-repeat-on]')?.classList.toggle('is-hidden', endMode !== 'on');
+    body.querySelector('[data-custom-repeat-after]')?.classList.toggle('is-hidden', endMode !== 'after');
+};
+
+window.openCustomEventEditor = async function(eventId = '') {
+    ensureCustomEvents();
+    const existing = db.customEvents.find(item => item.id === eventId);
+    const defaults = existing || {
+        title: '',
+        type: 'task',
+        date: localDateKey(),
+        endDate: localDateKey(),
+        time: '',
+        endTime: '',
+        allDay: false,
+        repeat: 'none',
+        repeatEvery: 1,
+        repeatWeekdays: [],
+        repeatEndMode: 'never',
+        repeatEndDate: '',
+        repeatOccurrences: '',
+        notificationAmount: '',
+        notificationUnit: 'minutes',
+        location: '',
+        color: '#2b7cff',
+        urgent: false,
+        memberId: '',
+        status: 'open',
+        note: '',
+        scheduleIds: [],
+        reminderIds: []
+    };
+    const memberOptions = db.family
+        .map(member => `<option value="${escapeHtml(member.id)}" ${defaults.memberId === member.id ? 'selected' : ''}>${escapeHtml(memberDisplayName(member))}</option>`)
+        .join('');
+    const links = customEventLinkedOptions(defaults);
+    const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const selectedWeekdays = new Set(asArray(defaults.repeatWeekdays).map(Number));
+    const result = await showActionModal(existing ? 'Edit Custom Task / Event' : 'Add Custom Task / Event', `
+        <div data-action-modal-size="wide" class="custom-event-editor">
+            <div class="event-editor-main">
+                <label>Title<input name="title" type="text" value="${escapeHtml(defaults.title)}" placeholder="e.g. Call pharmacy, lab draw, refill pickup"></label>
+                <div class="event-editor-grid">
+                    <label>Type
+                        <select name="type">
+                            ${['task', 'appointment', 'supply', 'lab', 'call', 'note'].map(type => `<option value="${type}" ${defaults.type === type ? 'selected' : ''}>${customEventTypeLabel(type)}</option>`).join('')}
+                        </select>
+                    </label>
+                    <label>Member
+                        <select name="memberId" onchange="filterCustomEventLinks()"><option value="">General / no member</option>${memberOptions}</select>
+                    </label>
+                    <label>From<input name="date" type="date" value="${escapeHtml(defaults.date || localDateKey())}"></label>
+                    <label>To<input name="endDate" type="date" value="${escapeHtml(defaults.endDate || defaults.date || localDateKey())}"></label>
+                    <label>Start time<input name="time" data-event-time-field type="time" value="${escapeHtml(defaults.time || '')}" ${defaults.allDay ? 'disabled' : ''}></label>
+                    <label>End time<input name="endTime" data-event-time-field type="time" value="${escapeHtml(defaults.endTime || '')}" ${defaults.allDay ? 'disabled' : ''}></label>
+                    <label class="event-check-tile event-all-day-toggle"><input name="allDay" type="checkbox" ${defaults.allDay ? 'checked' : ''} onchange="toggleCustomEventAllDay()"> <span>All day</span></label>
+                    <label>Status
+                        <select name="status">
+                            <option value="open" ${defaults.status !== 'completed' ? 'selected' : ''}>Open</option>
+                            <option value="completed" ${defaults.status === 'completed' ? 'selected' : ''}>Completed</option>
+                        </select>
+                    </label>
+                    <label>Location<input name="location" type="text" value="${escapeHtml(defaults.location || '')}" placeholder="Address, clinic, pharmacy, or phone"></label>
+                    <label>Color<input name="color" type="color" value="${escapeHtml(defaults.color || '#2b7cff')}"></label>
+                    <label class="event-check-tile event-urgent-toggle"><input name="urgent" type="checkbox" ${defaults.urgent ? 'checked' : ''}> <span>Urgent task</span></label>
+                    <label>Repeat
+                        <select name="repeat" onchange="updateCustomEventRecurrenceControls()">
+                            <option value="none" ${!defaults.repeat || defaults.repeat === 'none' ? 'selected' : ''}>Does not repeat</option>
+                            <option value="daily" ${defaults.repeat === 'daily' ? 'selected' : ''}>Daily</option>
+                            <option value="weekly" ${defaults.repeat === 'weekly' ? 'selected' : ''}>Weekly</option>
+                            <option value="monthly" ${defaults.repeat === 'monthly' ? 'selected' : ''}>Monthly</option>
+                            <option value="hourly" ${defaults.repeat === 'hourly' ? 'selected' : ''}>Hourly</option>
+                        </select>
+                    </label>
+                    <label>Notification
+                        <span class="event-notification-row">
+                            <input name="notificationAmount" type="number" min="0" step="1" value="${escapeHtml(defaults.notificationAmount || '')}" placeholder="1">
+                            <select name="notificationUnit">
+                                ${['minutes', 'hours', 'days'].map(unit => `<option value="${unit}" ${defaults.notificationUnit === unit ? 'selected' : ''}>${unit}</option>`).join('')}
+                            </select>
+                            <span>before</span>
+                        </span>
+                    </label>
+                </div>
+                <fieldset class="custom-event-recurrence ${defaults.repeat && defaults.repeat !== 'none' ? '' : 'is-hidden'}" data-custom-repeat-details>
+                    <legend>Custom recurrence</legend>
+                    <div class="event-editor-grid compact">
+                        <label>Repeat every<input name="repeatEvery" type="number" min="1" step="1" value="${escapeHtml(defaults.repeatEvery || 1)}"></label>
+                        <label>Ends
+                            <select name="repeatEndMode" onchange="updateCustomEventRecurrenceControls()">
+                                <option value="never" ${!defaults.repeatEndMode || defaults.repeatEndMode === 'never' ? 'selected' : ''}>Never</option>
+                                <option value="on" ${defaults.repeatEndMode === 'on' ? 'selected' : ''}>On date</option>
+                                <option value="after" ${defaults.repeatEndMode === 'after' ? 'selected' : ''}>After occurrences</option>
+                            </select>
+                        </label>
+                        <label class="${defaults.repeatEndMode === 'on' ? '' : 'is-hidden'}" data-custom-repeat-on>End date<input name="repeatEndDate" type="date" value="${escapeHtml(defaults.repeatEndDate || '')}"></label>
+                        <label class="${defaults.repeatEndMode === 'after' ? '' : 'is-hidden'}" data-custom-repeat-after>Occurrences<input name="repeatOccurrences" type="number" min="1" step="1" value="${escapeHtml(defaults.repeatOccurrences || '')}"></label>
+                    </div>
+                    <div class="custom-event-weekdays ${defaults.repeat === 'weekly' ? '' : 'is-hidden'}" data-custom-weekday-row>
+                        ${weekdayLabels.map((label, index) => {
+                            const id = `event-weekday-${index}-${defaults.id || 'new'}`.replace(/[^a-zA-Z0-9_-]/g, '');
+                            return `<span class="custom-weekday-choice">
+                                <input id="${escapeHtml(id)}" name="repeatWeekdays" type="checkbox" value="${index}" ${selectedWeekdays.has(index) ? 'checked' : ''}>
+                                <label for="${escapeHtml(id)}">${label}</label>
+                            </span>`;
+                        }).join('')}
+                    </div>
+                </fieldset>
+                <label>Notes<textarea name="note" rows="4" placeholder="Optional details, instructions, phone numbers, or plan.">${escapeHtml(defaults.note || '')}</textarea></label>
+            </div>
+            <div class="event-link-panel">
+                <fieldset>
+                    <legend>Link Medications</legend>
+                    <input class="event-link-search" name="eventMedicationSearch" type="text" placeholder="Search medications..." oninput="filterCustomEventLinks()">
+                    <div class="event-link-list">${links.scheduleOptions || '<div class="empty-state">No active medications to link.</div>'}</div>
+                </fieldset>
+                <fieldset>
+                    <legend>Link Monitoring Parameters</legend>
+                    <input class="event-link-search" name="eventReminderSearch" type="text" placeholder="Search monitoring..." oninput="filterCustomEventLinks()">
+                    <div class="event-link-list">${links.reminderOptions || '<div class="empty-state">No monitoring reminders to link.</div>'}</div>
+                </fieldset>
+            </div>
+        </div>
+    `, existing ? 'Save Event' : 'Add Event');
+    if (!result) return;
+    if (!String(result.title || '').trim()) {
+        await appAlert('Enter a title for the custom task or event.', 'Task Needs a Title');
+        return;
+    }
+    const payload = {
+        id: existing?.id || `event_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        title: String(result.title || '').trim(),
+        type: result.type || 'task',
+        memberId: result.memberId || '',
+        date: result.date || localDateKey(),
+        endDate: result.endDate || result.date || localDateKey(),
+        time: result.time || '',
+        endTime: result.endTime || '',
+        allDay: asArray(result.allDay).length > 0 || result.allDay === true || result.allDay === 'on',
+        repeat: result.repeat || 'none',
+        repeatEvery: Math.max(1, parseInt(result.repeatEvery || 1, 10) || 1),
+        repeatWeekdays: asArray(result.repeatWeekdays).map(Number).filter(day => day >= 0 && day <= 6),
+        repeatEndMode: result.repeatEndMode || 'never',
+        repeatEndDate: result.repeatEndDate || '',
+        repeatOccurrences: result.repeatOccurrences || '',
+        notificationAmount: result.notificationAmount || '',
+        notificationUnit: result.notificationUnit || 'minutes',
+        location: String(result.location || '').trim(),
+        color: result.color || '#2b7cff',
+        urgent: asArray(result.urgent).length > 0 || result.urgent === true || result.urgent === 'on',
+        status: result.status || 'open',
+        note: String(result.note || '').trim(),
+        scheduleIds: asArray(result.scheduleIds),
+        reminderIds: asArray(result.reminderIds),
+        updatedAt: new Date().toISOString(),
+        createdAt: existing?.createdAt || new Date().toISOString()
+    };
+    if (existing) Object.assign(existing, payload);
+    else db.customEvents.push(payload);
+    addAudit(existing ? 'Custom event updated' : 'Custom event added', payload.title, `${payload.date} ${payload.time || ''}`);
+    await sync();
+};
+
+window.toggleCustomEventDone = async function(eventId) {
+    const event = ensureCustomEvents().find(item => item.id === eventId);
+    if (!event) return;
+    event.status = event.status === 'completed' ? 'open' : 'completed';
+    event.updatedAt = new Date().toISOString();
+    addAudit('Custom event status changed', event.title || eventId, event.status);
+    await sync();
+};
+
+window.deleteCustomEvent = async function(eventId) {
+    const event = ensureCustomEvents().find(item => item.id === eventId);
+    if (!event) return;
+    if (!(await appConfirm(`Delete "${event.title}"?`, 'Delete Custom Task / Event'))) return;
+    event.archived = true;
+    event.updatedAt = new Date().toISOString();
+    addAudit('Custom event deleted', event.title || eventId, 'Archived from event calendar.');
+    await sync();
+};
+
 function renderMemberCalendar(memberId) {
-    renderCalendar('member-calendar-grid', memberCalendarStart, memberId, 'member-calendar-range');
+    renderCalendar('member-calendar-grid', memberCalendarStart, memberId, 'member-calendar-range', memberCalendarView);
 }
 
 window.shiftDashboardCalendar = function(days) {
-    const start = parseLocal(dashboardCalendarStart);
-    start.setDate(start.getDate() + days);
-    dashboardCalendarStart = localDateKey(start);
+    dashboardCalendarStart = moveCalendarAnchor(dashboardCalendarStart, days < 0 ? -1 : 1, dashboardCalendarView);
     renderCalendar();
 };
 
@@ -18116,10 +19632,18 @@ window.resetDashboardCalendar = function() {
     renderCalendar();
 };
 
+window.shiftCustomEventCalendar = function(days) {
+    customEventCalendarStart = moveCalendarAnchor(customEventCalendarStart, days < 0 ? -1 : 1, customEventCalendarView);
+    renderCustomEventCalendar();
+};
+
+window.resetCustomEventCalendar = function() {
+    customEventCalendarStart = localDateKey();
+    renderCustomEventCalendar();
+};
+
 window.shiftMemberCalendar = function(days) {
-    const start = parseLocal(memberCalendarStart);
-    start.setDate(start.getDate() + days);
-    memberCalendarStart = localDateKey(start);
+    memberCalendarStart = moveCalendarAnchor(memberCalendarStart, days < 0 ? -1 : 1, memberCalendarView);
     if (currentEditingMemberId) renderMemberCalendar(currentEditingMemberId);
 };
 
@@ -19067,9 +20591,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
         editOrder.name = orderName;
         editOrder.note = result.orderNote || '';
         editOrder.lines = lines;
-        editOrder.status = editOrder.lines.every(line => line.status === 'received') ? 'received'
-            : editOrder.lines.some(line => line.status === 'received') ? 'partial'
-            : 'open';
+        refreshInventoryOrderReceiptStatus(editOrder);
         editOrder.estimatedTotal = orderEstimatedTotal(editOrder);
         editOrder.actualTotal = orderActualTotal(editOrder);
         db.history.unshift({
@@ -19121,8 +20643,22 @@ window.markReceiveLineScanned = function() {
     if (!row) return;
     row.querySelector('[name="receiveLine"]').checked = true;
     row.querySelector('[name="receiveBarcode"]').value = code;
-    row.classList.add('receive-line-received');
+    row.classList.add('receive-line-selected', 'receive-line-scanned');
     if (codeInput) codeInput.value = '';
+};
+
+window.toggleReceiveOrderLineSelection = function(input) {
+    const row = input?.closest?.('.receive-order-line');
+    if (!row) return;
+    row.classList.toggle('receive-line-selected', input.checked);
+};
+
+window.toggleReceiveOrderLineFromRow = function(event, row) {
+    if (event.target.closest('input, select, textarea, button, a')) return;
+    const checkbox = row?.querySelector?.('[name="receiveLine"]');
+    if (!checkbox || checkbox.disabled) return;
+    checkbox.checked = !checkbox.checked;
+    window.toggleReceiveOrderLineSelection(checkbox);
 };
 
 function orderCustomComponentRowHtml(rowId, component = {}) {
@@ -19576,6 +21112,44 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
     return med;
 }
 
+function orderLineRequestedQuantity(line) {
+    return parseAmount(line?.requestedQty, NaN);
+}
+
+function orderLineReceivedQuantity(line) {
+    return parseAmount(line?.receivedQty, 0);
+}
+
+function orderLineRemainingQuantity(line) {
+    const requested = orderLineRequestedQuantity(line);
+    if (!Number.isFinite(requested) || requested <= 0) return '';
+    return Math.max(0, requested - orderLineReceivedQuantity(line));
+}
+
+function refreshOrderLineReceiptStatus(line) {
+    if (!line) return 'open';
+    const received = orderLineReceivedQuantity(line);
+    const requested = orderLineRequestedQuantity(line);
+    if (received <= 0) {
+        line.status = 'open';
+    } else if (Number.isFinite(requested) && requested > 0 && received + 1e-9 < requested) {
+        line.status = 'partial';
+    } else {
+        line.status = 'received';
+    }
+    return line.status;
+}
+
+function refreshInventoryOrderReceiptStatus(order) {
+    if (!order) return 'open';
+    (order.lines || []).forEach(refreshOrderLineReceiptStatus);
+    order.status = (order.lines || []).every(line => line.status === 'received') ? 'received'
+        : (order.lines || []).some(line => line.status === 'received' || line.status === 'partial') ? 'partial'
+        : 'open';
+    order.receivedAt = order.status === 'received' ? (order.receivedAt || new Date().toISOString()) : '';
+    return order.status;
+}
+
 async function receiveOrderLine(line, receivedQty, barcode, cost = {}) {
     const normalizedBarcode = normalizeMedicationCode(barcode);
     let med = line.medId ? db.inventory.find(item => item.id === line.medId) : null;
@@ -19613,7 +21187,7 @@ async function receiveOrderLine(line, receivedQty, barcode, cost = {}) {
     line.receivedQty = parseAmount(line.receivedQty, 0) + parseAmount(receivedQty, 0);
     line.actualUnitPrice = actualUnitPrice || line.actualUnitPrice || line.estimatedUnitPrice || '';
     line.actualTotal = actualTotal || line.actualUnitPrice || line.actualTotal || '';
-    line.status = 'received';
+    refreshOrderLineReceiptStatus(line);
     if (normalizedBarcode) {
         line.barcodeCodes = Array.from(new Set([...asArray(line.barcodeCodes), normalizedBarcode]));
         const formulary = line.formularyId ? db.formularyItems.find(item => item.id === line.formularyId) : null;
@@ -19629,7 +21203,10 @@ async function receiveOrderLine(line, receivedQty, barcode, cost = {}) {
 
 window.receiveInventoryOrder = async function() {
     const orders = (db.inventoryOrders || [])
-        .filter(order => (order.lines || []).some(line => line.status !== 'received'))
+        .filter(order => {
+            refreshInventoryOrderReceiptStatus(order);
+            return (order.lines || []).some(line => line.status !== 'received');
+        })
         .slice()
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     if (orders.length === 0) {
@@ -19650,15 +21227,28 @@ window.receiveInventoryOrder = async function() {
     if (!selectResult) return;
     const order = db.inventoryOrders.find(item => item.id === selectResult.orderId);
     if (!order) return;
-    const lineOptions = order.lines.map(line => `<option value="${escapeHtml(line.id)}">${escapeHtml(`${line.name} ${line.strength || ''}`)}</option>`).join('');
+    const lineOptions = order.lines
+        .filter(line => line.status !== 'received')
+        .map(line => `<option value="${escapeHtml(line.id)}">${escapeHtml(`${line.name} ${line.strength || ''}`)}</option>`)
+        .join('');
     const lineRows = order.lines.map(line => {
         const isNewNonInventory = isOrderLineNewNonInventory(line);
+        const remaining = orderLineRemainingQuantity(line);
+        const receiveValue = remaining !== '' ? formatAmount(remaining) : (line.requestedQty || '1');
+        const isSelectable = line.status !== 'received';
+        const isSelected = selectResult.receiveMode === 'manual' && isSelectable;
+        const receivedText = orderLineReceivedQuantity(line) > 0
+            ? ` | received so far: ${formatAmount(orderLineReceivedQuantity(line))} ${line.inventoryUnit || ''}`
+            : '';
+        const remainingText = remaining !== ''
+            ? ` | remaining: ${formatAmount(remaining)} ${line.inventoryUnit || ''}`
+            : '';
         return `
-        <div class="order-line-item receive-order-line ${line.status === 'received' ? 'receive-line-received' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}">
-            <input name="receiveLine" type="checkbox" value="${escapeHtml(line.id)}" ${selectResult.receiveMode === 'manual' && line.status !== 'received' ? 'checked' : ''}>
-            <div class="receive-line-copy"><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${line.estimatedUnitPrice ? ` - est. ${escapeHtml(formatCurrency(line.estimatedUnitPrice))}` : ''}${line.status === 'received' ? ` - received${orderLineActualTotal(line) > 0 ? ` (${escapeHtml(formatCurrency(orderLineActualTotal(line)))})` : ''}` : ''}</span>${line.purchaseLink ? `<br><span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}</div>
+        <div class="order-line-item receive-order-line ${line.status === 'received' ? 'receive-line-received' : ''} ${isSelected ? 'receive-line-selected' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}" onclick="toggleReceiveOrderLineFromRow(event, this)">
+            <input name="receiveLine" type="checkbox" value="${escapeHtml(line.id)}" aria-label="Receive ${escapeHtml(line.name || 'order line')}" onchange="toggleReceiveOrderLineSelection(this)" ${isSelected ? 'checked' : ''} ${line.status === 'received' ? 'disabled' : ''}>
+            <div class="receive-line-copy"><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${receivedText}${remainingText}${line.estimatedUnitPrice ? ` - est. ${escapeHtml(formatCurrency(line.estimatedUnitPrice))}` : ''}${line.status ? ` | status: ${escapeHtml(line.status)}` : ''}${line.status === 'received' && orderLineActualTotal(line) > 0 ? ` (${escapeHtml(formatCurrency(orderLineActualTotal(line)))})` : ''}</span>${line.purchaseLink ? `<br><span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}</div>
             <div class="receive-line-inputs">
-                <label>Received qty<input name="receiveQty" data-line-id="${escapeHtml(line.id)}" type="number" step="any" value="${escapeHtml(line.requestedQty || '1')}"></label>
+                <label>Received qty<input name="receiveQty" data-line-id="${escapeHtml(line.id)}" type="number" step="any" value="${escapeHtml(receiveValue)}" ${line.status === 'received' ? 'disabled' : ''}></label>
                 <label>Actual price<input name="receiveActualUnitPrice" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Actual price" value="${escapeHtml(line.actualUnitPrice || line.estimatedUnitPrice || '')}"></label>
                 <label>Barcode / QR code<input name="receiveBarcode" data-line-id="${escapeHtml(line.id)}" type="text" placeholder="Scan or type code" value=""></label>
             </div>
@@ -19700,8 +21290,7 @@ window.receiveInventoryOrder = async function() {
         await appAlert('No order lines were received.');
         return;
     }
-    order.status = order.lines.every(line => line.status === 'received') ? 'received' : 'partial';
-    order.receivedAt = order.status === 'received' ? new Date().toISOString() : '';
+    refreshInventoryOrderReceiptStatus(order);
     order.estimatedTotal = orderEstimatedTotal(order);
     order.actualTotal = orderActualTotal(order);
     db.history.unshift({
@@ -19788,8 +21377,9 @@ function inventoryOrderLogCard(order, receivedSection = false) {
 
 function inventoryOrderLogHtml() {
     const orders = (db.inventoryOrders || []).slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    const openOrders = orders.filter(order => order.status !== 'received' && order.status !== 'partial');
-    const receivedOrders = orders.filter(order => order.status === 'received' || order.status === 'partial');
+    orders.forEach(refreshInventoryOrderReceiptStatus);
+    const openOrders = orders.filter(order => order.status !== 'received');
+    const receivedOrders = orders.filter(order => order.status === 'received');
     return `<div data-action-modal-size="wide" class="inventory-order-log">
         <div class="form-help">Created orders can be deleted here. Received orders stay in this log and can be corrected after receiving.</div>
         <fieldset>
@@ -19924,17 +21514,14 @@ window.editReceivedInventoryOrder = async function(orderId) {
         line.actualTotal = line.actualUnitPrice;
         line.purchaseLink = String(edit.purchaseLink || '').trim();
         line.notes = edit.notes || '';
-        line.status = nextQty > 0 ? 'received' : 'open';
+        refreshOrderLineReceiptStatus(line);
         if (med) {
             if (line.actualUnitPrice) med.lastUnitPrice = line.actualUnitPrice;
             if (line.purchaseLink) med.purchaseLink = line.purchaseLink;
         }
         changed++;
     }
-    order.status = order.lines.every(line => line.status === 'received') ? 'received'
-        : order.lines.some(line => line.status === 'received') ? 'partial'
-        : 'open';
-    order.receivedAt = order.status === 'received' ? (order.receivedAt || new Date().toISOString()) : '';
+    refreshInventoryOrderReceiptStatus(order);
     order.actualTotal = orderActualTotal(order);
     order.estimatedTotal = orderEstimatedTotal(order);
     db.history.unshift({
@@ -20105,6 +21692,7 @@ sortedInventory.forEach(med => {
         });
     }
     renderPanelSafely('Medication schedule calendar', () => renderCalendar(), 'calendar-grid');
+    renderPanelSafely('Custom tasks calendar', () => renderCustomEventCalendar(), 'custom-event-calendar-grid');
     renderPanelSafely('Regimens', () => renderOrderSets(), 'order-set-med-list');
     renderPanelSafely('Prepackage queues', () => renderPrepackageQueues(), 'prepack-active-list');
     renderPanelSafely('Recipes', () => renderRecipes(), 'compound-recipe-list');
