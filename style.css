@@ -8001,6 +8001,27 @@ button {
     gap: 6px 8px;
 }
 
+.custom-label-code-row {
+    margin-top: 6px;
+}
+
+.custom-label-code-row textarea {
+    width: 100%;
+    min-height: 42px;
+    resize: vertical;
+}
+
+.label-custom-size-row {
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+}
+
+.label-custom-size-row input[type="number"] {
+    width: 72px !important;
+    max-width: 72px !important;
+}
+
 .custom-label-content-grid label,
 .custom-label-builder-form label {
     font-weight: bold;
@@ -8651,10 +8672,12 @@ button {
 .med-kit-label-page {
     position: relative;
     overflow: hidden;
+    width: var(--custom-label-width, 2.25in) !important;
+    height: var(--custom-label-height, 1.25in) !important;
 }
 
 .med-kit-label-page.has-med-kit-code {
-    padding-right: 0.36in !important;
+    padding-right: 0.34in !important;
 }
 
 .med-kit-label-copy {
@@ -8675,20 +8698,23 @@ button {
 .med-kit-label-list {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0;
     margin-top: 2px;
 }
 
 .med-kit-label-row {
-    overflow-wrap: anywhere;
+    line-height: 1.02;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    white-space: normal;
 }
 
 .med-kit-label-aztec {
     position: absolute;
     top: 0.035in;
     right: 0.035in;
-    width: 0.28in;
-    height: 0.28in;
+    width: 0.26in;
+    height: 0.26in;
     object-fit: contain;
     background: #ffffff;
     image-rendering: pixelated;

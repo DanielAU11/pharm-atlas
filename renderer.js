@@ -548,6 +548,15 @@ function medicationQrDataUrl(code) {
     return qr.createDataURL(4, 1);
 }
 
+function rawQrDataUrl(text) {
+    const value = String(text || '').trim();
+    if (!value || typeof window.qrcode !== 'function') return '';
+    const qr = window.qrcode(0, 'M');
+    qr.addData(value);
+    qr.make();
+    return qr.createDataURL(4, 1);
+}
+
 const CODE128_PATTERNS = [
     '212222','222122','222221','121223','121322','131222','122213','122312','132212','221213',
     '221312','231212','112232','122132','122231','113222','123122','123221','223211','221132',
@@ -3743,7 +3752,7 @@ let pendingPrepackDefinition = null;
 function fitLabelPages(container) {
     const densityClasses = ['label-compact', 'label-dense', 'label-ultra-dense', 'label-micro'];
     container.querySelectorAll('.label-page').forEach(page => {
-        const textElements = page.querySelectorAll('.label-date, .label-title, .label-small, .label-med-row, .compound-label-strength');
+        const textElements = page.querySelectorAll('.label-date, .label-title, .label-small, .label-med-row, .compound-label-strength, .med-kit-label-row');
         textElements.forEach(element => {
             element.style.removeProperty('font-size');
             element.style.removeProperty('line-height');
@@ -4317,23 +4326,70 @@ function medKitAvailableChoices(kit, medId = '') {
         );
 }
 
-function medKitLabelHtml(kit) {
+function medKitLabelCapacity(size, hasCode = false) {
+    const width = Number(size?.width) || 2.25;
+    const height = Number(size?.height) || 1.25;
+    const area = width * height;
+    const wideBonus = width >= 3 ? 2 : 0;
+    const codePenalty = hasCode ? 2 : 0;
+    return Math.max(3, Math.floor(area * 2.6) + wideBonus - codePenalty);
+}
+
+function medKitLabelPages(choices, size, hasCode) {
+    const queue = choices.slice();
+    const pages = [];
+    while (queue.length) {
+        const codeOnPage = hasCode;
+        const capacity = medKitLabelCapacity(size, codeOnPage);
+        pages.push({
+            choices: queue.splice(0, capacity),
+            hasCode: codeOnPage
+        });
+    }
+    if (!pages.length) pages.push({ choices: [], hasCode });
+    return pages;
+}
+
+function medKitLabelOptionSize(values = {}) {
+    const sizeId = values.sizeId || localStorage.getItem('pharmAtlasMedKitLabelSize') || 'thermal-225-125';
+    const preset = customLabelSizeById(sizeId);
+    if (sizeId !== 'custom') return preset;
+    return {
+        ...preset,
+        width: Math.max(0.8, parseAmount(values.customWidth, parseAmount(localStorage.getItem('pharmAtlasMedKitLabelCustomWidth'), preset.width))),
+        height: Math.max(0.5, parseAmount(values.customHeight, parseAmount(localStorage.getItem('pharmAtlasMedKitLabelCustomHeight'), preset.height)))
+    };
+}
+
+window.toggleMedKitLabelCustomSize = function(value) {
+    const row = document.getElementById('med-kit-label-custom-size');
+    if (row) row.style.display = value === 'custom' ? 'flex' : 'none';
+};
+
+function medKitLabelHtml(kit, options = {}) {
     const choices = medKitAvailableChoices(kit);
-    const medLines = choices.map(({ med }) =>
-        `<div class="med-kit-label-row">${escapeHtml(inventoryDisplayName(med))}</div>`
-    ).join('');
+    const size = options.size || customLabelSizeById(options.sizeId || localStorage.getItem('pharmAtlasMedKitLabelSize') || 'thermal-225-125');
     const kitCode = medKitScanCode(kit);
     const barcodeDataUrl = kitCode ? aztecBarcodeDataUrl(kitCode) : '';
-    const textParts = [medKitName(kit), ...choices.map(({ med }) => inventoryDisplayName(med))];
-    const labelClass = `${getLabelClass(textParts, choices.length + 2)} med-kit-label-page ${barcodeDataUrl ? 'has-med-kit-code' : ''}`;
-    return `<div class="${labelClass}">
-        <div class="med-kit-label-copy">
-            <div class="label-title med-kit-label-title">${escapeHtml(medKitName(kit))}</div>
-            <div class="label-small med-kit-label-subtitle">Med Kit Contents</div>
-            <div class="med-kit-label-list">${medLines || '<div class="label-small">No medications in this kit.</div>'}</div>
-        </div>
-        ${barcodeDataUrl ? `<img class="med-kit-label-aztec" src="${barcodeDataUrl}" alt="Med kit Aztec barcode">` : ''}
-    </div>`;
+    const pages = medKitLabelPages(choices, size, !!barcodeDataUrl);
+    const styleVars = `--custom-label-width:${size.width}in; --custom-label-height:${size.height}in;`;
+    const pageHtml = pages.map((page, index) => {
+        const medLines = page.choices.map(({ med }) =>
+            `<div class="med-kit-label-row">${escapeHtml(inventoryDisplayName(med))}</div>`
+        ).join('');
+        const pageText = [medKitName(kit), ...page.choices.map(({ med }) => inventoryDisplayName(med))];
+        const labelClass = `${getLabelClass(pageText, page.choices.length + 2)} med-kit-label-page ${page.hasCode ? 'has-med-kit-code' : ''}`;
+        const pageCounter = pages.length > 1 ? ` (${index + 1}/${pages.length})` : '';
+        return `<div class="${labelClass}" style="${styleVars}">
+            <div class="med-kit-label-copy">
+                <div class="label-title med-kit-label-title">${escapeHtml(medKitName(kit))}</div>
+                <div class="label-small med-kit-label-subtitle">Med Kit Contents${pageCounter}</div>
+                <div class="med-kit-label-list">${medLines || '<div class="label-small">No medications in this kit.</div>'}</div>
+            </div>
+            ${page.hasCode ? `<img class="med-kit-label-aztec" src="${barcodeDataUrl}" alt="Med kit Aztec barcode">` : ''}
+        </div>`;
+    }).join('');
+    return `${options.includePrintStyle ? customLabelPrintSizeStyle(size) : ''}${pageHtml}`;
 }
 
 function isExpiringWithinDays(dateValue, days = 10) {
@@ -9310,7 +9366,35 @@ window.printMedKitLabel = async function(kitId) {
     }
     ensureMedKitScanCode(kit);
     await sync();
-    previewLabelHtml(medKitLabelHtml(kit));
+    const savedSizeId = localStorage.getItem('pharmAtlasMedKitLabelSize') || 'thermal-225-125';
+    const savedCustomWidth = localStorage.getItem('pharmAtlasMedKitLabelCustomWidth') || '2.25';
+    const savedCustomHeight = localStorage.getItem('pharmAtlasMedKitLabelCustomHeight') || '1.25';
+    const sizeOptions = CUSTOM_LABEL_SIZE_PRESETS.map(size =>
+        `<option value="${escapeHtml(size.id)}" ${size.id === savedSizeId ? 'selected' : ''}>${escapeHtml(size.name)}</option>`
+    ).join('');
+    const result = await showChildActionModal('Med Kit Label Options', `
+        <div class="field-row">
+            <label>Label size:</label>
+            <select name="sizeId" style="width:260px;" onchange="toggleMedKitLabelCustomSize(this.value)">${sizeOptions}</select>
+        </div>
+        <div id="med-kit-label-custom-size" class="field-row label-custom-size-row" style="display:${savedSizeId === 'custom' ? 'flex' : 'none'};">
+            <label>Width (in):</label><input name="customWidth" type="number" min="0.8" step="0.05" value="${escapeHtml(savedCustomWidth)}">
+            <label>Height (in):</label><input name="customHeight" type="number" min="0.5" step="0.05" value="${escapeHtml(savedCustomHeight)}">
+        </div>
+        <div class="form-help">If the kit contents do not fit, PharmAtlas continues the list onto another label.</div>
+    `, 'Preview Label');
+    if (!result) return;
+    const sizeId = result.sizeId || savedSizeId;
+    const size = medKitLabelOptionSize(result);
+    localStorage.setItem('pharmAtlasMedKitLabelSize', sizeId);
+    if (sizeId === 'custom') {
+        localStorage.setItem('pharmAtlasMedKitLabelCustomWidth', String(size.width));
+        localStorage.setItem('pharmAtlasMedKitLabelCustomHeight', String(size.height));
+    }
+    previewLabelHtml(medKitLabelHtml(kit, {
+        size,
+        includePrintStyle: true
+    }));
 };
 
 window.returnMedKitItem = async function(kitId, itemId) {
@@ -23013,7 +23097,7 @@ function selectedAuxiliaryLabels() {
 
 function auxiliaryBuilderValues() {
     const value = id => document.getElementById(id)?.value || '';
-    const size = customLabelSizeById(value('aux-label-size') || 'thermal-225-125');
+    const size = labelSizeFromControls('aux-label', 'thermal-225-125');
     const mode = value('aux-print-mode') || 'separate';
     return {
         mode,
@@ -23102,6 +23186,8 @@ function refreshAuxiliaryChoiceList() {
 
 window.updateAuxiliaryLabelPreview = function() {
     const values = auxiliaryBuilderValues();
+    const customSize = document.getElementById('aux-label-custom-size');
+    if (customSize) customSize.style.display = document.getElementById('aux-label-size')?.value === 'custom' ? 'flex' : 'none';
     document.querySelectorAll('.aux-label-choice').forEach(choice => {
         const input = choice.querySelector('input[type="checkbox"]');
         choice.classList.toggle('selected', !!input?.checked);
@@ -23255,6 +23341,10 @@ window.openAuxiliaryLabelBuilder = async function(source = 'inventory') {
                         <label>Label size<select id="aux-label-size" onchange="updateAuxiliaryLabelPreview()">${sizeOptions}</select></label>
                         <label>Copies<input id="aux-label-copies" type="number" min="1" max="99" value="1" oninput="updateAuxiliaryLabelPreview()"></label>
                     </div>
+                    <div id="aux-label-custom-size" class="field-row label-custom-size-row" style="display:none;">
+                        <label>Width (in):</label><input id="aux-label-width" type="number" min="0.8" step="0.05" value="2.25" oninput="updateAuxiliaryLabelPreview()">
+                        <label>Height (in):</label><input id="aux-label-height" type="number" min="0.5" step="0.05" value="1.25" oninput="updateAuxiliaryLabelPreview()">
+                    </div>
                 </fieldset>
                 <div class="field-row custom-label-actions">
                     <button type="button" class="custom-label-print-button" onclick="printAuxiliaryLabels()"><span class="win98-icon icon-label"></span>Preview / Print Auxiliary Labels</button>
@@ -23298,6 +23388,18 @@ let customLabelSourceFile = null;
 
 function customLabelSizeById(id) {
     return CUSTOM_LABEL_SIZE_PRESETS.find(size => size.id === id) || CUSTOM_LABEL_SIZE_PRESETS[0];
+}
+
+function labelSizeFromControls(prefix, defaultId = 'thermal-225-125') {
+    const presetId = document.getElementById(`${prefix}-size`)?.value || defaultId;
+    const preset = customLabelSizeById(presetId);
+    const width = presetId === 'custom'
+        ? Math.max(0.8, parseAmount(document.getElementById(`${prefix}-width`)?.value, preset.width))
+        : preset.width;
+    const height = presetId === 'custom'
+        ? Math.max(0.5, parseAmount(document.getElementById(`${prefix}-height`)?.value, preset.height))
+        : preset.height;
+    return { ...preset, width, height };
 }
 
 function customLabelFontById(id) {
@@ -23392,15 +23494,7 @@ function customLabelStorageOptions(selected = '') {
 }
 
 function customLabelCurrentSize() {
-    const presetId = document.getElementById('custom-label-size')?.value || CUSTOM_LABEL_SIZE_PRESETS[0].id;
-    const preset = customLabelSizeById(presetId);
-    const width = presetId === 'custom'
-        ? Math.max(0.8, parseAmount(document.getElementById('custom-label-width')?.value, preset.width))
-        : preset.width;
-    const height = presetId === 'custom'
-        ? Math.max(0.5, parseAmount(document.getElementById('custom-label-height')?.value, preset.height))
-        : preset.height;
-    return { ...preset, width, height };
+    return labelSizeFromControls('custom-label', CUSTOM_LABEL_SIZE_PRESETS[0].id);
 }
 
 function customLabelFieldEnabled(fieldName) {
@@ -23447,7 +23541,9 @@ function customLabelValues() {
         storage: value('custom-label-storage').trim(),
         instructions: value('custom-label-instructions').trim(),
         lot: value('custom-label-lot').trim(),
+        barcodeType: value('custom-label-code-type') || 'inventory-aztec',
         barcodeCode: normalizeMedicationCode(value('custom-label-barcode')),
+        qrText: value('custom-label-qr-text').trim(),
         footer: value('custom-label-footer').trim()
     };
 }
@@ -23460,7 +23556,8 @@ function customLabelPrintSizeStyle(size) {
             @page { size: ${width}in ${height}in; margin: 0 !important; }
             html, body, #print-area { width: ${width}in !important; min-height: ${height}in !important; }
             #print-area .label-page.custom-label-page,
-            #print-area .label-page.auxiliary-label-page { width: ${width}in !important; height: ${height}in !important; }
+            #print-area .label-page.auxiliary-label-page,
+            #print-area .label-page.med-kit-label-page { width: ${width}in !important; height: ${height}in !important; }
         }
     </style>`;
 }
@@ -23532,7 +23629,10 @@ function customLabelHtml(values, includePrintStyle = false) {
         lines.push(line(`<div class="label-small custom-label-footer">${escapeHtml(values.footer)}</div>`));
     }
 
-    const barcodeDataUrl = values.includeBarcode && values.barcodeCode ? aztecBarcodeDataUrl(values.barcodeCode) : '';
+    const printableCodeValue = values.barcodeType === 'qr-text' ? values.qrText : values.barcodeCode;
+    const barcodeDataUrl = values.includeBarcode
+        ? (values.barcodeType === 'qr-text' ? rawQrDataUrl(values.qrText) : aztecBarcodeDataUrl(values.barcodeCode))
+        : '';
     const sourceFileHtml = customLabelSourceFileHtml(values);
     const labelClass = `${getLabelClass(textParts, lines.length)} custom-label-page ${values.font.className}${values.includeDividers ? ' has-dividers' : ''}${values.includeBorder ? ' has-outer-border' : ''}${barcodeDataUrl ? ' has-custom-code' : ''}${barcodeDataUrl && linkedMeds.length > 1 ? ' has-multi-linked-meds' : ''}${sourceFileHtml ? ' has-source-file' : ''}`;
     const content = lines.length ? lines.join('') : (sourceFileHtml ? '' : '<div class="label-small custom-label-empty">No fields selected.</div>');
@@ -23541,7 +23641,7 @@ function customLabelHtml(values, includePrintStyle = false) {
         <div class="${labelClass}" style="${styleVars}">
             ${sourceFileHtml}
             <div class="custom-label-copy">${content}</div>
-            ${barcodeDataUrl ? `<img class="custom-label-aztec" src="${barcodeDataUrl}" alt="Aztec barcode">` : ''}
+            ${barcodeDataUrl ? `<img class="custom-label-aztec" src="${barcodeDataUrl}" alt="${escapeHtml(values.barcodeType === 'qr-text' ? 'QR code' : 'Aztec barcode')}" title="${escapeHtml(printableCodeValue)}">` : ''}
         </div>`;
 }
 
@@ -23550,6 +23650,11 @@ function updateCustomLabelPreview() {
     const customSize = document.getElementById('custom-label-custom-size');
     const size = customLabelCurrentSize();
     if (customSize) customSize.style.display = document.getElementById('custom-label-size')?.value === 'custom' ? 'flex' : 'none';
+    const codeType = document.getElementById('custom-label-code-type')?.value || 'inventory-aztec';
+    const inventoryCodeRow = document.getElementById('custom-label-inventory-code-row');
+    const qrTextRow = document.getElementById('custom-label-qr-text-row');
+    if (inventoryCodeRow) inventoryCodeRow.style.display = codeType === 'qr-text' ? 'none' : 'block';
+    if (qrTextRow) qrTextRow.style.display = codeType === 'qr-text' ? 'block' : 'none';
     if (preview) {
         preview.innerHTML = customLabelHtml(customLabelValues(), false);
         fitLabelPages(preview);
@@ -23650,6 +23755,8 @@ function applyCustomLabelSelectedMeds() {
         set('custom-label-instructions', '');
     }
     set('custom-label-barcode', customLabelMergedCodeForMeds(meds));
+    set('custom-label-qr-text', '');
+    set('custom-label-code-type', 'inventory-aztec');
     const barcodeCheck = document.querySelector('#action-modal-body input.custom-label-field-toggle[value="barcode"]');
     if (barcodeCheck) barcodeCheck.checked = true;
 }
@@ -23712,8 +23819,21 @@ window.setCustomLabelNow = function() {
 };
 
 window.generateCustomLabelCode = function() {
+    const type = document.getElementById('custom-label-code-type');
+    if (type) type.value = 'inventory-aztec';
     const input = document.getElementById('custom-label-barcode');
     if (input) input.value = createMedicationCode();
+    const barcodeCheck = document.querySelector('#action-modal-body input.custom-label-field-toggle[value="barcode"]');
+    if (barcodeCheck) barcodeCheck.checked = true;
+    updateCustomLabelPreview();
+};
+
+window.updateCustomLabelCodeType = function() {
+    const type = document.getElementById('custom-label-code-type')?.value || 'inventory-aztec';
+    const inventoryRow = document.getElementById('custom-label-inventory-code-row');
+    const qrRow = document.getElementById('custom-label-qr-text-row');
+    if (inventoryRow) inventoryRow.style.display = type === 'qr-text' ? 'none' : 'block';
+    if (qrRow) qrRow.style.display = type === 'qr-text' ? 'block' : 'none';
     const barcodeCheck = document.querySelector('#action-modal-body input.custom-label-field-toggle[value="barcode"]');
     if (barcodeCheck) barcodeCheck.checked = true;
     updateCustomLabelPreview();
@@ -23732,10 +23852,12 @@ window.toggleCustomLabelBorder = function() {
 };
 
 window.clearCustomLabelBuilder = function() {
-    ['custom-label-name', 'custom-label-strength', 'custom-label-quantity', 'custom-label-storage', 'custom-label-expiration', 'custom-label-instructions', 'custom-label-lot', 'custom-label-header', 'custom-label-footer', 'custom-label-barcode', 'custom-label-inventory-search'].forEach(id => {
+    ['custom-label-name', 'custom-label-strength', 'custom-label-quantity', 'custom-label-storage', 'custom-label-expiration', 'custom-label-instructions', 'custom-label-lot', 'custom-label-header', 'custom-label-footer', 'custom-label-barcode', 'custom-label-qr-text', 'custom-label-inventory-search'].forEach(id => {
         const element = document.getElementById(id);
         if (element) element.value = '';
     });
+    const codeType = document.getElementById('custom-label-code-type');
+    if (codeType) codeType.value = 'inventory-aztec';
     const linked = document.getElementById('custom-label-linked-med-ids');
     if (linked) linked.value = '';
     customLabelSourceFile = null;
@@ -23765,7 +23887,8 @@ function setupCustomLabelBuilderEvents() {
         'custom-label-storage': 'storage',
         'custom-label-instructions': 'instructions',
         'custom-label-lot': 'lot',
-        'custom-label-barcode': 'barcode'
+        'custom-label-barcode': 'barcode',
+        'custom-label-qr-text': 'barcode'
     };
     const enableFieldForInput = element => {
         const field = fieldByInputId[element?.id];
@@ -23801,7 +23924,11 @@ window.printCustomBuiltLabels = async function() {
         await appAlert('Select at least one label field, upload a PDF/image, or enter footer text before printing.');
         return;
     }
-    if (values.includeBarcode && !values.barcodeCode) {
+    if (values.includeBarcode && values.barcodeType === 'qr-text' && !values.qrText) {
+        await appAlert('Enter a URL or free text before printing a QR code.');
+        return;
+    }
+    if (values.includeBarcode && values.barcodeType !== 'qr-text' && !values.barcodeCode) {
         await appAlert('Enter, scan, generate, or link a barcode code before printing a barcode.');
         return;
     }
@@ -23850,7 +23977,7 @@ window.openCustomLabelBuilder = async function() {
                             ${fieldToggle('expiration', 'Expiration')}
                             ${fieldToggle('storage', 'Storage')}
                             ${fieldToggle('instructions', 'Instructions')}
-                            ${fieldToggle('barcode', 'Aztec barcode')}
+                            ${fieldToggle('barcode', 'Scannable code')}
                             ${fieldToggle('lot', 'Lot / batch')}
                             ${fieldToggle('header', 'Optional title')}
                         </div>
@@ -23868,7 +23995,16 @@ window.openCustomLabelBuilder = async function() {
                             <label>Expiration<input id="custom-label-expiration" type="date" onchange="updateCustomLabelPreview()"></label>
                             <label>Storage<select id="custom-label-storage">${customLabelStorageOptions('Room Temp')}</select></label>
                             <label>Lot / batch<input id="custom-label-lot" type="text" placeholder="Optional lot or batch" oninput="updateCustomLabelPreview()"></label>
-                            <label>Aztec code<input id="custom-label-barcode" type="text" placeholder="Scan, paste, or generate" oninput="updateCustomLabelPreview()"></label>
+                            <label>Code type<select id="custom-label-code-type" onchange="updateCustomLabelCodeType()">
+                                <option value="inventory-aztec">Inventory Aztec code</option>
+                                <option value="qr-text">QR code from URL/free text</option>
+                            </select></label>
+                        </div>
+                        <div id="custom-label-inventory-code-row" class="custom-label-code-row">
+                            <label>Inventory Aztec code<input id="custom-label-barcode" type="text" placeholder="Scan, paste, or generate" oninput="updateCustomLabelPreview()"></label>
+                        </div>
+                        <div id="custom-label-qr-text-row" class="custom-label-code-row" style="display:none;">
+                            <label>QR URL or free text<textarea id="custom-label-qr-text" rows="2" placeholder="https://example.com, contact info, instructions, or other text" oninput="updateCustomLabelPreview()"></textarea></label>
                         </div>
                         <div class="field-row">
                             <button type="button" onclick="setCustomLabelNow()">Use Current Date/Time</button>
