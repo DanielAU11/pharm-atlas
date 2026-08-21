@@ -4046,7 +4046,11 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
             modal.style.display = 'none';
             resolve(value);
         };
-        ok.onclick = () => cleanup(collectFn ? collectFn(body) : collectNamedInputs(body));
+        ok.onclick = async () => {
+            const value = collectFn ? await collectFn(body) : collectNamedInputs(body);
+            if (value === false) return;
+            cleanup(value);
+        };
         cancel.onclick = () => cleanup(null);
         close.onclick = () => cleanup(null);
         if (minimize) {
@@ -11996,14 +12000,32 @@ function markPrepackItemWasted(row, reason = 'wasted', note = '') {
     if (med) addAudit('Prepack dose wasted', med.name, `${queue.memberName || 'Prepack'} | ${day?.date || ''} ${item.time || ''} | ${reason} | no stock return.`);
 }
 
-function prepackedDoseCovers(scheduleId, date, time) {
+function prepackItemMatchesCurrentSchedule(item, schedule, med) {
+    if (!item || !schedule || !med) return false;
+    if (item.scheduleId !== schedule.id) return false;
+    if (item.medId && item.medId !== med.id) return false;
+    const normalizedPackedText = value => normalizeSlashPartsText(value).replace(/\s+/g, '').toLowerCase();
+    const currentStrength = normalizedPackedText(formatLabelMedStrength(med));
+    const packedStrength = normalizedPackedText(item.strength || '');
+    if (packedStrength && currentStrength && packedStrength !== currentStrength) return false;
+    const currentDose = normalizedPackedText(formatPrescribedDose(med, schedule.doseQty));
+    const packedDose = normalizedPackedText(item.dose || '');
+    if (packedDose && currentDose && packedDose !== currentDose) return false;
+    return true;
+}
+
+function prepackedDoseCovers(scheduleId, date, time, med = null) {
     if (!scheduleId || !date || !time) return null;
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const currentMed = med || (schedule ? db.inventory.find(item => item.id === schedule.medId) : null);
+    if (!schedule || !currentMed) return null;
     const exactKey = scheduleInstanceKey(scheduleId, date, time);
     for (const queue of db.prepackQueues || []) {
         if (isInventoryUnitDoseQueue(queue)) continue;
         for (const day of queue.days || []) {
             for (const item of day.items || []) {
-                if (!item.inventoryDeducted || item.inventoryReturned || item.scheduleId !== scheduleId) continue;
+                if (!item.inventoryDeducted || item.inventoryReturned) continue;
+                if (!prepackItemMatchesCurrentSchedule(item, schedule, currentMed)) continue;
                 if (item.instanceKey === exactKey) return { queue, day, item };
                 const range = String(item.instanceKey || '').split('|');
                 if (range[0] === 'range' && range[1] === scheduleId) {
@@ -13303,7 +13325,7 @@ function returnPrepackModalContent(labelHtml = '', statusText = '') {
                         <option value="other">Other</option>
                     </select>
                 </label>
-                <label>Action
+                <label class="return-handling-field">Action
                     <select name="handling" onchange="updateReturnPrepackActionUi(); updateReturnPrepackLabelPreview(false)">
                         <option value="return">Return to inventory</option>
                         <option value="waste">Waste / do not return</option>
@@ -17646,7 +17668,7 @@ async function getAdministrationStockPlan(med, sched, actual = {}) {
     const qtyToSubtract = parseAmount(sched.doseQty, 0);
     const scheduledDate = actual.scheduledDate || actual.actualDate || '';
     const scheduledTime = actual.scheduledTime || actual.actualTime || '';
-    const prepacked = prepackedDoseCovers(sched.id, scheduledDate, scheduledTime);
+    const prepacked = prepackedDoseCovers(sched.id, scheduledDate, scheduledTime, med);
     if (prepacked) {
         return {
             qtyToSubtract: 0,
@@ -20325,6 +20347,15 @@ function formularyBarcodeCodes(item) {
     return med ? medicationCodes(med) : asArray(item.barcodeCodes).map(normalizeMedicationCode).filter(Boolean);
 }
 
+function orderLineBarcodeCodes(line) {
+    const med = line?.medId ? db.inventory.find(candidate => candidate.id === line.medId) : null;
+    return Array.from(new Set([
+        ...(med ? medicationCodes(med) : []),
+        normalizeMedicationCode(line?.barcodeCode),
+        ...asArray(line?.barcodeCodes).map(normalizeMedicationCode)
+    ].filter(Boolean)));
+}
+
 function sortByName(list, getName = item => item.name || '') {
     return list.slice().sort((a, b) => getName(a).localeCompare(getName(b), undefined, { sensitivity: 'base' }));
 }
@@ -20371,6 +20402,10 @@ function cssEscape(value) {
     return typeof CSS !== 'undefined' && CSS.escape
         ? CSS.escape(String(value))
         : String(value).replace(/["\\]/g, '\\$&');
+}
+
+function cssSafeId(value) {
+    return String(value || 'id').replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 
 function filterInventoryBuilder(inputId, itemSelector) {
@@ -21149,7 +21184,33 @@ window.createInventoryOrder = async function(editOrderId = '') {
     await sync();
 };
 
-window.markReceiveLineScanned = function() {
+function scannedCodeMatchesOrderLine(code, line) {
+    const scannedCodes = medicationCodesFromScannedPayload(code);
+    const expectedCodes = orderLineBarcodeCodes(line);
+    return scannedCodes.length > 0 && expectedCodes.some(expected => scannedCodes.includes(expected));
+}
+
+async function validateReceiveLineScan(line, code) {
+    const normalized = normalizeMedicationCode(code);
+    if (!line || !normalized) return true;
+    const matchedMed = findInventoryByBarcode(normalized);
+    if (matchedMed && line.medId && matchedMed.id !== line.medId) {
+        await appAlert(`That scan belongs to ${inventoryDisplayName(matchedMed)}, not ${line.name}. Select the correct order line or scan the correct product.`);
+        return false;
+    }
+    if (matchedMed && !line.medId && line.name && matchedMed.name && String(matchedMed.name).toLowerCase() !== String(line.name).toLowerCase()) {
+        const ok = await appConfirm(`That scan matched ${inventoryDisplayName(matchedMed)}, but this order line is ${line.name}. Continue and receive it as the scanned medication?`, 'Receive Scan Check');
+        return !!ok;
+    }
+    if (!matchedMed && line.medId && !scannedCodeMatchesOrderLine(normalized, line)) {
+        const med = db.inventory.find(item => item.id === line.medId);
+        const ok = await appConfirm(`This code is not currently linked to ${inventoryDisplayName(med)}. Continue receiving and add this as another code for that medication?`, 'New Product Code');
+        return !!ok;
+    }
+    return true;
+}
+
+window.markReceiveLineScanned = async function() {
     const body = document.getElementById('action-modal-body');
     const codeInput = body?.querySelector('#receive-scan-code');
     const lineSelect = body?.querySelector('#receive-scan-line');
@@ -21158,15 +21219,27 @@ window.markReceiveLineScanned = function() {
     let lineId = lineSelect?.value || '';
     if (!lineId) {
         const matchedMed = findInventoryByBarcode(code);
-        const matchedRow = matchedMed && body.querySelector(`.order-line-item[data-med-id="${cssEscape(matchedMed.id)}"]`);
+        const scannedCodes = medicationCodesFromScannedPayload(code);
+        const matchedRow = Array.from(body.querySelectorAll('.order-line-item')).find(row => {
+            if (matchedMed && row.dataset.medId === matchedMed.id) return true;
+            const rowCodes = String(row.dataset.lineCodes || '').split('|').map(normalizeMedicationCode).filter(Boolean);
+            return rowCodes.some(rowCode => scannedCodes.includes(rowCode));
+        });
         lineId = matchedRow?.dataset.lineId || '';
     }
     if (!lineId) {
-        void appAlert('Select the order line this new barcode belongs to.');
+        const matchedMed = findInventoryByBarcode(code);
+        await appAlert(matchedMed
+            ? `${inventoryDisplayName(matchedMed)} was recognized, but it is not on this open order. Select a line manually only if you are intentionally receiving it as a substitute.`
+            : 'That barcode is not recognized on this open order. Select the matching order line manually if this is a new package code.');
         return;
     }
     const row = body.querySelector(`.order-line-item[data-line-id="${cssEscape(lineId)}"]`);
     if (!row) return;
+    const orderId = body.querySelector('.receive-order-modal')?.dataset.orderId || '';
+    const order = db.inventoryOrders.find(item => item.id === orderId);
+    const line = order?.lines?.find(item => item.id === lineId);
+    if (!await validateReceiveLineScan(line, code)) return;
     row.querySelector('[name="receiveLine"]').checked = true;
     row.querySelector('[name="receiveBarcode"]').value = code;
     row.classList.add('receive-line-selected', 'receive-line-scanned');
@@ -21763,6 +21836,7 @@ window.receiveInventoryOrder = async function() {
         const receiveValue = remaining !== '' ? formatAmount(remaining) : (line.requestedQty || '1');
         const isSelectable = line.status !== 'received';
         const isSelected = selectResult.receiveMode === 'manual' && isSelectable;
+        const lineCodes = orderLineBarcodeCodes(line).join('|');
         const receivedText = orderLineReceivedQuantity(line) > 0
             ? ` | received so far: ${formatAmount(orderLineReceivedQuantity(line))} ${line.inventoryUnit || ''}`
             : '';
@@ -21770,7 +21844,7 @@ window.receiveInventoryOrder = async function() {
             ? ` | remaining: ${formatAmount(remaining)} ${line.inventoryUnit || ''}`
             : '';
         return `
-        <div class="order-line-item receive-order-line ${line.status === 'received' ? 'receive-line-received' : ''} ${isSelected ? 'receive-line-selected' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}" onclick="toggleReceiveOrderLineFromRow(event, this)">
+        <div class="order-line-item receive-order-line ${line.status === 'received' ? 'receive-line-received' : ''} ${isSelected ? 'receive-line-selected' : ''} ${isNewNonInventory ? 'order-new-noninventory' : ''}" data-line-id="${escapeHtml(line.id)}" data-med-id="${escapeHtml(line.medId || '')}" data-line-codes="${escapeHtml(lineCodes)}" onclick="toggleReceiveOrderLineFromRow(event, this)">
             <input name="receiveLine" type="checkbox" value="${escapeHtml(line.id)}" aria-label="Receive ${escapeHtml(line.name || 'order line')}" onchange="toggleReceiveOrderLineSelection(this)" ${isSelected ? 'checked' : ''} ${line.status === 'received' ? 'disabled' : ''}>
             <div class="receive-line-copy"><strong>${escapeHtml(line.name)} ${escapeHtml(line.strength || '')}${isNewNonInventory ? '<span class="order-new-badge">New non-inventory</span>' : ''}</strong><br><span class="form-help">Requested: ${escapeHtml(line.requestedQty || 'not specified')} ${escapeHtml(line.inventoryUnit || '')}${receivedText}${remainingText}${line.estimatedUnitPrice ? ` - est. ${escapeHtml(formatCurrency(line.estimatedUnitPrice))}` : ''}${line.status ? ` | status: ${escapeHtml(line.status)}` : ''}${line.status === 'received' && orderLineActualTotal(line) > 0 ? ` (${escapeHtml(formatCurrency(orderLineActualTotal(line)))})` : ''}</span>${line.purchaseLink ? `<br><span class="form-help">Link: ${escapeHtml(line.purchaseLink)}</span>` : ''}</div>
             <div class="receive-line-inputs">
@@ -21790,20 +21864,25 @@ window.receiveInventoryOrder = async function() {
         </div>`
         : '';
     const result = await showActionModal(`Receive Order: ${inventoryOrderName(order)}`, `
-        <div data-action-modal-size="wide" class="receive-order-modal">
+        <div data-action-modal-size="wide" class="receive-order-modal" data-order-id="${escapeHtml(order.id)}">
         ${scanPanel}
         <div class="order-line-list">${lineRows}</div>
         </div>
-    `, 'Receive Selected', body => ({
-        lines: Array.from(body.querySelectorAll('.order-line-item')).map(row => ({
+    `, 'Receive Selected', async body => {
+        const lines = Array.from(body.querySelectorAll('.order-line-item')).map(row => ({
             lineId: row.dataset.lineId,
             selected: row.querySelector('[name="receiveLine"]')?.checked === true,
             qty: row.querySelector('[name="receiveQty"]')?.value || '',
             actualUnitPrice: row.querySelector('[name="receiveActualUnitPrice"]')?.value || '',
             actualTotal: '',
             barcode: row.querySelector('[name="receiveBarcode"]')?.value || ''
-        }))
-    }));
+        }));
+        for (const received of lines.filter(item => item.selected && normalizeMedicationCode(item.barcode))) {
+            const line = order.lines.find(item => item.id === received.lineId);
+            if (!await validateReceiveLineScan(line, received.barcode)) return false;
+        }
+        return { lines };
+    });
     if (!result) return;
     let receivedCount = 0;
     for (const received of result.lines.filter(item => item.selected)) {
@@ -22787,6 +22866,401 @@ window.printAllInventoryLabels = async function() {
     previewLabelHtml(selectedMeds.map(inventoryLabelHtml).join(''));
 };
 
+const AUXILIARY_LABEL_PRESETS = [
+    { id: 'refrigerate', text: 'Refrigerate', icon: 'R', color: 'blue', hint: 'Keep this product refrigerated.' },
+    { id: 'shake', text: 'Shake well', icon: 'SW', color: 'orange', hint: 'Shake before each use.' },
+    { id: 'hazardous', text: 'Hazardous medication', icon: '!', color: 'red', hint: 'Use special handling precautions.' },
+    { id: 'external', text: 'For external use only', icon: 'EXT', color: 'purple', hint: 'Do not take by mouth.' },
+    { id: 'light', text: 'Protect from light', icon: 'LT', color: 'navy', hint: 'Store away from light.' },
+    { id: 'dry', text: 'Keep dry', icon: 'DRY', color: 'teal', hint: 'Protect from moisture.' },
+    { id: 'food', text: 'Take with food', icon: 'FD', color: 'green', hint: 'Take with a meal or snack.' },
+    { id: 'empty-stomach', text: 'Take on empty stomach', icon: 'ES', color: 'yellow', hint: 'Take apart from meals if directed.' },
+    { id: 'drowsy', text: 'May cause drowsiness', icon: 'ZZ', color: 'violet', hint: 'Use caution with driving or sedating medicines.' },
+    { id: 'discard', text: 'Discard after date', icon: 'EXP', color: 'red', hint: 'Do not use beyond expiration or discard date.' },
+    { id: 'child', text: 'Keep away from children', icon: 'KC', color: 'pink', hint: 'Store securely.' },
+    { id: 'sublingual', text: 'Dissolve under tongue', icon: 'SL', color: 'blue', hint: 'Do not swallow whole unless directed.' }
+];
+
+const AUXILIARY_ICON_LIBRARY = [
+    ...AUXILIARY_LABEL_PRESETS,
+    { id: 'no-crush', text: 'Do not crush', icon: 'NC', color: 'red' },
+    { id: 'measure', text: 'Measure dose', icon: 'ML', color: 'teal' },
+    { id: 'syringe', text: 'Syringe', icon: 'SYR', color: 'blue' },
+    { id: 'dropper', text: 'Drops', icon: 'DRP', color: 'teal' },
+    { id: 'inhaler', text: 'Inhaler', icon: 'INH', color: 'navy' },
+    { id: 'gloves', text: 'Wear gloves', icon: 'GLV', color: 'purple' },
+    { id: 'wash', text: 'Wash hands', icon: 'WASH', color: 'blue' },
+    { id: 'clock', text: 'Time sensitive', icon: 'CLK', color: 'orange' },
+    { id: 'calendar', text: 'Date sensitive', icon: 'CAL', color: 'green' },
+    { id: 'flame', text: 'Flammable', icon: 'FIRE', color: 'red' },
+    { id: 'eye', text: 'Eye use', icon: 'EYE', color: 'blue' },
+    { id: 'ear', text: 'Ear use', icon: 'EAR', color: 'orange' },
+    { id: 'nose', text: 'Nasal use', icon: 'NOSE', color: 'teal' },
+    { id: 'skin', text: 'Skin use', icon: 'SKIN', color: 'pink' },
+    { id: 'pregnancy', text: 'Pregnancy warning', icon: 'PREG', color: 'red' },
+    { id: 'alcohol', text: 'Avoid alcohol', icon: 'ETOH', color: 'red' },
+    { id: 'sun', text: 'Daytime', icon: 'SUN', color: 'yellow' },
+    { id: 'moon', text: 'Evening', icon: 'MOON', color: 'violet' }
+];
+
+function auxiliaryCustomLabels() {
+    db.settings = db.settings || {};
+    db.settings.auxiliaryLabels = Array.isArray(db.settings.auxiliaryLabels) ? db.settings.auxiliaryLabels : [];
+    return db.settings.auxiliaryLabels;
+}
+
+function auxiliaryLabelDefinitions() {
+    const custom = auxiliaryCustomLabels().map(label => ({
+        id: label.id || `custom_${label.text || Math.random()}`,
+        text: label.text || 'Custom auxiliary',
+        icon: label.icon || 'C',
+        iconPresetId: label.iconPresetId || '',
+        color: label.color || 'green',
+        hint: label.hint || 'Custom auxiliary label.'
+    }));
+    return [...AUXILIARY_LABEL_PRESETS, ...custom];
+}
+
+function auxiliaryPresetById(id = '') {
+    return AUXILIARY_ICON_LIBRARY.find(preset => preset.id === id) || null;
+}
+
+function auxiliaryIconLibraryHtml(selected = '') {
+    const letterOption = `<button type="button" class="aux-icon-option ${!selected ? 'selected' : ''}" onclick="selectAuxiliaryCustomIcon(this, '')">
+        <span class="aux-label-icon aux-green"><span class="aux-icon-text">ABC</span></span>
+        <small>Typed letters</small>
+    </button>`;
+    return letterOption + AUXILIARY_ICON_LIBRARY.map(icon => `<button type="button" class="aux-icon-option ${icon.id === selected ? 'selected' : ''}" onclick="selectAuxiliaryCustomIcon(this, '${escapeHtml(icon.id)}')">
+        ${auxiliaryIconHtml({ ...icon, iconPresetId: icon.id })}
+        <small>${escapeHtml(icon.text)}</small>
+    </button>`).join('');
+}
+
+function auxiliaryPresetSvg(id = '') {
+    const svgAttrs = 'viewBox="0 0 32 32" aria-hidden="true" focusable="false"';
+    const icons = {
+        refrigerate: `<svg ${svgAttrs}><circle cx="16" cy="16" r="3" fill="currentColor"/><path d="M16 4v24M6 10l20 12M6 22l20-12M11 6l5 5 5-5M11 26l5-5 5 5M4 16h24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`,
+        shake: `<svg ${svgAttrs}><path d="M12 6h8v4l3 3v13H9V13l3-3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 18h10M6 9l3-2M23 7l3 2M5 23l3 2M24 25l3-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`,
+        hazardous: `<svg ${svgAttrs}><path d="M16 4 29 27H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 11v8M16 23v2" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"/></svg>`,
+        external: `<svg ${svgAttrs}><path d="M10 24V13c0-2 3-2 3 0v5-9c0-2 3-2 3 0v8-7c0-2 3-2 3 0v8-5c0-2 3-2 3 0v8c0 5-3 8-8 8h-1c-3 0-5-2-5-5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 5l22 22" stroke="currentColor" stroke-width="2"/></svg>`,
+        light: `<svg ${svgAttrs}><circle cx="16" cy="16" r="5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 3v5M16 24v5M3 16h5M24 16h5M7 7l4 4M21 21l4 4M25 7 7 25" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`,
+        dry: `<svg ${svgAttrs}><path d="M16 4c5 7 8 11 8 16a8 8 0 0 1-16 0c0-5 3-9 8-16z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 26 27 5" stroke="currentColor" stroke-width="2"/></svg>`,
+        food: `<svg ${svgAttrs}><path d="M9 4v10M5 4v8c0 2 2 3 4 3s4-1 4-3V4M9 15v13M21 4v24M21 4c5 3 6 10 0 13" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        'empty-stomach': `<svg ${svgAttrs}><path d="M18 5c-4 2-5 5-3 8 2 4-2 5-5 8-3 4 0 8 5 8h5c5 0 8-4 6-8-2-3-6-3-5-8 1-4 2-6-3-8z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 26 26 7" stroke="currentColor" stroke-width="2"/></svg>`,
+        drowsy: `<svg ${svgAttrs}><path d="M21 4a10 10 0 1 0 7 17 12 12 0 1 1-7-17z" fill="currentColor"/><text x="5" y="28" font-size="11" font-family="Arial" font-weight="bold" fill="currentColor">Zz</text></svg>`,
+        discard: `<svg ${svgAttrs}><rect x="6" y="7" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 12h20M11 4v6M21 4v6M11 18h10M11 23h7" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        child: `<svg ${svgAttrs}><rect x="8" y="14" width="16" height="12" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 14v-3a5 5 0 0 1 10 0v3M16 19v3" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        sublingual: `<svg ${svgAttrs}><path d="M5 13c4-5 18-5 22 0-2 5-6 8-11 8S7 18 5 13z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 19c3 5 9 5 12 0M9 13h14" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        'no-crush': `<svg ${svgAttrs}><rect x="7" y="8" width="18" height="14" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 26 26 6M11 13h10M11 17h10" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        measure: `<svg ${svgAttrs}><path d="M9 6h14v20H9zM13 10h6M13 15h6M13 20h6" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        syringe: `<svg ${svgAttrs}><path d="M7 25 25 7M20 4l8 8M17 7l8 8M8 20l4 4M5 27l4-4" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        dropper: `<svg ${svgAttrs}><path d="M18 4l10 10-4 4-10-10zM15 10 5 20c-2 2-1 6 2 7 2 1 4 0 5-1l10-10" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        inhaler: `<svg ${svgAttrs}><rect x="8" y="12" width="12" height="15" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 5h11v8H11zM20 16h6v7" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        gloves: `<svg ${svgAttrs}><path d="M10 26V10c0-2 3-2 3 0v8-11c0-2 3-2 3 0v11-9c0-2 3-2 3 0v9-6c0-2 3-2 3 0v9c0 4-3 7-7 7h-1c-2 0-4-1-4-2z" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        wash: `<svg ${svgAttrs}><path d="M7 21c4-4 14-4 18 0M6 25h20M10 12h12M13 7h6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="16" r="1.5" fill="currentColor"/><circle cx="15" cy="17" r="1.5" fill="currentColor"/></svg>`,
+        clock: `<svg ${svgAttrs}><circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 9v8h7" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        calendar: `<svg ${svgAttrs}><rect x="6" y="8" width="20" height="18" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 13h20M11 5v6M21 5v6M11 18h4M17 18h4M11 22h4" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        flame: `<svg ${svgAttrs}><path d="M17 4c4 5-2 6 4 11 3 3 3 8-1 11-4 3-12 1-13-5-1-4 2-7 5-10 1 4 4 4 5 1 1-2-1-4 0-8z" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        eye: `<svg ${svgAttrs}><path d="M4 16c4-6 20-6 24 0-4 6-20 6-24 0z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="4" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        ear: `<svg ${svgAttrs}><path d="M12 23c0-3 6-4 6-10 0-4-3-6-6-6s-6 3-6 7M12 13c0-2 3-3 4-1 2 4-5 6-2 12 1 2 3 3 5 2" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        nose: `<svg ${svgAttrs}><path d="M17 4c0 6 6 9 5 15-1 5-8 7-12 3M14 18h6" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        skin: `<svg ${svgAttrs}><path d="M6 22c5-9 16-9 20 0M8 25h16M12 18l-2-4M20 18l2-4M16 16v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        pregnancy: `<svg ${svgAttrs}><circle cx="14" cy="7" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11c-4 5-2 14 4 16 5-2 6-9 2-13l3 3" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        alcohol: `<svg ${svgAttrs}><path d="M11 5h10l-3 8v12h5v3H9v-3h5V13zM6 26 26 6" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        sun: `<svg ${svgAttrs}><circle cx="16" cy="16" r="5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 3v5M16 24v5M3 16h5M24 16h5M6 6l4 4M22 22l4 4M26 6l-4 4M10 22l-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+        moon: `<svg ${svgAttrs}><path d="M21 4a10 10 0 1 0 7 17 12 12 0 1 1-7-17z" fill="currentColor"/></svg>`
+    };
+    return icons[id] || '';
+}
+
+function auxiliaryIconHtml(label) {
+    const presetId = label.iconPresetId || (auxiliaryPresetById(label.id) ? label.id : '');
+    const preset = auxiliaryPresetById(presetId);
+    const svg = auxiliaryPresetSvg(presetId);
+    const fallback = escapeHtml(String(label.icon || preset?.icon || '?').slice(0, 3).toUpperCase());
+    const color = label.color || preset?.color || 'green';
+    return `<span class="aux-label-icon aux-${escapeHtml(color)}">${svg || `<span class="aux-icon-text">${fallback}</span>`}</span>`;
+}
+
+function auxiliaryLabelChoiceHtml(label, checked = false) {
+    const inputId = `aux-choice-${cssSafeId(label.id)}`;
+    return `<div class="aux-label-choice ${checked ? 'selected' : ''}" onclick="toggleAuxiliaryChoice(event, '${escapeHtml(inputId)}')">
+        <input id="${inputId}" name="auxiliaryIds" type="checkbox" value="${escapeHtml(label.id)}" ${checked ? 'checked' : ''} onchange="updateAuxiliaryLabelPreview()">
+        <span class="aux-choice-icon-cell">${auxiliaryIconHtml(label)}</span>
+        <span class="aux-choice-copy"><strong>${escapeHtml(label.text)}</strong><small>${escapeHtml(label.hint || '')}</small></span>
+    </div>`;
+}
+
+function selectedAuxiliaryLabels() {
+    const body = document.getElementById('action-modal-body');
+    const selected = new Set(Array.from(body?.querySelectorAll('input[name="auxiliaryIds"]:checked') || []).map(input => input.value));
+    return auxiliaryLabelDefinitions().filter(label => selected.has(label.id));
+}
+
+function auxiliaryBuilderValues() {
+    const value = id => document.getElementById(id)?.value || '';
+    const size = customLabelSizeById(value('aux-label-size') || 'thermal-225-125');
+    const mode = value('aux-print-mode') || 'separate';
+    return {
+        mode,
+        title: value('aux-label-title').trim(),
+        size,
+        copies: Math.max(1, Math.min(99, parseInt(value('aux-label-copies'), 10) || 1)),
+        labels: selectedAuxiliaryLabels()
+    };
+}
+
+function auxiliaryLabelsPerPage(values) {
+    const size = values.size || customLabelSizeById('thermal-225-125');
+    const area = Math.max(1, Number(size.width || 2.25) * Number(size.height || 1.25));
+    const titlePenalty = values.title ? 1 : 0;
+    if (values.mode === 'icons') return Math.max(10, Math.floor(area * 8));
+    if (values.mode === 'compact') return Math.max(4, Math.floor(area * 2.3) - titlePenalty);
+    return Math.max(2, Math.floor(area * 1.45) - titlePenalty);
+}
+
+function chunkAuxiliaryLabels(labels, perPage) {
+    const safePerPage = Math.max(1, perPage || labels.length || 1);
+    const pages = [];
+    for (let index = 0; index < labels.length; index += safePerPage) {
+        pages.push(labels.slice(index, index + safePerPage));
+    }
+    return pages.length ? pages : [[]];
+}
+
+function auxiliaryLabelHtml(values, includePrintStyle = false) {
+    const labels = values.labels || [];
+    const iconOnly = values.mode === 'icons';
+    const compact = values.mode === 'compact';
+    const sizeStyle = `--custom-label-width:${values.size.width}in; --custom-label-height:${values.size.height}in;`;
+    const titleHtml = !iconOnly && values.title ? `<div class="label-title aux-label-title">${escapeHtml(values.title)}</div>` : '';
+    const pages = chunkAuxiliaryLabels(labels, auxiliaryLabelsPerPage(values)).map(pageLabels => {
+        const lines = pageLabels.map(label => {
+            const word = iconOnly ? '' : `<span class="aux-label-word">${escapeHtml(label.text)}</span>`;
+            return `<div class="aux-label-line">${auxiliaryIconHtml(label)}${word}</div>`;
+        }).join('');
+        const textParts = pageLabels.map(label => label.text);
+        if (!iconOnly && values.title) textParts.push(values.title);
+        const className = `${getLabelClass(textParts, Math.max(3, pageLabels.length + 1))} auxiliary-label-page aux-mode-${escapeHtml(values.mode || 'separate')}`;
+        return `
+        <div class="${className}" style="${sizeStyle}">
+            ${titleHtml}
+            <div class="aux-label-lines ${compact ? 'compact' : ''}">${lines || '<div class="label-small">Select one or more auxiliary labels.</div>'}</div>
+        </div>`;
+    }).join('');
+    return `${includePrintStyle ? customLabelPrintSizeStyle(values.size) : ''}${pages}`;
+}
+
+function auxiliaryCustomRowsHtml() {
+    const rows = auxiliaryCustomLabels();
+    if (!rows.length) return '<div class="custom-label-hint">No custom auxiliary labels saved.</div>';
+    return rows.map(label => {
+        const iconPresetId = label.iconPresetId || '';
+        return `<div class="aux-custom-row" data-custom-id="${escapeHtml(label.id)}">
+        <input type="hidden" class="aux-custom-icon-preset" value="${escapeHtml(iconPresetId)}">
+        <div class="aux-custom-form-grid">
+            <div class="aux-custom-current-icon">
+                <span class="aux-custom-icon-preview">${auxiliaryIconHtml({ ...label, id: iconPresetId || label.id, iconPresetId })}</span>
+                <button type="button" onclick="toggleAuxiliaryIconLibrary(this)">Choose Icon</button>
+            </div>
+            <label>Letters<input class="aux-custom-icon" value="${escapeHtml(label.icon || '')}" placeholder="e.g. AUX"></label>
+            <label>Label text<input class="aux-custom-text" value="${escapeHtml(label.text || '')}" placeholder="Custom label text"></label>
+            <label>Color<select class="aux-custom-color" title="Icon color">
+                ${['green', 'blue', 'orange', 'red', 'purple', 'teal', 'yellow', 'pink', 'navy'].map(color => `<option value="${color}" ${color === (label.color || 'green') ? 'selected' : ''}>${color}</option>`).join('')}
+            </select></label>
+            <label>Helper note<input class="aux-custom-hint" value="${escapeHtml(label.hint || '')}" placeholder="Optional helper note"></label>
+            <button type="button" onclick="removeAuxiliaryCustomRow(this)">Remove</button>
+        </div>
+        <div class="aux-custom-icon-library" hidden>
+            <div class="form-help">Choose a pharmacy-style icon, or pick typed letters to use the abbreviation box.</div>
+            <div class="aux-icon-library-grid">${auxiliaryIconLibraryHtml(iconPresetId)}</div>
+        </div>
+    </div>`;
+    }).join('');
+}
+
+function refreshAuxiliaryChoiceList() {
+    const list = document.getElementById('aux-label-choice-list');
+    if (!list) return;
+    const selectedIds = new Set(Array.from(list.querySelectorAll('input[name="auxiliaryIds"]:checked')).map(input => input.value));
+    list.innerHTML = auxiliaryLabelDefinitions().map(label => auxiliaryLabelChoiceHtml(label, selectedIds.has(label.id))).join('');
+}
+
+window.updateAuxiliaryLabelPreview = function() {
+    const values = auxiliaryBuilderValues();
+    document.querySelectorAll('.aux-label-choice').forEach(choice => {
+        const input = choice.querySelector('input[type="checkbox"]');
+        choice.classList.toggle('selected', !!input?.checked);
+    });
+    const preview = document.getElementById('aux-label-preview');
+    if (preview) {
+        preview.innerHTML = auxiliaryLabelHtml(values);
+        fitLabelPages(preview);
+    }
+};
+
+window.toggleAuxiliaryChoice = function(event, inputId) {
+    if (event.target.closest('input, button, select, textarea')) return;
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.checked = !input.checked;
+    updateAuxiliaryLabelPreview();
+};
+
+window.toggleAuxiliaryIconLibrary = function(button) {
+    const panel = button?.closest('.aux-custom-row')?.querySelector('.aux-custom-icon-library');
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+};
+
+window.selectAuxiliaryCustomIcon = function(button, iconId) {
+    const row = button?.closest('.aux-custom-row');
+    const preset = auxiliaryPresetById(iconId || '');
+    if (!row) return;
+    row.querySelector('.aux-custom-icon-preset').value = iconId || '';
+    row.querySelectorAll('.aux-icon-option').forEach(option => option.classList.toggle('selected', option === button));
+    const iconInput = row.querySelector('.aux-custom-icon');
+    const colorSelect = row.querySelector('.aux-custom-color');
+    if (preset && iconInput && !iconInput.value.trim()) iconInput.value = preset.icon || '';
+    if (preset && colorSelect) colorSelect.value = preset.color || 'green';
+    const preview = row.querySelector('.aux-custom-icon-preview');
+    if (preview) {
+        const label = {
+            icon: iconInput?.value || preset?.icon || 'C',
+            iconPresetId: iconId || '',
+            color: colorSelect?.value || preset?.color || 'green',
+            id: iconId || row.dataset.customId || ''
+        };
+        preview.innerHTML = auxiliaryIconHtml(label);
+    }
+};
+
+window.syncAuxiliaryCustomIconRow = function(select) {
+    const row = select?.closest('.aux-custom-row');
+    const preset = auxiliaryPresetById(select?.value || '');
+    if (!row || !preset) return;
+    const iconInput = row.querySelector('.aux-custom-icon');
+    const colorSelect = row.querySelector('.aux-custom-color');
+    if (iconInput && !iconInput.value.trim()) iconInput.value = preset.icon || '';
+    if (colorSelect) colorSelect.value = preset.color || 'green';
+};
+
+window.addAuxiliaryCustomRow = function() {
+    auxiliaryCustomLabels().push({
+        id: `aux_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        text: '',
+        icon: 'C',
+        iconPresetId: '',
+        color: 'green',
+        hint: ''
+    });
+    const rows = document.getElementById('aux-custom-rows');
+    if (rows) rows.innerHTML = auxiliaryCustomRowsHtml();
+};
+
+window.removeAuxiliaryCustomRow = function(button) {
+    const id = button?.closest('.aux-custom-row')?.dataset.customId;
+    db.settings.auxiliaryLabels = auxiliaryCustomLabels().filter(label => label.id !== id);
+    const rows = document.getElementById('aux-custom-rows');
+    if (rows) rows.innerHTML = auxiliaryCustomRowsHtml();
+    refreshAuxiliaryChoiceList();
+    updateAuxiliaryLabelPreview();
+};
+
+window.saveAuxiliaryCustomLabels = async function() {
+    const rows = Array.from(document.querySelectorAll('#aux-custom-rows .aux-custom-row'));
+    db.settings.auxiliaryLabels = rows.map(row => ({
+        id: row.dataset.customId || `aux_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        iconPresetId: row.querySelector('.aux-custom-icon-preset')?.value || '',
+        icon: row.querySelector('.aux-custom-icon')?.value.trim() || 'C',
+        text: row.querySelector('.aux-custom-text')?.value.trim() || 'Custom auxiliary',
+        color: row.querySelector('.aux-custom-color')?.value || 'green',
+        hint: row.querySelector('.aux-custom-hint')?.value.trim() || ''
+    })).filter(label => label.text);
+    await window.api.save(db);
+    refreshAuxiliaryChoiceList();
+    const rowsContainer = document.getElementById('aux-custom-rows');
+    if (rowsContainer) rowsContainer.innerHTML = auxiliaryCustomRowsHtml();
+    updateAuxiliaryLabelPreview();
+    const status = document.getElementById('aux-custom-save-status');
+    if (status) {
+        status.textContent = 'Saved';
+        window.setTimeout(() => {
+            if (status.textContent === 'Saved') status.textContent = '';
+        }, 1800);
+    }
+};
+
+window.printAuxiliaryLabels = async function() {
+    const values = auxiliaryBuilderValues();
+    if (!values.labels.length) {
+        await appAlert('Select at least one auxiliary label to print.');
+        return;
+    }
+    const html = customLabelPrintSizeStyle(values.size) + Array.from({ length: values.copies }, () => auxiliaryLabelHtml(values)).join('');
+    previewLabelHtml(html);
+};
+
+window.openAuxiliaryLabelBuilder = async function(source = 'inventory') {
+    const sourceTitle = {
+        inventory: 'Inventory Auxiliary Labels',
+        prepack: 'Prepack Auxiliary Labels',
+        recipes: 'Recipe / Compounding Auxiliary Labels'
+    }[source] || 'Auxiliary Labels';
+    const defaultChecked = source === 'recipes' ? new Set(['shake', 'refrigerate']) : new Set(['refrigerate', 'shake']);
+    const sizeOptions = CUSTOM_LABEL_SIZE_PRESETS.map(size =>
+        `<option value="${escapeHtml(size.id)}" ${size.id === 'thermal-225-125' ? 'selected' : ''}>${escapeHtml(size.name)}</option>`
+    ).join('');
+    const choices = auxiliaryLabelDefinitions().map(label => auxiliaryLabelChoiceHtml(label, defaultChecked.has(label.id))).join('');
+    const modalPromise = showActionModal(sourceTitle, `
+        <div data-action-modal-size="wide" class="aux-label-builder">
+            <div class="aux-label-left">
+                <fieldset>
+                    <legend>Auxiliary label presets</legend>
+                    <div class="form-help">Select warnings or handling instructions to print. If the selected warnings do not fit, PharmAtlas automatically continues them on another label.</div>
+                    <div id="aux-label-choice-list" class="aux-label-choice-list">${choices}</div>
+                </fieldset>
+                <fieldset>
+                    <legend>Custom auxiliary labels</legend>
+                    <div id="aux-custom-rows" class="aux-custom-rows">${auxiliaryCustomRowsHtml()}</div>
+                    <div class="field-row">
+                        <button type="button" onclick="addAuxiliaryCustomRow()">Add Custom Label</button>
+                        <button type="button" onclick="saveAuxiliaryCustomLabels()">Save Custom Labels</button>
+                        <span id="aux-custom-save-status" class="inline-save-status"></span>
+                    </div>
+                </fieldset>
+                <fieldset>
+                    <legend>Print options</legend>
+                    <div class="aux-print-options">
+                        <label>Title <span class="form-help-inline">(optional)</span><input id="aux-label-title" type="text" placeholder="Optional title" value="" oninput="updateAuxiliaryLabelPreview()"></label>
+                        <label>Style<select id="aux-print-mode" onchange="updateAuxiliaryLabelPreview()">
+                            <option value="separate">Words + icons on one separate label</option>
+                            <option value="compact">Compact words + icons</option>
+                            <option value="icons">Icons only strip for original labels</option>
+                        </select></label>
+                        <label>Label size<select id="aux-label-size" onchange="updateAuxiliaryLabelPreview()">${sizeOptions}</select></label>
+                        <label>Copies<input id="aux-label-copies" type="number" min="1" max="99" value="1" oninput="updateAuxiliaryLabelPreview()"></label>
+                    </div>
+                </fieldset>
+                <div class="field-row custom-label-actions">
+                    <button type="button" class="custom-label-print-button" onclick="printAuxiliaryLabels()"><span class="win98-icon icon-label"></span>Preview / Print Auxiliary Labels</button>
+                </div>
+            </div>
+            <div class="aux-label-preview-pane">
+                <fieldset>
+                    <legend>Live auxiliary label preview</legend>
+                    <div class="custom-label-preview-stage">
+                        <div id="aux-label-preview"></div>
+                    </div>
+                    <div class="custom-label-hint">All selected auxiliary items print together. In icon-only mode, the words are removed so the icons can be applied to existing labels.</div>
+                </fieldset>
+            </div>
+        </div>
+    `, 'Close');
+    setTimeout(updateAuxiliaryLabelPreview, 0);
+    await modalPromise;
+};
+
 const CUSTOM_LABEL_SIZE_PRESETS = [
     { id: 'thermal-225-125', name: 'Thermal 2.25 x 1.25 in', width: 2.25, height: 1.25 },
     { id: 'thermal-225-100', name: 'Thermal 2.25 x 1.0 in', width: 2.25, height: 1 },
@@ -22971,7 +23445,8 @@ function customLabelPrintSizeStyle(size) {
         @media print {
             @page { size: ${width}in ${height}in; margin: 0 !important; }
             html, body, #print-area { width: ${width}in !important; min-height: ${height}in !important; }
-            #print-area .label-page.custom-label-page { width: ${width}in !important; height: ${height}in !important; }
+            #print-area .label-page.custom-label-page,
+            #print-area .label-page.auxiliary-label-page { width: ${width}in !important; height: ${height}in !important; }
         }
     </style>`;
 }

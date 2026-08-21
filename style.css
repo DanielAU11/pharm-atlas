@@ -3225,7 +3225,7 @@ button {
 }
 
 .action-modal-window-wide:has(.return-prepack-modal) {
-    width: min(1480px, calc(100vw - 24px));
+    width: min(1760px, calc(100vw - 18px));
 }
 
 .action-modal-window-wide:has(.custom-event-editor) {
@@ -3233,7 +3233,7 @@ button {
 }
 
 .return-prepack-modal {
-    min-width: min(1380px, calc(100vw - 56px));
+    min-width: min(1580px, calc(100vw - 44px));
     max-width: 100%;
     box-sizing: border-box;
 }
@@ -6712,7 +6712,7 @@ button {
 
 .return-prepack-modal-grid {
     display: grid;
-    grid-template-columns: minmax(760px, 1.6fr) minmax(360px, 0.8fr);
+    grid-template-columns: minmax(880px, 1fr) minmax(430px, 0.42fr);
     gap: 10px;
     align-items: start;
 }
@@ -6723,7 +6723,7 @@ button {
 
 .return-prepack-filter-panel {
     display: grid;
-    grid-template-columns: 170px 125px 145px 145px 170px 150px 150px 120px minmax(120px, auto);
+    grid-template-columns: minmax(170px, 1fr) 130px minmax(155px, 0.9fr) minmax(130px, 0.75fr) minmax(130px, 0.75fr) minmax(185px, 1fr);
     align-items: end;
     gap: 6px;
     padding: 7px;
@@ -6735,6 +6735,12 @@ button {
 
 .return-label-option {
     align-self: center;
+}
+
+.return-reason-field,
+.waste-reason-field,
+.return-handling-field {
+    grid-column: span 2;
 }
 
 .return-prepack-filter-panel label {
@@ -6756,6 +6762,7 @@ button {
 
 #return-prepack-filter-count {
     align-self: center;
+    justify-self: start;
     white-space: nowrap;
     padding: 4px 6px;
     background: #ffffd8;
@@ -6915,7 +6922,34 @@ button {
     overflow: auto;
     padding: 10px;
     border: 2px inset #ffffff;
-    background: #808080;
+    background: #c0c0c0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.return-prepack-label-preview .label-page,
+.return-prepack-label-preview .label-page-small,
+.return-prepack-label-preview .label-page-tiny,
+.return-prepack-label-preview .label-page-micro {
+    flex: 0 0 auto;
+    width: 2.25in;
+    height: 1.25in;
+    padding: 0.05in;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: #ffffff;
+    color: #000000;
+    border: 1px solid #000000;
+    box-shadow: 1px 1px 0 #808080;
+}
+
+.return-prepack-label-preview .label-page *,
+.return-prepack-label-preview .label-page-small *,
+.return-prepack-label-preview .label-page-tiny *,
+.return-prepack-label-preview .label-page-micro * {
+    color: inherit;
 }
 
 #return-print-label-button.return-print-ready {
@@ -6926,6 +6960,24 @@ button {
 #return-print-label-button:disabled {
     color: #666666;
 }
+
+.return-prepack-label-preview .label-compact .label-title { font-size: 10pt; }
+.return-prepack-label-preview .label-compact .label-small,
+.return-prepack-label-preview .label-compact .label-med-row { font-size: 8pt; line-height: 1; }
+.return-prepack-label-preview .label-dense .label-date { font-size: 7.5pt; }
+.return-prepack-label-preview .label-dense .label-title { font-size: 9pt; }
+.return-prepack-label-preview .label-dense .label-small,
+.return-prepack-label-preview .label-dense .label-med-row { font-size: 7.25pt; line-height: 0.95; }
+.return-prepack-label-preview .label-ultra-dense { padding: 0.035in; }
+.return-prepack-label-preview .label-ultra-dense .label-date { font-size: 6.8pt; }
+.return-prepack-label-preview .label-ultra-dense .label-title { font-size: 7.8pt; line-height: 0.92; }
+.return-prepack-label-preview .label-ultra-dense .label-small,
+.return-prepack-label-preview .label-ultra-dense .label-med-row { font-size: 6.25pt; line-height: 0.88; }
+.return-prepack-label-preview .label-micro { padding: 0.025in; }
+.return-prepack-label-preview .label-micro .label-date { font-size: 6pt; }
+.return-prepack-label-preview .label-micro .label-title { font-size: 6.8pt; line-height: 0.86; }
+.return-prepack-label-preview .label-micro .label-small,
+.return-prepack-label-preview .label-micro .label-med-row { font-size: 5.35pt; line-height: 0.82; }
 
 .return-label-preview-empty {
     padding: 10px;
@@ -8064,6 +8116,388 @@ button {
 .custom-label-page.has-multi-linked-meds .custom-label-aztec {
     top: auto;
     bottom: 0.04in;
+    width: 0.27in;
+    height: 0.27in;
+}
+
+.aux-label-builder {
+    display: grid;
+    grid-template-columns: minmax(620px, 1fr) minmax(360px, 0.42fr);
+    gap: 10px;
+    min-width: min(1180px, calc(100vw - 42px));
+}
+
+.aux-label-left {
+    min-width: 0;
+}
+
+.aux-label-choice-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 6px;
+    max-height: 260px;
+    overflow: auto;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.aux-label-choice {
+    display: grid;
+    grid-template-columns: 18px 52px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: 70px;
+    padding: 8px;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+    background: #f8f8f8;
+    cursor: pointer;
+}
+
+.aux-label-choice input[type="checkbox"] {
+    grid-column: 1;
+    position: static !important;
+    display: inline-block !important;
+    appearance: auto !important;
+    opacity: 1 !important;
+    width: 13px !important;
+    min-width: 13px !important;
+    height: 13px !important;
+    margin: 0 !important;
+    justify-self: center;
+    align-self: center;
+}
+
+.aux-label-choice.selected {
+    background: #e2ffe2;
+    outline: 1px solid #008000;
+}
+
+.aux-choice-icon-cell {
+    grid-column: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+}
+
+.aux-choice-copy {
+    grid-column: 3;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+}
+
+.aux-label-choice > .aux-choice-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.aux-label-choice strong {
+    display: block;
+    color: #000080;
+    font-size: 12px;
+    line-height: 1.1;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+
+.aux-label-choice small {
+    display: block;
+    color: #333333;
+    font-size: 10px;
+    line-height: 1.18;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+
+.aux-label-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #404040;
+    border-bottom: 1px solid #404040;
+    background: #dff8df;
+    color: #004000;
+    font-weight: bold;
+    font-size: 10px;
+    line-height: 1;
+    position: static;
+    flex: 0 0 auto;
+}
+
+.aux-label-icon svg {
+    width: 28px;
+    height: 28px;
+    display: block;
+}
+
+.aux-icon-text {
+    display: block;
+    max-width: 34px;
+    overflow: hidden;
+    text-align: center;
+}
+
+.aux-blue { background: #dcefff; color: #000080; }
+.aux-orange { background: #ffe4bf; color: #8a3b00; }
+.aux-red { background: #ffd5d5; color: #a00000; }
+.aux-purple { background: #eadcff; color: #400080; }
+.aux-teal { background: #d9ffff; color: #006060; }
+.aux-yellow { background: #ffffbf; color: #806000; }
+.aux-pink { background: #ffe0f0; color: #800040; }
+.aux-navy { background: #e5e5ff; color: #000040; }
+.aux-violet { background: #eadcff; color: #4b0080; }
+
+.aux-custom-rows {
+    display: grid;
+    gap: 8px;
+    max-height: 310px;
+    overflow: auto;
+}
+
+.aux-custom-row {
+    display: block;
+    padding: 8px;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+    background: #f4f8ff;
+}
+
+.aux-custom-form-grid {
+    display: grid;
+    grid-template-columns: 130px 92px minmax(170px, 1fr) 95px minmax(180px, 1.2fr) 82px;
+    gap: 7px;
+    align-items: end;
+}
+
+.aux-custom-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.aux-custom-row label input,
+.aux-custom-row label select {
+    font-weight: normal;
+}
+
+.aux-custom-current-icon {
+    display: grid;
+    grid-template-columns: 42px minmax(76px, 1fr);
+    gap: 5px;
+    align-items: center;
+}
+
+.aux-custom-icon-preview {
+    display: flex;
+    justify-content: center;
+}
+
+.aux-custom-current-icon button {
+    min-width: 0;
+}
+
+.aux-custom-icon-library {
+    margin-top: 8px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.aux-icon-library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+    gap: 5px;
+    max-height: 190px;
+    overflow: auto;
+}
+
+.aux-icon-option {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: center;
+    gap: 5px;
+    min-height: 44px;
+    padding: 4px;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+    background: #efefef;
+    color: #000080;
+    text-align: left;
+    cursor: pointer;
+}
+
+.aux-icon-option .aux-label-icon {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+}
+
+.aux-icon-option .aux-label-icon svg {
+    width: 22px;
+    height: 22px;
+}
+
+.aux-icon-option small {
+    display: block;
+    min-width: 0;
+    font-size: 10px;
+    line-height: 1.1;
+    white-space: normal;
+}
+
+.aux-icon-option.selected {
+    background: #e2ffe2;
+    outline: 1px solid #008000;
+    font-weight: bold;
+}
+
+.inline-save-status {
+    align-self: center;
+    color: #008000;
+    font-weight: bold;
+    padding-left: 4px;
+}
+
+.aux-print-options {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(210px, 1fr) minmax(180px, 1fr) 90px;
+    gap: 6px;
+}
+
+.aux-print-options label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.aux-label-preview-pane {
+    position: sticky;
+    top: 8px;
+}
+
+#aux-label-preview .label-page.auxiliary-label-page,
+#label-preview-content .label-page.auxiliary-label-page {
+    width: var(--custom-label-width, 2.25in);
+    height: var(--custom-label-height, 1.25in);
+}
+
+#aux-label-preview .label-page,
+#aux-label-preview .label-page * {
+    font-family: "Pixelated MS Sans Serif", "MS Sans Serif", Tahoma, sans-serif !important;
+    letter-spacing: 0 !important;
+}
+
+#aux-label-preview .label-page.auxiliary-label-page {
+    background: #ffffff;
+    color: #000000;
+    padding: 0.05in;
+    margin: 0 auto 10px;
+    overflow: hidden;
+    border: 1px solid #000000;
+    box-sizing: border-box;
+}
+
+.auxiliary-label-page {
+    position: relative;
+}
+
+.aux-label-title {
+    border-bottom: 1px solid #000000;
+    margin-bottom: 3px;
+}
+
+.aux-label-lines {
+    display: grid;
+    gap: 2px;
+}
+
+.aux-label-lines.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 4px;
+    align-items: start;
+}
+
+.aux-mode-icons .aux-label-lines {
+    grid-template-columns: repeat(auto-fit, minmax(32px, max-content));
+    align-items: center;
+    gap: 3px;
+}
+
+.aux-label-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-weight: bold;
+    line-height: 1.05;
+}
+
+.aux-mode-compact .aux-label-line {
+    gap: 2px;
+    font-size: 0.82em;
+}
+
+.aux-label-line .aux-label-icon {
+    width: 0.28in;
+    min-width: 0.28in;
+    height: 0.28in;
+}
+
+.aux-mode-compact .aux-label-line .aux-label-icon {
+    width: 0.2in;
+    min-width: 0.2in;
+    height: 0.2in;
+}
+
+.aux-label-line .aux-label-icon svg {
+    width: 0.22in;
+    height: 0.22in;
+}
+
+.aux-mode-compact .aux-label-line .aux-label-icon svg {
+    width: 0.16in;
+    height: 0.16in;
+}
+
+.aux-label-word {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+
+.aux-mode-icons .aux-label-icon {
+    width: 0.34in;
+    min-width: 0.34in;
+    height: 0.34in;
+    font-size: 11px;
+}
+
+.aux-mode-icons .aux-label-icon svg {
     width: 0.27in;
     height: 0.27in;
 }
