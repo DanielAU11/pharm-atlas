@@ -653,19 +653,36 @@
 
                     <fieldset>
                         <legend>Inventory</legend>
-                        <div class="field-row" style="margin-bottom:6px;">
-                            <label for="inventory-search">Search:</label>
-                            <input id="inventory-search" type="search" placeholder="Find medication..." style="width:220px;" oninput="renderAll()">
-                            <button type="button" onclick="clearInventorySearch()"><span class="win98-icon icon-clear"></span>Clear</button>
-                            <button type="button" onclick="printAllInventoryLabels()"><span class="win98-icon icon-label"></span>Print Inventory Labels</button>
-                            <button type="button" onclick="createEditFormulary()"><span class="win98-icon icon-formulary"></span>Create/edit formulary</button>
-                            <button type="button" onclick="viewFormulary()"><span class="win98-icon icon-view"></span>View Formulary</button>
-                            <button type="button" onclick="createInventoryOrder()"><span class="win98-icon icon-order"></span>Create Order</button>
-                            <button type="button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive Order</button>
-                            <button type="button" onclick="viewInventoryOrderLog()"><span class="win98-icon icon-view"></span>Order Log</button>
-                            <button type="button" onclick="printInventoryOrderPdf()"><span class="win98-icon icon-order"></span>Order PDF</button>
-                            <button type="button" onclick="returnPrepackedDispense()"><span class="win98-icon icon-box"></span>Return Prepack</button>
-                            <button type="button" onclick="openMedKits()"><span class="win98-icon icon-box"></span>Med Kits</button>
+                        <div class="inventory-command-strip">
+                            <div class="inventory-search-strip">
+                                <label for="inventory-search">Search:</label>
+                                <input id="inventory-search" type="search" placeholder="Find medication..." oninput="renderAll()">
+                                <button type="button" class="inventory-mini-button" onclick="clearInventorySearch()"><span class="win98-icon icon-clear"></span>Clear</button>
+                            </div>
+                            <div class="inventory-command-groups">
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Labels</span>
+                                    <button type="button" class="inventory-mini-button" onclick="printAllInventoryLabels()"><span class="win98-icon icon-label"></span>Inventory Labels</button>
+                                    <button type="button" class="inventory-mini-button" onclick="openCustomLabelBuilder()"><span class="win98-icon icon-label"></span>Custom Label</button>
+                                </div>
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Formulary</span>
+                                    <button type="button" class="inventory-mini-button" onclick="createEditFormulary()"><span class="win98-icon icon-formulary"></span>Edit</button>
+                                    <button type="button" class="inventory-mini-button" onclick="viewFormulary()"><span class="win98-icon icon-view"></span>View</button>
+                                </div>
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Orders</span>
+                                    <button type="button" class="inventory-mini-button" onclick="createInventoryOrder()"><span class="win98-icon icon-order"></span>Create</button>
+                                    <button type="button" class="inventory-mini-button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive</button>
+                                    <button type="button" class="inventory-mini-button" onclick="viewInventoryOrderLog()"><span class="win98-icon icon-view"></span>Log</button>
+                                    <button type="button" class="inventory-mini-button" onclick="printInventoryOrderPdf()"><span class="win98-icon icon-order"></span>PDF</button>
+                                </div>
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Stock Tools</span>
+                                    <button type="button" class="inventory-mini-button" onclick="returnPrepackedDispense()"><span class="win98-icon icon-box"></span>Return Prepack</button>
+                                    <button type="button" class="inventory-mini-button" onclick="openMedKits()"><span class="win98-icon icon-box"></span>Med Kits</button>
+                                </div>
+                            </div>
                         </div>
                         <div id="inventory-workflow-summary" class="inventory-workflow-summary"></div>
                         <div class="sunken-panel" style="height: 800px; width: 100%; overflow-y: scroll;">
@@ -915,6 +932,7 @@
                                 <li>For container-based products such as many topicals, stock can stay unchanged until the container is marked finished.</li>
                                 <li>Use <strong>Restock</strong> to add received quantities directly to inventory.</li>
                                 <li>Use <strong>Print Inventory Labels</strong> or individual Label buttons to generate inventory labels.</li>
+                                <li>Use <strong>Custom Label Builder</strong> for optional free-form inventory labels with editable fields, label sizes, and Aztec barcodes.</li>
                             </ul>
                         </fieldset>
 

@@ -7644,6 +7644,323 @@ button {
     image-rendering: pixelated;
 }
 
+.inventory-command-strip {
+    display: grid;
+    grid-template-columns: minmax(320px, 0.35fr) minmax(620px, 1fr);
+    gap: 8px;
+    align-items: stretch;
+    margin-bottom: 6px;
+}
+
+.inventory-search-strip,
+.inventory-command-groups {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.inventory-search-strip {
+    padding: 3px 5px;
+    background: #d7e8f8;
+    border: 1px solid #9aaec0;
+}
+
+.inventory-search-strip input {
+    flex: 1 1 180px;
+    min-width: 120px;
+}
+
+.inventory-command-groups {
+    flex-wrap: wrap;
+}
+
+.inventory-command-group {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 5px;
+    min-height: 26px;
+    background: #eeeeee;
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+    box-sizing: border-box;
+}
+
+.inventory-command-title {
+    color: #000080;
+    font-weight: bold;
+    margin-right: 2px;
+    white-space: nowrap;
+}
+
+.inventory-mini-button {
+    min-height: 22px;
+    height: 24px;
+    padding: 2px 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.inventory-mini-button .win98-icon {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    margin: 0;
+}
+
+.custom-label-builder {
+    min-width: min(1180px, 92vw);
+}
+
+.custom-label-builder-grid {
+    display: grid;
+    grid-template-columns: minmax(620px, 1fr) minmax(300px, 0.42fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.custom-label-builder fieldset {
+    margin-bottom: 8px;
+}
+
+.custom-label-builder .field-row {
+    flex-wrap: wrap;
+}
+
+.custom-label-builder-form input[type="text"],
+.custom-label-builder-form input[type="search"],
+.custom-label-builder-form select,
+.custom-label-builder-form textarea {
+    width: 100%;
+    max-width: 100%;
+}
+
+.custom-label-inventory-results {
+    max-height: 160px;
+    overflow-y: auto;
+    border: inset 2px #ffffff;
+    background: #ffffff;
+    padding: 3px;
+}
+
+.custom-label-inventory-result {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) minmax(90px, 0.45fr) minmax(90px, 0.45fr);
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    min-height: 28px;
+    padding: 3px 5px;
+    margin: 0 0 3px;
+    text-align: left;
+    background: #ffffff;
+    border: 1px dotted #b0b0b0;
+    box-shadow: none;
+    cursor: pointer;
+}
+
+.custom-label-inventory-result:hover,
+.custom-label-inventory-result.selected {
+    background: #e5ffe5;
+    border-color: #008000;
+}
+
+.custom-label-inventory-result strong {
+    color: #000080;
+    overflow-wrap: anywhere;
+}
+
+.custom-label-inventory-result span {
+    color: #333333;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.custom-label-inventory-empty {
+    padding: 10px;
+    color: #800000;
+    background: #fff8d8;
+}
+
+.custom-label-toggle-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 4px 10px;
+}
+
+.custom-label-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 22px;
+    padding: 2px 4px;
+    background: #f8f8e8;
+    border: 1px dotted #a0a0a0;
+    box-sizing: border-box;
+}
+
+.custom-label-toggle:has(input[type="checkbox"]:checked) {
+    background: #dfffdf;
+    border-color: #008000;
+    color: #006000;
+    font-weight: bold;
+}
+
+.custom-label-toggle input[type="checkbox"] {
+    flex: 0 0 13px;
+    width: 13px !important;
+    min-width: 13px !important;
+    max-width: 13px !important;
+    height: 13px !important;
+    min-height: 13px !important;
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
+    margin: 0;
+    cursor: pointer;
+}
+
+.custom-label-toggle span {
+    min-width: 0;
+    overflow-wrap: break-word;
+}
+
+.custom-label-toggle input[type="checkbox"]:checked + span::after {
+    content: "  \2713";
+    color: #008000;
+    font-weight: bold;
+}
+
+.custom-label-content-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+    gap: 6px 8px;
+}
+
+.custom-label-content-grid label,
+.custom-label-builder-form label {
+    font-weight: bold;
+    color: #000080;
+}
+
+.custom-label-content-grid label input,
+.custom-label-content-grid label select,
+.custom-label-builder-form label textarea {
+    margin-top: 2px;
+    font-weight: normal;
+    color: #000000;
+}
+
+.custom-label-actions {
+    justify-content: flex-end;
+    padding-top: 4px;
+}
+
+.custom-label-layout-actions {
+    gap: 6px;
+    align-items: center;
+}
+
+.custom-label-layout-button.active {
+    background: #dfffdf;
+    color: #006000;
+    font-weight: bold;
+    border-top-color: #ffffff;
+    border-left-color: #ffffff;
+    border-right-color: #008000;
+    border-bottom-color: #008000;
+}
+
+.custom-label-preview-pane {
+    position: sticky;
+    top: 8px;
+}
+
+.custom-label-preview-stage {
+    min-height: 260px;
+    max-height: 58vh;
+    overflow: auto;
+    padding: 12px;
+    background: #808080;
+    border: inset 2px #dfdfdf;
+}
+
+#custom-label-live-preview .label-page.custom-label-page,
+#label-preview-content .label-page.custom-label-page {
+    width: var(--custom-label-width, 2.25in);
+    height: var(--custom-label-height, 1.25in);
+}
+
+#custom-label-live-preview .label-page.custom-label-page {
+    background: #ffffff;
+    color: #000000;
+    padding: 0.05in;
+    margin: 0 auto 10px;
+    overflow: hidden;
+    border: 1px solid #000000;
+    box-sizing: border-box;
+}
+
+.custom-label-page {
+    position: relative;
+}
+
+.custom-label-page.has-outer-border {
+    border: 1px solid #000000 !important;
+}
+
+.custom-label-page.has-custom-code {
+    padding-right: 0.43in;
+}
+
+.custom-label-copy {
+    min-width: 0;
+}
+
+.custom-label-aztec {
+    position: absolute;
+    top: 0.04in;
+    right: 0.04in;
+    width: 0.34in;
+    height: 0.34in;
+    image-rendering: pixelated;
+    background: #ffffff;
+}
+
+.custom-label-header,
+.custom-label-main-title {
+    font-weight: bold !important;
+}
+
+.custom-label-line {
+    border-bottom: 1px solid #000000;
+    margin-bottom: 1px;
+    padding-bottom: 1px;
+}
+
+.custom-label-line:last-child {
+    margin-bottom: 0;
+}
+
+.custom-label-footer {
+    border-top: 1px dotted #808080;
+    padding-top: 1px;
+}
+
+.custom-label-empty,
+.custom-label-hint,
+.custom-label-size-caption {
+    color: #333333;
+    font-size: 10px;
+}
+
 .label-code {
     margin-top: 2px;
     font-family: monospace !important;
@@ -8505,6 +8822,15 @@ button {
         page-break-after: always !important;
         page-break-before: avoid !important;
     }
+    #print-area .label-page.custom-label-page {
+        width: var(--custom-label-width, 2.25in) !important;
+        height: var(--custom-label-height, 1.25in) !important;
+    }
+    #print-area .custom-label-aztec {
+        width: 0.34in !important;
+        height: 0.34in !important;
+        image-rendering: pixelated;
+    }
     .inventory-qr-label { display: flex !important; }
     #print-area .label-page:last-of-type { page-break-after: avoid !important; }
     .label-date { font-weight: bold; border-bottom: 1px solid black; font-size: 8pt; margin-bottom: 1px; }
@@ -8528,4 +8854,68 @@ button {
     .label-micro .label-title { font-size: 6.8pt; line-height: 0.86; }
     .label-micro .label-small,
     .label-micro .label-med-row { font-size: 5.35pt; line-height: 0.82; }
+}
+
+#custom-label-live-preview .custom-label-font-small .label-title,
+#label-preview-content .custom-label-font-small .label-title,
+#print-area .custom-label-font-small .label-title {
+    font-size: 9pt;
+}
+
+#custom-label-live-preview .custom-label-font-small .label-small,
+#custom-label-live-preview .custom-label-font-small .custom-label-header,
+#label-preview-content .custom-label-font-small .label-small,
+#label-preview-content .custom-label-font-small .custom-label-header,
+#print-area .custom-label-font-small .label-small,
+#print-area .custom-label-font-small .custom-label-header {
+    font-size: 7.25pt;
+    line-height: 0.95;
+}
+
+#custom-label-live-preview .custom-label-font-normal .label-title,
+#label-preview-content .custom-label-font-normal .label-title,
+#print-area .custom-label-font-normal .label-title {
+    font-size: 11pt;
+}
+
+#custom-label-live-preview .custom-label-font-normal .label-small,
+#custom-label-live-preview .custom-label-font-normal .custom-label-header,
+#label-preview-content .custom-label-font-normal .label-small,
+#label-preview-content .custom-label-font-normal .custom-label-header,
+#print-area .custom-label-font-normal .label-small,
+#print-area .custom-label-font-normal .custom-label-header {
+    font-size: 9pt;
+    line-height: 1.05;
+}
+
+#custom-label-live-preview .custom-label-font-large .label-title,
+#label-preview-content .custom-label-font-large .label-title,
+#print-area .custom-label-font-large .label-title {
+    font-size: 13pt;
+}
+
+#custom-label-live-preview .custom-label-font-large .label-small,
+#custom-label-live-preview .custom-label-font-large .custom-label-header,
+#label-preview-content .custom-label-font-large .label-small,
+#label-preview-content .custom-label-font-large .custom-label-header,
+#print-area .custom-label-font-large .label-small,
+#print-area .custom-label-font-large .custom-label-header {
+    font-size: 10.5pt;
+    line-height: 1.05;
+}
+
+#custom-label-live-preview .custom-label-font-xlarge .label-title,
+#label-preview-content .custom-label-font-xlarge .label-title,
+#print-area .custom-label-font-xlarge .label-title {
+    font-size: 15pt;
+}
+
+#custom-label-live-preview .custom-label-font-xlarge .label-small,
+#custom-label-live-preview .custom-label-font-xlarge .custom-label-header,
+#label-preview-content .custom-label-font-xlarge .label-small,
+#label-preview-content .custom-label-font-xlarge .custom-label-header,
+#print-area .custom-label-font-xlarge .label-small,
+#print-area .custom-label-font-xlarge .custom-label-header {
+    font-size: 12pt;
+    line-height: 1.05;
 }

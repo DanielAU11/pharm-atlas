@@ -22261,6 +22261,482 @@ window.printAllInventoryLabels = async function() {
     previewLabelHtml(selectedMeds.map(inventoryLabelHtml).join(''));
 };
 
+const CUSTOM_LABEL_SIZE_PRESETS = [
+    { id: 'thermal-225-125', name: 'Thermal 2.25 x 1.25 in', width: 2.25, height: 1.25 },
+    { id: 'thermal-225-100', name: 'Thermal 2.25 x 1.0 in', width: 2.25, height: 1 },
+    { id: 'thermal-225-150', name: 'Thermal 2.25 x 1.5 in', width: 2.25, height: 1.5 },
+    { id: 'dymo-30336', name: 'DYMO small 2.125 x 1.0 in', width: 2.125, height: 1 },
+    { id: 'address-30252', name: 'Address 3.5 x 1.125 in', width: 3.5, height: 1.125 },
+    { id: 'shipping-400-200', name: 'Wide 4 x 2 in', width: 4, height: 2 },
+    { id: 'custom', name: 'Custom size', width: 2.25, height: 1.25 }
+];
+
+const CUSTOM_LABEL_FONT_PRESETS = [
+    { id: 'auto', name: 'Auto fit', className: '' },
+    { id: 'small', name: 'Small', className: 'custom-label-font-small' },
+    { id: 'normal', name: 'Normal', className: 'custom-label-font-normal' },
+    { id: 'large', name: 'Large', className: 'custom-label-font-large' },
+    { id: 'xlarge', name: 'Extra large', className: 'custom-label-font-xlarge' }
+];
+
+function customLabelSizeById(id) {
+    return CUSTOM_LABEL_SIZE_PRESETS.find(size => size.id === id) || CUSTOM_LABEL_SIZE_PRESETS[0];
+}
+
+function customLabelFontById(id) {
+    return CUSTOM_LABEL_FONT_PRESETS.find(font => font.id === id) || CUSTOM_LABEL_FONT_PRESETS[0];
+}
+
+function customLabelInventoryMatches(filter = '') {
+    const term = String(filter || '').trim().toLowerCase();
+    return db.inventory
+        .slice()
+        .filter(med => {
+            if (!term) return true;
+            return [
+                med.name,
+                formatLabelMedStrength(med, true),
+                formatLabelMedStrength(med),
+                med.formulation,
+                inventoryUnitFor(med),
+                med.storage,
+                med.notes,
+                ...medicationCodes(med)
+            ].join(' ').toLowerCase().includes(term);
+        })
+        .sort((a, b) => inventoryDisplayName(a).localeCompare(inventoryDisplayName(b), undefined, { sensitivity: 'base' }));
+}
+
+function customLabelInventoryResultsHtml(filter = '', selectedId = '') {
+    const meds = customLabelInventoryMatches(filter).slice(0, 60);
+    if (!meds.length) {
+        return '<div class="custom-label-inventory-empty">No matching inventory items.</div>';
+    }
+    return meds.map(med => {
+        const selected = med.id === selectedId;
+        return `<button type="button" class="custom-label-inventory-result ${selected ? 'selected' : ''}" data-med-id="${escapeHtml(med.id)}">
+            <strong>${escapeHtml(inventoryDisplayName(med))}</strong>
+            <span>${escapeHtml(formatLabelMedStrength(med, true) || 'No strength')}</span>
+            <span>${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span>
+        </button>`;
+    }).join('');
+}
+
+function customLabelStorageOptions(selected = '') {
+    const common = [
+        '',
+        'Room Temp',
+        'Refrigerated',
+        'Frozen',
+        'Protect from light',
+        'Keep dry',
+        'Do not freeze',
+        'Controlled room temp',
+        'N/A'
+    ];
+    const values = common.includes(selected) || !selected ? common : [...common, selected];
+    return values.map(value => {
+        const label = value || 'Select storage...';
+        return `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+}
+
+function customLabelCurrentSize() {
+    const presetId = document.getElementById('custom-label-size')?.value || CUSTOM_LABEL_SIZE_PRESETS[0].id;
+    const preset = customLabelSizeById(presetId);
+    const width = presetId === 'custom'
+        ? Math.max(0.8, parseAmount(document.getElementById('custom-label-width')?.value, preset.width))
+        : preset.width;
+    const height = presetId === 'custom'
+        ? Math.max(0.5, parseAmount(document.getElementById('custom-label-height')?.value, preset.height))
+        : preset.height;
+    return { ...preset, width, height };
+}
+
+function customLabelFieldEnabled(fieldName) {
+    return !!document.querySelector(`#action-modal-body input.custom-label-field-toggle[value="${fieldName}"]`)?.checked;
+}
+
+function customLabelValues() {
+    const size = customLabelCurrentSize();
+    const value = id => document.getElementById(id)?.value || '';
+    const include = field => customLabelFieldEnabled(field);
+    return {
+        size,
+        font: customLabelFontById(value('custom-label-font-size')),
+        copies: Math.max(1, Math.min(99, parseInt(value('custom-label-copies'), 10) || 1)),
+        includeDividers: !!document.getElementById('custom-label-dividers')?.checked,
+        includeBorder: !!document.getElementById('custom-label-border')?.checked,
+        includeName: include('name'),
+        includeQuantity: include('quantity'),
+        includeDate: include('date'),
+        includeTime: include('time'),
+        includeExpiration: include('expiration'),
+        includeStorage: include('storage'),
+        includeInstructions: include('instructions'),
+        includeBarcode: include('barcode'),
+        includeLot: include('lot'),
+        includeHeader: include('header'),
+        header: value('custom-label-header').trim(),
+        name: value('custom-label-name').trim(),
+        strength: value('custom-label-strength').trim(),
+        quantity: value('custom-label-quantity').trim(),
+        date: value('custom-label-date'),
+        time: value('custom-label-time'),
+        expiration: value('custom-label-expiration'),
+        storage: value('custom-label-storage').trim(),
+        instructions: value('custom-label-instructions').trim(),
+        lot: value('custom-label-lot').trim(),
+        barcodeCode: normalizeMedicationCode(value('custom-label-barcode')),
+        footer: value('custom-label-footer').trim()
+    };
+}
+
+function customLabelPrintSizeStyle(size) {
+    const width = Number(size.width).toFixed(3);
+    const height = Number(size.height).toFixed(3);
+    return `<style>
+        @media print {
+            @page { size: ${width}in ${height}in; margin: 0 !important; }
+            html, body, #print-area { width: ${width}in !important; min-height: ${height}in !important; }
+            #print-area .label-page.custom-label-page { width: ${width}in !important; height: ${height}in !important; }
+        }
+    </style>`;
+}
+
+function customLabelHtml(values, includePrintStyle = false) {
+    const textParts = [];
+    const lines = [];
+    const line = html => values.includeDividers ? `<div class="custom-label-line">${html}</div>` : html;
+    if (values.includeHeader && values.header) {
+        textParts.push(values.header);
+        lines.push(line(`<div class="label-title custom-label-header">${escapeHtml(values.header)}</div>`));
+    }
+    if (values.includeName && (values.name || values.strength)) {
+        textParts.push(values.name, values.strength);
+        lines.push(line(`<div class="label-title custom-label-main-title">${escapeHtml([values.name, values.strength].filter(Boolean).join(' '))}</div>`));
+    }
+    if (values.includeQuantity && values.quantity) {
+        textParts.push(values.quantity);
+        lines.push(line(`<div class="label-small"><b>Qty:</b> ${escapeHtml(values.quantity)}</div>`));
+    }
+    if ((values.includeDate && values.date) || (values.includeTime && values.time)) {
+        const dateTime = [
+            values.includeDate && values.date ? `Date: ${values.date}` : '',
+            values.includeTime && values.time ? `Time: ${values.time}` : ''
+        ].filter(Boolean).join(' | ');
+        textParts.push(dateTime);
+        lines.push(line(`<div class="label-small">${escapeHtml(dateTime)}</div>`));
+    }
+    if (values.includeExpiration && values.expiration) {
+        textParts.push(values.expiration);
+        lines.push(line(`<div class="label-small"><b>Exp:</b> ${escapeHtml(values.expiration)}</div>`));
+    }
+    if (values.includeLot && values.lot) {
+        textParts.push(values.lot);
+        lines.push(line(`<div class="label-small"><b>Lot:</b> ${escapeHtml(values.lot)}</div>`));
+    }
+    if (values.includeStorage && values.storage) {
+        textParts.push(values.storage);
+        lines.push(line(`<div class="label-small"><b>Storage:</b> ${escapeHtml(values.storage)}</div>`));
+    }
+    if (values.includeInstructions && values.instructions) {
+        textParts.push(values.instructions);
+        lines.push(line(`<div class="label-small"><b>Instructions:</b> ${escapeHtml(values.instructions)}</div>`));
+    }
+    if (values.footer) {
+        textParts.push(values.footer);
+        lines.push(line(`<div class="label-small custom-label-footer">${escapeHtml(values.footer)}</div>`));
+    }
+
+    const barcodeDataUrl = values.includeBarcode && values.barcodeCode ? aztecBarcodeDataUrl(values.barcodeCode) : '';
+    const labelClass = `${getLabelClass(textParts, lines.length)} custom-label-page ${values.font.className}${values.includeDividers ? ' has-dividers' : ''}${values.includeBorder ? ' has-outer-border' : ''}${barcodeDataUrl ? ' has-custom-code' : ''}`;
+    const content = lines.length ? lines.join('') : '<div class="label-small custom-label-empty">No fields selected.</div>';
+    const styleVars = `--custom-label-width:${values.size.width}in; --custom-label-height:${values.size.height}in;`;
+    return `${includePrintStyle ? customLabelPrintSizeStyle(values.size) : ''}
+        <div class="${labelClass}" style="${styleVars}">
+            <div class="custom-label-copy">${content}</div>
+            ${barcodeDataUrl ? `<img class="custom-label-aztec" src="${barcodeDataUrl}" alt="Aztec barcode">` : ''}
+        </div>`;
+}
+
+function updateCustomLabelPreview() {
+    const preview = document.getElementById('custom-label-live-preview');
+    const customSize = document.getElementById('custom-label-custom-size');
+    const size = customLabelCurrentSize();
+    if (customSize) customSize.style.display = document.getElementById('custom-label-size')?.value === 'custom' ? 'flex' : 'none';
+    if (preview) {
+        preview.innerHTML = customLabelHtml(customLabelValues(), false);
+        fitLabelPages(preview);
+    }
+    const sizeCaption = document.getElementById('custom-label-size-caption');
+    if (sizeCaption) sizeCaption.textContent = `${formatAmount(size.width)} x ${formatAmount(size.height)} in`;
+    const dividerButton = document.getElementById('custom-label-divider-button');
+    const dividers = document.getElementById('custom-label-dividers');
+    if (dividerButton && dividers) {
+        dividerButton.classList.toggle('active', dividers.checked);
+        dividerButton.textContent = dividers.checked ? 'Remove Divider Lines' : 'Insert Divider Lines';
+    }
+    const borderButton = document.getElementById('custom-label-border-button');
+    const border = document.getElementById('custom-label-border');
+    if (borderButton && border) {
+        borderButton.classList.toggle('active', border.checked);
+        borderButton.textContent = border.checked ? 'Remove Outer Border' : 'Add Outer Border';
+    }
+}
+
+window.updateCustomLabelPreview = updateCustomLabelPreview;
+
+window.filterCustomLabelInventory = function() {
+    const results = document.getElementById('custom-label-inventory-results');
+    if (!results) return;
+    const selectedId = document.getElementById('custom-label-linked-med-id')?.value || '';
+    results.innerHTML = customLabelInventoryResultsHtml(document.getElementById('custom-label-inventory-search')?.value || '', selectedId);
+};
+
+window.selectCustomLabelInventory = function(medId = '') {
+    medId = medId || document.getElementById('custom-label-linked-med-id')?.value || '';
+    const med = db.inventory.find(item => item.id === medId);
+    if (!med) {
+        updateCustomLabelPreview();
+        return;
+    }
+    const linked = document.getElementById('custom-label-linked-med-id');
+    if (linked) linked.value = med.id;
+    const set = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) element.value = value || '';
+    };
+    set('custom-label-name', med.name || '');
+    set('custom-label-strength', formatLabelMedStrength(med, true));
+    set('custom-label-quantity', `${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}`);
+    const storageSelect = document.getElementById('custom-label-storage');
+    if (storageSelect) storageSelect.innerHTML = customLabelStorageOptions(med.storage || 'Room Temp');
+    set('custom-label-storage', med.storage || '');
+    set('custom-label-expiration', med.expiry || '');
+    set('custom-label-instructions', med.notes || '');
+    set('custom-label-barcode', medicationCodes(med)[0] || '');
+    window.filterCustomLabelInventory();
+    updateCustomLabelPreview();
+};
+
+window.setCustomLabelNow = function() {
+    const defaults = defaultActualDateTime();
+    const date = document.getElementById('custom-label-date');
+    const time = document.getElementById('custom-label-time');
+    if (date) date.value = defaults.date;
+    if (time) time.value = defaults.time;
+    updateCustomLabelPreview();
+};
+
+window.generateCustomLabelCode = function() {
+    const input = document.getElementById('custom-label-barcode');
+    if (input) input.value = createMedicationCode();
+    const barcodeCheck = document.querySelector('#action-modal-body input.custom-label-field-toggle[value="barcode"]');
+    if (barcodeCheck) barcodeCheck.checked = true;
+    updateCustomLabelPreview();
+};
+
+window.toggleCustomLabelDividers = function() {
+    const input = document.getElementById('custom-label-dividers');
+    if (input) input.checked = !input.checked;
+    updateCustomLabelPreview();
+};
+
+window.toggleCustomLabelBorder = function() {
+    const input = document.getElementById('custom-label-border');
+    if (input) input.checked = !input.checked;
+    updateCustomLabelPreview();
+};
+
+window.clearCustomLabelBuilder = function() {
+    ['custom-label-name', 'custom-label-strength', 'custom-label-quantity', 'custom-label-storage', 'custom-label-expiration', 'custom-label-instructions', 'custom-label-lot', 'custom-label-header', 'custom-label-footer', 'custom-label-barcode', 'custom-label-inventory-search'].forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.value = '';
+    });
+    const linked = document.getElementById('custom-label-linked-med-id');
+    if (linked) linked.value = '';
+    const fontSize = document.getElementById('custom-label-font-size');
+    if (fontSize) fontSize.value = 'auto';
+    const dividers = document.getElementById('custom-label-dividers');
+    if (dividers) dividers.checked = false;
+    const border = document.getElementById('custom-label-border');
+    if (border) border.checked = false;
+    window.filterCustomLabelInventory();
+    window.setCustomLabelNow();
+};
+
+function setupCustomLabelBuilderEvents() {
+    const root = document.querySelector('#action-modal-body .custom-label-builder');
+    if (!root) return;
+    const fieldByInputId = {
+        'custom-label-header': 'header',
+        'custom-label-name': 'name',
+        'custom-label-quantity': 'quantity',
+        'custom-label-date': 'date',
+        'custom-label-time': 'time',
+        'custom-label-expiration': 'expiration',
+        'custom-label-storage': 'storage',
+        'custom-label-instructions': 'instructions',
+        'custom-label-lot': 'lot',
+        'custom-label-barcode': 'barcode'
+    };
+    const enableFieldForInput = element => {
+        const field = fieldByInputId[element?.id];
+        if (!field) return;
+        const toggle = root.querySelector(`input.custom-label-field-toggle[value="${field}"]`);
+        if (toggle && String(element.value || '').trim()) toggle.checked = true;
+    };
+    root.addEventListener('input', event => {
+        if (!event.target.closest('.custom-label-builder')) return;
+        if (event.target.id === 'custom-label-inventory-search') {
+            window.filterCustomLabelInventory();
+        } else {
+            enableFieldForInput(event.target);
+        }
+        updateCustomLabelPreview();
+    });
+    root.addEventListener('change', event => {
+        if (!event.target.closest('.custom-label-builder')) return;
+        enableFieldForInput(event.target);
+        updateCustomLabelPreview();
+    });
+    root.addEventListener('click', event => {
+        const result = event.target.closest('.custom-label-inventory-result');
+        if (result) {
+            window.selectCustomLabelInventory(result.dataset.medId || '');
+        }
+    });
+}
+
+window.printCustomBuiltLabels = async function() {
+    const values = customLabelValues();
+    if (!values.includeName && !values.includeQuantity && !values.includeDate && !values.includeTime && !values.includeExpiration && !values.includeStorage && !values.includeInstructions && !values.includeBarcode && !values.includeLot && !values.includeHeader && !values.footer) {
+        await appAlert('Select at least one label field or enter footer text before printing.');
+        return;
+    }
+    if (values.includeBarcode && !values.barcodeCode) {
+        await appAlert('Enter, scan, generate, or link a barcode code before printing a barcode.');
+        return;
+    }
+    const html = customLabelPrintSizeStyle(values.size) + Array.from({ length: values.copies }, () => customLabelHtml(values, false)).join('');
+    previewLabelHtml(html);
+};
+
+window.openCustomLabelBuilder = async function() {
+    const defaults = defaultActualDateTime();
+    const sizeOptions = CUSTOM_LABEL_SIZE_PRESETS.map(size =>
+        `<option value="${escapeHtml(size.id)}">${escapeHtml(size.name)}</option>`
+    ).join('');
+    const fontOptions = CUSTOM_LABEL_FONT_PRESETS.map(font =>
+        `<option value="${escapeHtml(font.id)}" ${font.id === 'auto' ? 'selected' : ''}>${escapeHtml(font.name)}</option>`
+    ).join('');
+    const fieldToggle = (field, label, checked = false) => `
+        <label class="custom-label-toggle" for="custom-label-field-${escapeHtml(field)}">
+            <input id="custom-label-field-${escapeHtml(field)}" class="custom-label-field-toggle" type="checkbox" value="${escapeHtml(field)}" ${checked ? 'checked' : ''}>
+            <span>${escapeHtml(label)}</span>
+        </label>`;
+    const modalPromise = showActionModal('Custom Label Builder', `
+        <div data-action-modal-size="wide" class="custom-label-builder">
+            <div class="custom-label-builder-grid">
+                <div class="custom-label-builder-form">
+                    <fieldset>
+                        <legend>Inventory link</legend>
+                        <div class="field-row">
+                            <label>Search:</label>
+                            <input id="custom-label-inventory-search" type="search" placeholder="Find an inventory item by name, strength, notes, or barcode...">
+                        </div>
+                        <input id="custom-label-linked-med-id" type="hidden" value="">
+                        <div id="custom-label-inventory-results" class="custom-label-inventory-results">${customLabelInventoryResultsHtml()}</div>
+                        <div class="custom-label-hint">Click an item to copy its saved details into the label. The printed label remains editable and does not change inventory.</div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Fields to print</legend>
+                        <div class="custom-label-toggle-grid">
+                            ${fieldToggle('name', 'Medication name + strength', true)}
+                            ${fieldToggle('quantity', 'Quantity', true)}
+                            ${fieldToggle('date', 'Current/date field')}
+                            ${fieldToggle('time', 'Current/time field')}
+                            ${fieldToggle('expiration', 'Expiration')}
+                            ${fieldToggle('storage', 'Storage')}
+                            ${fieldToggle('instructions', 'Instructions')}
+                            ${fieldToggle('barcode', 'Aztec barcode')}
+                            ${fieldToggle('lot', 'Lot / batch')}
+                            ${fieldToggle('header', 'Optional title')}
+                        </div>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Label content</legend>
+                        <div class="custom-label-content-grid">
+                            <label>Optional title<input id="custom-label-header" type="text" placeholder="e.g. Returned stock, Travel kit" oninput="updateCustomLabelPreview()"></label>
+                            <label>Name<input id="custom-label-name" type="text" placeholder="Medication or inventory name" oninput="updateCustomLabelPreview()"></label>
+                            <label>Strength<input id="custom-label-strength" type="text" placeholder="e.g. 500mg, 2.5mg/5mL" oninput="updateCustomLabelPreview()"></label>
+                            <label>Quantity<input id="custom-label-quantity" type="text" placeholder="e.g. 30 tablets, 10 mL" oninput="updateCustomLabelPreview()"></label>
+                            <label>Date<input id="custom-label-date" type="date" value="${defaults.date}" onchange="updateCustomLabelPreview()"></label>
+                            <label>Time<input id="custom-label-time" type="time" value="${defaults.time}" onchange="updateCustomLabelPreview()"></label>
+                            <label>Expiration<input id="custom-label-expiration" type="date" onchange="updateCustomLabelPreview()"></label>
+                            <label>Storage<select id="custom-label-storage">${customLabelStorageOptions('Room Temp')}</select></label>
+                            <label>Lot / batch<input id="custom-label-lot" type="text" placeholder="Optional lot or batch" oninput="updateCustomLabelPreview()"></label>
+                            <label>Aztec code<input id="custom-label-barcode" type="text" placeholder="Scan, paste, or generate" oninput="updateCustomLabelPreview()"></label>
+                        </div>
+                        <div class="field-row">
+                            <button type="button" onclick="setCustomLabelNow()">Use Current Date/Time</button>
+                            <button type="button" onclick="generateCustomLabelCode()">Generate Code</button>
+                        </div>
+                        <label>Instructions<textarea id="custom-label-instructions" rows="3" placeholder="Optional directions, handling notes, or use instructions" oninput="updateCustomLabelPreview()"></textarea></label>
+                        <label>Footer / free text<textarea id="custom-label-footer" rows="2" placeholder="Optional extra line that can print even if no checkbox is selected" oninput="updateCustomLabelPreview()"></textarea></label>
+                    </fieldset>
+
+                    <fieldset>
+                        <legend>Size and copies</legend>
+                        <div class="field-row">
+                            <label>Label size:</label>
+                            <select id="custom-label-size" onchange="updateCustomLabelPreview()">${sizeOptions}</select>
+                            <span id="custom-label-size-caption" class="custom-label-size-caption"></span>
+                            <label>Font size:</label>
+                            <select id="custom-label-font-size">${fontOptions}</select>
+                            <label>Copies:</label>
+                            <input id="custom-label-copies" type="number" min="1" max="99" value="1" oninput="updateCustomLabelPreview()">
+                        </div>
+                        <div id="custom-label-custom-size" class="field-row" style="display:none;">
+                            <label>Width (in):</label><input id="custom-label-width" type="number" min="0.8" step="0.05" value="2.25" oninput="updateCustomLabelPreview()">
+                            <label>Height (in):</label><input id="custom-label-height" type="number" min="0.5" step="0.05" value="1.25" oninput="updateCustomLabelPreview()">
+                        </div>
+                        <div class="field-row custom-label-layout-actions">
+                            <input id="custom-label-dividers" type="checkbox" hidden>
+                            <button type="button" id="custom-label-divider-button" class="custom-label-layout-button" onclick="toggleCustomLabelDividers()">Insert Divider Lines</button>
+                            <input id="custom-label-border" type="checkbox" hidden>
+                            <button type="button" id="custom-label-border-button" class="custom-label-layout-button" onclick="toggleCustomLabelBorder()">Add Outer Border</button>
+                        </div>
+                    </fieldset>
+
+                    <div class="field-row custom-label-actions">
+                        <button type="button" onclick="printCustomBuiltLabels()"><span class="win98-icon icon-label"></span>Preview / Print</button>
+                        <button type="button" onclick="clearCustomLabelBuilder()"><span class="win98-icon icon-clear"></span>Clear Builder</button>
+                    </div>
+                </div>
+
+                <div class="custom-label-preview-pane">
+                    <fieldset>
+                        <legend>Live label preview</legend>
+                        <div class="custom-label-preview-stage">
+                            <div id="custom-label-live-preview"></div>
+                        </div>
+                        <div class="custom-label-hint">Preview uses the same pixel font and adaptive fitting as printed labels.</div>
+                    </fieldset>
+                </div>
+            </div>
+        </div>
+    `, 'Close');
+    setTimeout(() => {
+        setupCustomLabelBuilderEvents();
+        updateCustomLabelPreview();
+    }, 0);
+    await modalPromise;
+};
+
 
 
 
