@@ -7543,6 +7543,10 @@ button {
     justify-content: center;
 }
 
+#label-preview-modal {
+    z-index: 50000;
+}
+
 .label-preview-window {
     width: 420px;
 }
@@ -7753,7 +7757,7 @@ button {
 
 .custom-label-inventory-result {
     display: grid;
-    grid-template-columns: minmax(170px, 1fr) minmax(90px, 0.45fr) minmax(90px, 0.45fr);
+    grid-template-columns: 18px minmax(170px, 1fr) minmax(90px, 0.45fr) minmax(90px, 0.45fr);
     gap: 6px;
     align-items: center;
     width: 100%;
@@ -7773,6 +7777,20 @@ button {
     border-color: #008000;
 }
 
+.custom-label-result-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border: inset 2px #ffffff;
+    background: #ffffff;
+    color: #008000;
+    font-weight: bold;
+    line-height: 1;
+    box-sizing: border-box;
+}
+
 .custom-label-inventory-result strong {
     color: #000080;
     overflow-wrap: anywhere;
@@ -7788,6 +7806,42 @@ button {
     padding: 10px;
     color: #800000;
     background: #fff8d8;
+}
+
+.custom-label-selected-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    margin-top: 4px;
+    min-height: 26px;
+    border: inset 2px #ffffff;
+    background: #f8fff8;
+}
+
+.custom-label-linked-chip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 260px;
+    gap: 4px;
+    padding: 2px 4px;
+    background: #dfffdf;
+    border: 1px solid #008000;
+    color: #004f00;
+    font-weight: bold;
+}
+
+.custom-label-linked-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.custom-label-linked-chip button {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 3px;
+    color: #800000;
 }
 
 .custom-label-toggle-grid {
@@ -7863,6 +7917,11 @@ button {
     padding-top: 4px;
 }
 
+.custom-label-print-button {
+    color: #006000;
+    font-weight: bold;
+}
+
 .custom-label-layout-actions {
     gap: 6px;
     align-items: center;
@@ -7876,6 +7935,19 @@ button {
     border-left-color: #ffffff;
     border-right-color: #008000;
     border-bottom-color: #008000;
+}
+
+.custom-label-source-panel {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 140px auto minmax(150px, 0.8fr);
+    gap: 6px;
+    align-items: end;
+}
+
+.custom-label-source-panel input[type="file"] {
+    display: block;
+    width: 100%;
+    margin-top: 2px;
 }
 
 .custom-label-preview-pane {
@@ -7912,6 +7984,10 @@ button {
     position: relative;
 }
 
+.custom-label-page.has-source-file {
+    padding: 0;
+}
+
 .custom-label-page.has-outer-border {
     border: 1px solid #000000 !important;
 }
@@ -7922,6 +7998,43 @@ button {
 
 .custom-label-copy {
     min-width: 0;
+    position: relative;
+    z-index: 2;
+}
+
+.custom-label-page.has-source-file .custom-label-copy {
+    padding: 0.05in;
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.custom-label-page.has-source-file .custom-label-copy:empty {
+    display: none;
+}
+
+.custom-label-source-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.custom-label-source-layer img,
+.custom-label-source-layer embed {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+}
+
+.custom-label-source-layer.contain img,
+.custom-label-source-layer.contain embed {
+    object-fit: contain;
+}
+
+.custom-label-source-layer.cover img,
+.custom-label-source-layer.cover embed {
+    object-fit: cover;
 }
 
 .custom-label-aztec {
@@ -7932,6 +8045,7 @@ button {
     height: 0.34in;
     image-rendering: pixelated;
     background: #ffffff;
+    z-index: 3;
 }
 
 .custom-label-header,
