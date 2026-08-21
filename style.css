@@ -6220,6 +6220,49 @@ button {
     color: #6e0000;
 }
 
+.kit-return-choice-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(190px, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.kit-return-choice {
+    min-height: 64px;
+    padding: 8px;
+    text-align: left;
+    white-space: normal;
+    line-height: 1.15;
+    background: #efefef;
+    border-top: 2px solid #ffffff;
+    border-left: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+}
+
+.kit-return-choice strong {
+    display: block;
+    color: #000080;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.kit-return-choice span {
+    display: block;
+    color: #202020;
+    font-size: 11px;
+}
+
+.kit-return-choice.selected {
+    background: #dffff0;
+    outline: 2px solid #008000;
+}
+
+.kit-return-choice.selected strong::before {
+    content: "\2713  ";
+    color: #008000;
+}
+
 .container-open-status.unknown {
     background: #fff1a8;
     color: #5a3b00;

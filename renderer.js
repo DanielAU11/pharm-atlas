@@ -9256,14 +9256,17 @@ window.returnOrDiscardMedKitItem = async function(kitId, itemId) {
             <strong>${escapeHtml(med ? inventoryDisplayName(med) : item.name || 'this item')}</strong>
             from <strong>${escapeHtml(medKitName(kit))}</strong>.
         </div>
-        <label class="choice-row">
-            <input type="radio" name="handling" value="return" ${med ? 'checked' : 'disabled'}>
-            Return to main inventory
-        </label>
-        <label class="choice-row">
-            <input type="radio" name="handling" value="discard" ${med ? '' : 'checked'}>
-            Discard / remove without returning to inventory
-        </label>
+        <input type="hidden" name="handling" value="${med ? 'return' : 'discard'}">
+        <div class="kit-return-choice-group">
+            <button type="button" class="kit-return-choice ${med ? 'selected' : ''}" ${med ? '' : 'disabled'} onclick="selectKitReturnHandling(this, 'return')">
+                <strong>Return to main inventory</strong>
+                <span>Add this quantity back to the main inventory and remove it from the kit.</span>
+            </button>
+            <button type="button" class="kit-return-choice ${med ? '' : 'selected'}" onclick="selectKitReturnHandling(this, 'discard')">
+                <strong>Remove / discard without returning to main inventory</strong>
+                <span>Remove it from the kit only. Main inventory will not change.</span>
+            </button>
+        </div>
         ${med ? '' : '<div class="form-help error-text">This kit item is no longer linked to inventory, so it can only be discarded from the kit.</div>'}
     `, 'Continue');
     if (!result) return;
@@ -9284,6 +9287,17 @@ window.returnOrDiscardMedKitItem = async function(kitId, itemId) {
     await sync();
     renderMedKitsWorkspace();
     setMedKitMessage(result.handling === 'return' ? 'Item returned to main inventory.' : 'Item discarded from med kit.', 'ok');
+};
+
+window.selectKitReturnHandling = function(button, value) {
+    const group = button?.closest('.kit-return-choice-group');
+    const body = button?.closest('.child-action-modal-body');
+    const hidden = body?.querySelector('input[name="handling"]');
+    if (!group || !hidden || button.disabled) return;
+    hidden.value = value;
+    group.querySelectorAll('.kit-return-choice').forEach(choice => {
+        choice.classList.toggle('selected', choice === button);
+    });
 };
 
 window.printMedKitLabel = async function(kitId) {
