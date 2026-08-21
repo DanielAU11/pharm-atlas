@@ -348,6 +348,16 @@ function findInventoryByBarcode(code) {
     return db.inventory.find(med => medicationCodes(med).some(itemCode => scannedCodes.includes(itemCode))) || null;
 }
 
+function findInventoryMatchesByBarcode(code) {
+    const scannedCodes = medicationCodesFromScannedPayload(code);
+    if (!scannedCodes.length) return [];
+    return db.inventory.filter(med => medicationCodes(med).some(itemCode => scannedCodes.includes(itemCode)));
+}
+
+function isMultiMedicationScanPayload(code) {
+    return normalizeMedicationCode(code).startsWith('PA-MULTI|');
+}
+
 function medicationCodesFromScannedPayload(code) {
     const normalized = normalizeMedicationCode(code);
     if (!normalized) return [];
@@ -362,6 +372,41 @@ function scannedCodeMatchesMedicationCodes(scannedCode, expectedCodes = []) {
     if (!scannedCodes.length) return false;
     const normalizedExpected = expectedCodes.map(normalizeMedicationCode).filter(Boolean);
     return normalizedExpected.some(code => scannedCodes.includes(code));
+}
+
+async function chooseInventoryItemsFromScan(scannedCode, options = {}) {
+    const allowMultiple = options.allowMultiple !== false;
+    const candidates = options.candidates || findInventoryMatchesByBarcode(scannedCode);
+    const unique = [];
+    const seen = new Set();
+    candidates.forEach(med => {
+        if (!med?.id || seen.has(med.id)) return;
+        seen.add(med.id);
+        unique.push(med);
+    });
+    if (unique.length <= 1) return unique;
+    const selectedName = allowMultiple ? 'selectedMedIds' : 'selectedMedId';
+    const inputType = allowMultiple ? 'checkbox' : 'radio';
+    const rows = unique.map((med, index) => `
+        <label class="scan-med-choice-row">
+            <input type="${inputType}" name="${selectedName}" value="${escapeHtml(med.id)}" ${allowMultiple || index === 0 ? 'checked' : ''}>
+            <span>
+                <strong>${escapeHtml(inventoryDisplayName(med))}</strong>
+                <small>${escapeHtml(formatLabelMedStrength(med, true) || 'No strength')} | ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</small>
+            </span>
+        </label>
+    `).join('');
+    const result = await showActionModal(options.title || 'Choose Medication From Label', `
+        <div class="scan-med-choice-shell">
+            <div class="form-help">${escapeHtml(options.help || 'This label is linked to more than one inventory item. Select the medication(s) actually being used for this action.')}</div>
+            <div class="scan-med-choice-list">${rows}</div>
+        </div>
+    `, options.confirmText || 'Continue');
+    if (!result) return null;
+    const selectedIds = allowMultiple
+        ? asArray(result.selectedMedIds)
+        : [result.selectedMedId].filter(Boolean);
+    return unique.filter(med => selectedIds.includes(med.id));
 }
 
 function barcodeConflictItems(code, excludedMedId = '') {
@@ -4215,6 +4260,78 @@ function kitItemMed(item) {
     return db.inventory.find(med => med.id === item.medId) || null;
 }
 
+function createMedKitScanCode() {
+    let code = '';
+    do {
+        code = `PA-KIT-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+    } while ((db.medKits || []).some(kit => normalizeMedicationCode(kit.scanCode) === code) || barcodeConflictItems(code).length);
+    return code;
+}
+
+function ensureMedKitScanCode(kit) {
+    if (!kit) return '';
+    const existing = normalizeMedicationCode(kit.scanCode);
+    if (existing) {
+        kit.scanCode = existing;
+        return existing;
+    }
+    kit.scanCode = createMedKitScanCode();
+    kit.updatedAt = new Date().toISOString();
+    return kit.scanCode;
+}
+
+function medKitScanCode(kit) {
+    if (!kit?.id) return '';
+    return ensureMedKitScanCode(kit);
+}
+
+function medKitFromScannedPayload(code) {
+    const raw = String(code || '').trim();
+    if (!raw) return null;
+    ensureMedKits();
+    const normalized = normalizeMedicationCode(raw);
+    const directMatch = db.medKits.find(kit => normalizeMedicationCode(kit.scanCode) === normalized);
+    if (directMatch) return directMatch;
+    const [prefix, kitId] = raw.split('|');
+    if (String(prefix || '').toUpperCase() !== 'PA-KIT' || !kitId) return null;
+    const normalizedKitId = String(kitId).toUpperCase();
+    return db.medKits.find(kit => String(kit.id || '').toUpperCase() === normalizedKitId) || null;
+}
+
+function medKitItemSourceValue(kit, item) {
+    return kit?.id && item?.id ? `${kit.id}|${item.id}` : 'main';
+}
+
+function medKitAvailableChoices(kit, medId = '') {
+    if (!kit) return [];
+    return (kit.items || [])
+        .map(item => ({ kit, item, med: kitItemMed(item) }))
+        .filter(choice =>
+            choice.med &&
+            parseAmount(choice.item.qty, 0) > 0 &&
+            (!medId || choice.item.medId === medId)
+        );
+}
+
+function medKitLabelHtml(kit) {
+    const choices = medKitAvailableChoices(kit);
+    const medLines = choices.map(({ med }) =>
+        `<div class="med-kit-label-row">${escapeHtml(inventoryDisplayName(med))}</div>`
+    ).join('');
+    const kitCode = medKitScanCode(kit);
+    const barcodeDataUrl = kitCode ? aztecBarcodeDataUrl(kitCode) : '';
+    const textParts = [medKitName(kit), ...choices.map(({ med }) => inventoryDisplayName(med))];
+    const labelClass = `${getLabelClass(textParts, choices.length + 2)} med-kit-label-page ${barcodeDataUrl ? 'has-med-kit-code' : ''}`;
+    return `<div class="${labelClass}">
+        <div class="med-kit-label-copy">
+            <div class="label-title med-kit-label-title">${escapeHtml(medKitName(kit))}</div>
+            <div class="label-small med-kit-label-subtitle">Med Kit Contents</div>
+            <div class="med-kit-label-list">${medLines || '<div class="label-small">No medications in this kit.</div>'}</div>
+        </div>
+        ${barcodeDataUrl ? `<img class="med-kit-label-aztec" src="${barcodeDataUrl}" alt="Med kit Aztec barcode">` : ''}
+    </div>`;
+}
+
 function isExpiringWithinDays(dateValue, days = 10) {
     const date = parseLocal(dateValue);
     if (!date) return false;
@@ -7529,6 +7646,7 @@ function applyDashboardCommandPanelState() {
     if (button) {
         button.textContent = collapsed ? '◀ Open' : '▶ Hide';
         button.title = collapsed ? 'Show Daily Command Panel' : 'Hide Daily Command Panel';
+        button.textContent = collapsed ? 'Open Panel' : 'Hide';
     }
 }
 
@@ -8552,6 +8670,46 @@ window.addInventory = async function() {
     await sync();
 };
 
+async function recordManualInventoryDose(med, member, amountTaken, result, sourceValue = 'main') {
+    const formulation = med.formulation || 'unit(s)';
+    let stockSourceLabel = 'Main inventory';
+    let stockSource = usesContainerTracking(med) ? 'container' : 'main';
+    let kitId = '';
+    let kitItemId = '';
+    let kitExpiry = '';
+    if (!usesContainerTracking(med)) {
+        if (sourceValue && sourceValue !== 'main') {
+            const kitResult = consumeFromKitSource(sourceValue, med, amountTaken);
+            if (kitResult.error) return { ok: false, error: kitResult.error };
+            stockSourceLabel = kitResult.sourceLabel;
+            stockSource = 'kit';
+            kitId = kitResult.kitId || '';
+            kitItemId = kitResult.kitItemId || '';
+            kitExpiry = kitResult.kitItem?.expiry || med.expiry || '';
+        } else {
+            if (parseAmount(med.stock) < amountTaken) return { ok: false, error: 'Insufficient stock.' };
+            med.stock = parseAmount(med.stock) - amountTaken;
+        }
+    }
+    db.history.unshift({
+        id: Date.now().toString() + Math.random().toString(16).slice(2),
+        timestamp: formatActualTimestamp(result),
+        memberId: member.id,
+        memberName: memberDisplayName(member),
+        medId: med.id,
+        medName: med.name,
+        stockSource,
+        inventorySource: sourceValue || 'main',
+        kitId,
+        kitItemId,
+        kitExpiry,
+        stockDelta: usesContainerTracking(med) ? 0 : amountTaken,
+        details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}; Source: ${stockSourceLabel}${usesContainerTracking(med) ? `; ${inventoryUnitFor(med)} inventory unchanged until a container is marked finished` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
+    });
+    addAudit('Manual dose documented', med.name, `${memberDisplayName(member)} | ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}`);
+    return { ok: true };
+}
+
 window.takeDose = async function(medId) {
     const med = db.inventory.find(m => m.id === medId);
     if (!med) return;
@@ -8560,8 +8718,7 @@ window.takeDose = async function(medId) {
         return;
     }
 
-    const formulation = med.formulation || 'unit(s)';
-    const administrationUnit = med.administrationUnit || formulation;
+    const administrationUnit = med.administrationUnit || med.formulation || 'unit(s)';
     const result = await requestActualAdministration(`Take: ${med.name}`, `
         <div class="field-row" style="margin-top:8px;">
             <label>Member:</label>
@@ -8588,47 +8745,173 @@ window.takeDose = async function(medId) {
         await appAlert("Enter an amount taken greater than 0.");
         return;
     }
-    let stockSourceLabel = 'Main inventory';
-    let stockSource = usesContainerTracking(med) ? 'container' : 'main';
-    let kitId = '';
-    let kitItemId = '';
-    let kitExpiry = '';
-    if (!usesContainerTracking(med)) {
-        if (result.inventorySource && result.inventorySource !== 'main') {
-            const kitResult = consumeFromKitSource(result.inventorySource, med, amountTaken);
-            if (kitResult.error) {
-                await appAlert(kitResult.error);
+    const recorded = await recordManualInventoryDose(med, member, amountTaken, result, result.inventorySource || 'main');
+    if (!recorded.ok) {
+        await appAlert(recorded.error || 'Unable to record dose.');
+        return;
+    }
+    await sync();
+};
+
+window.scanCustomLabelForSupplementalDose = async function() {
+    if (db.family.length === 0) {
+        await appAlert('Add a member before recording a supplemental dose.');
+        return;
+    }
+    const scan = await showActionModal('Scan Custom Label', `
+        <div class="field-row-stacked">
+            <label>Scan or type Aztec / barcode code:</label>
+            <input name="scanCode" type="text" placeholder="Scan label code..." style="width:100%;">
+        </div>
+        <div class="form-help" style="margin-top:8px;">Custom labels only affect inventory when they include an Aztec/barcode code. If the label links several medications, PharmAtlas will ask which item(s) were actually used.</div>
+    `, 'Find Medication');
+    const scannedCode = normalizeMedicationCode(scan?.scanCode);
+    if (!scannedCode) return;
+    const scannedKit = medKitFromScannedPayload(scan?.scanCode || scannedCode);
+    if (scannedKit) {
+        const choices = medKitAvailableChoices(scannedKit);
+        if (!choices.length) {
+            await appAlert(`${medKitName(scannedKit)} does not have any available medications to use.`);
+            return;
+        }
+        const rows = choices.map((choice, index) => {
+            const med = choice.med;
+            const unit = med.administrationUnit || med.formulation || inventoryUnitFor(med);
+            return `<div class="scan-dose-row with-check">
+                <label class="scan-dose-check"><input type="checkbox" name="kitChoiceIds" value="${escapeHtml(choice.item.id)}"> Use</label>
+                <strong>${escapeHtml(inventoryDisplayName(med))}</strong>
+                <span>${escapeHtml(formatLabelMedStrength(med, true) || '')}</span>
+                <label>Amount (${escapeHtml(unit)})<input name="amount_${index}" type="number" min="0" step="any" value="1"></label>
+                <label>Kit source<input type="text" value="${escapeHtml(medKitName(scannedKit))}" disabled></label>
+            </div>`;
+        }).join('');
+        const result = await requestActualAdministration('Record Dose From Med Kit Label', `
+            <div class="form-help">This label belongs to <strong>${escapeHtml(medKitName(scannedKit))}</strong>. Only this med kit inventory will be reduced.</div>
+            <div class="field-row" style="margin-top:8px;">
+                <label>Member:</label>
+                <select name="memberId" style="width:220px;">${memberOptionsHtml(currentEditingMemberId || '')}</select>
+            </div>
+            <div class="scan-dose-list">${rows}</div>
+            <div class="field-row-stacked" style="margin-top:8px;">
+                <label>Note / reason given:</label>
+                <textarea name="adminNote" rows="2" style="width:100%; resize:none;"></textarea>
+            </div>
+        `, 'Record Selected');
+        if (!result) return;
+        const member = db.family.find(item => item.id === result.memberId);
+        if (!member) {
+            await appAlert('Select the member who received the medication.');
+            return;
+        }
+        const selectedKitItemIds = new Set(asArray(result.kitChoiceIds));
+        const selectedChoices = choices.filter(choice => selectedKitItemIds.has(choice.item.id));
+        if (!selectedChoices.length) {
+            await appAlert('Select at least one medication from this med kit.');
+            return;
+        }
+        for (let index = 0; index < choices.length; index++) {
+            const { med, item } = choices[index];
+            if (!selectedKitItemIds.has(item.id)) continue;
+            const amount = parseAmount(result[`amount_${index}`], NaN);
+            if (!Number.isFinite(amount) || amount <= 0) {
+                await appAlert(`Enter an amount greater than 0 for ${med.name}.`);
                 return;
             }
-            stockSourceLabel = kitResult.sourceLabel;
-            stockSource = 'kit';
-            kitId = kitResult.kitId || '';
-            kitItemId = kitResult.kitItemId || '';
-            kitExpiry = kitResult.kitItem?.expiry || med.expiry || '';
-        } else {
-            if (parseAmount(med.stock) < amountTaken) {
-                await appAlert("Insufficient stock.");
+            if (!usesContainerTracking(med) && parseAmount(item.qty, 0) < amount) {
+                await appAlert(`${med.name}: ${medKitName(scannedKit)} only has ${formatAmount(parseAmount(item.qty, 0))} ${inventoryUnitFor(med)} available.`);
                 return;
             }
-            med.stock = parseAmount(med.stock) - amountTaken;
+        }
+        for (let index = 0; index < choices.length; index++) {
+            const { med, item } = choices[index];
+            if (!selectedKitItemIds.has(item.id)) continue;
+            const amount = parseAmount(result[`amount_${index}`], NaN);
+            const recorded = await recordManualInventoryDose(med, member, amount, result, medKitItemSourceValue(scannedKit, item));
+            if (!recorded.ok) {
+                await appAlert(`${med.name}: ${recorded.error || 'Unable to record dose.'}`);
+                return;
+            }
+        }
+        await sync();
+        return;
+    }
+    const meds = await chooseInventoryItemsFromScan(scannedCode, {
+        title: 'Select Medication(s) Used',
+        help: 'This scanned custom label is linked to multiple inventory items. Select only the medication(s) that were actually administered or removed from stock.',
+        confirmText: 'Use Selected',
+        allowMultiple: true
+    });
+    if (meds === null) return;
+    if (!meds.length) {
+        await appAlert('That label code did not match any inventory item.');
+        return;
+    }
+    const rows = meds.map((med, index) => {
+        const sourceOptions = kitSourceOptionsForMed(med.id).map(({ kit, item }) => {
+            const itemMed = kitItemMed(item);
+            const unit = itemMed ? inventoryUnitFor(itemMed) : item.unit || 'unit';
+            return `<option value="${escapeHtml(`${kit.id}|${item.id}`)}">${escapeHtml(`${medKitName(kit)} - ${formatAmount(parseAmount(item.qty))} ${unit} available`)}</option>`;
+        }).join('');
+        return `<div class="scan-dose-row">
+            <input type="hidden" name="medId_${index}" value="${escapeHtml(med.id)}">
+            <strong>${escapeHtml(inventoryDisplayName(med))}</strong>
+            <span>${escapeHtml(formatLabelMedStrength(med, true) || '')}</span>
+            <label>Amount (${escapeHtml(med.administrationUnit || med.formulation || inventoryUnitFor(med))})<input name="amount_${index}" type="number" min="0" step="any" value="1"></label>
+            <label>Source<select name="source_${index}">
+                <option value="main">Main inventory</option>
+                ${sourceOptions}
+            </select></label>
+        </div>`;
+    }).join('');
+    const result = await requestActualAdministration('Record Supplemental Dose From Label', `
+        <div class="field-row" style="margin-top:8px;">
+            <label>Member:</label>
+            <select name="memberId" style="width:220px;">${memberOptionsHtml(currentEditingMemberId || '')}</select>
+        </div>
+        <div class="scan-dose-list">${rows}</div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Note / reason given:</label>
+            <textarea name="adminNote" rows="2" style="width:100%; resize:none;"></textarea>
+        </div>
+    `, 'Record Selected');
+    if (!result) return;
+    const member = db.family.find(item => item.id === result.memberId);
+    if (!member) {
+        await appAlert('Select the member who received the medication.');
+        return;
+    }
+    for (let index = 0; index < meds.length; index++) {
+        const med = meds[index];
+        const amount = parseAmount(result[`amount_${index}`], NaN);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            await appAlert(`Enter an amount greater than 0 for ${med.name}.`);
+            return;
+        }
+        const source = result[`source_${index}`] || 'main';
+        if (!usesContainerTracking(med)) {
+            if (source && source !== 'main') {
+                const [kitId, itemId] = String(source).split('|');
+                const kit = db.medKits.find(candidate => candidate.id === kitId);
+                const kitItem = kit?.items?.find(candidate => candidate.id === itemId && candidate.medId === med.id);
+                if (!kit || !kitItem || parseAmount(kitItem.qty, 0) < amount) {
+                    await appAlert(`${med.name}: insufficient med kit quantity for the selected source.`);
+                    return;
+                }
+            } else if (parseAmount(med.stock, 0) < amount) {
+                await appAlert(`${med.name}: insufficient main inventory stock.`);
+                return;
+            }
         }
     }
-    db.history.unshift({
-        id: Date.now().toString(),
-        timestamp: formatActualTimestamp(result),
-        memberId: member.id,
-        memberName: memberDisplayName(member),
-        medId: med.id,
-        medName: med.name,
-        stockSource,
-        inventorySource: result.inventorySource || 'main',
-        kitId,
-        kitItemId,
-        kitExpiry,
-        stockDelta: usesContainerTracking(med) ? 0 : amountTaken,
-        details: `Manual/supplemental ${isTopicalMedication(med) ? 'application' : 'dose'} - ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}; Source: ${stockSourceLabel}${usesContainerTracking(med) ? `; ${inventoryUnitFor(med)} inventory unchanged until a container is marked finished` : ''}${result.adminNote ? ` | Note: ${result.adminNote}` : ''}`
-    });
-    addAudit('Manual dose documented', med.name, `${memberDisplayName(member)} | ${formatAmount(amountTaken)} ${med.administrationUnit || formulation}`);
+    for (let index = 0; index < meds.length; index++) {
+        const med = meds[index];
+        const amount = parseAmount(result[`amount_${index}`], NaN);
+        const recorded = await recordManualInventoryDose(med, member, amount, result, result[`source_${index}`] || 'main');
+        if (!recorded.ok) {
+            await appAlert(`${med.name}: ${recorded.error || 'Unable to record dose.'}`);
+            return;
+        }
+    }
     await sync();
 };
 
@@ -8733,6 +9016,7 @@ function renderMedKitsWorkspace() {
                             <label>Kit name:</label>
                             <input id="med-kit-name-input" type="text" value="${escapeHtml(medKitName(activeKit))}" style="width:260px;">
                             <button type="button" onclick="saveMedKitName('${escapeHtml(activeKit.id)}')">Save Name</button>
+                            <button type="button" onclick="printMedKitLabel('${escapeHtml(activeKit.id)}')"><span class="win98-icon icon-label"></span> Kit Label</button>
                             <button type="button" onclick="deleteMedKit('${escapeHtml(activeKit.id)}')">Delete Kit</button>
                         </div>
                     </div>
@@ -8793,6 +9077,7 @@ window.createMedKit = async function() {
     const kit = {
         id: `kit_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         name: `Med Kit ${db.medKits.length + 1}`,
+        scanCode: createMedKitScanCode(),
         items: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -8995,6 +9280,19 @@ window.returnOrDiscardMedKitItem = async function(kitId, itemId) {
     await sync();
     renderMedKitsWorkspace();
     setMedKitMessage(result.handling === 'return' ? 'Item returned to main inventory.' : 'Item discarded from med kit.', 'ok');
+};
+
+window.printMedKitLabel = async function(kitId) {
+    ensureMedKits();
+    const kit = db.medKits.find(candidate => candidate.id === kitId);
+    if (!kit) return;
+    if (!medKitAvailableChoices(kit).length) {
+        setMedKitMessage('Add at least one medication before printing a kit label.', 'error');
+        return;
+    }
+    ensureMedKitScanCode(kit);
+    await sync();
+    previewLabelHtml(medKitLabelHtml(kit));
 };
 
 window.returnMedKitItem = async function(kitId, itemId) {
@@ -13178,6 +13476,94 @@ window.schedulePrepackScan = function(queueId) {
     }, 180);
 };
 
+async function choosePrepackItemsFromMultiScan(queue, day, scannedCode) {
+    if (!isMultiMedicationScanPayload(scannedCode)) return [];
+    const candidates = (day?.items || []).filter(item => {
+        if (item.status === 'correct') return false;
+        const med = db.inventory.find(candidate => candidate.id === item.medId);
+        const expectedCodes = med ? medicationCodes(med) : [normalizeMedicationCode(item.barcodeCode)].filter(Boolean);
+        return scannedCodeMatchesMedicationCodes(scannedCode, expectedCodes);
+    });
+    if (candidates.length <= 1) return candidates;
+    const rows = candidates.map(item => {
+        const med = db.inventory.find(candidate => candidate.id === item.medId);
+        const unit = med ? med.administrationUnit || inventoryUnitFor(med) : item.unit || 'unit';
+        return `<label class="scan-med-choice-row">
+            <input type="checkbox" name="prepackItemIds" value="${escapeHtml(item.id)}" checked>
+            <span>
+                <strong>${escapeHtml(item.time || '')} - ${escapeHtml(item.medName || med?.name || 'Medication')}</strong>
+                <small>${escapeHtml(formatAmount(prepackItemDoseQty(queue, item)))} ${escapeHtml(unit)}${item.regimenName ? ` | ${escapeHtml(item.regimenName)}` : ''}</small>
+            </span>
+        </label>`;
+    }).join('');
+    const result = await showActionModal('Choose Prepacked Medication(s)', `
+        <div class="scan-med-choice-shell">
+            <div class="form-help">This scanned custom label is linked to multiple inventory items. Select the medication(s) actually placed into this prepack. Medications linked as "must take together" are processed together when selected.</div>
+            <div class="scan-med-choice-list">${rows}</div>
+        </div>
+    `, 'Mark Selected');
+    if (!result) return [];
+    const selectedIds = new Set(asArray(result.prepackItemIds));
+    candidates.forEach(item => {
+        if (!selectedIds.has(item.id)) return;
+        prepackTogetherGroupItems(day, item).forEach(groupItem => {
+            if (candidates.some(candidate => candidate.id === groupItem.id)) selectedIds.add(groupItem.id);
+        });
+    });
+    return candidates.filter(item => selectedIds.has(item.id));
+}
+
+async function choosePrepackItemsFromMedKitScan(queue, day, kit) {
+    const sourceByMedId = new Map();
+    medKitAvailableChoices(kit).forEach(({ item }) => {
+        if (!sourceByMedId.has(item.medId)) sourceByMedId.set(item.medId, medKitItemSourceValue(kit, item));
+    });
+    const candidates = (day?.items || []).filter(item =>
+        item.status !== 'correct' &&
+        item.medId &&
+        sourceByMedId.has(item.medId)
+    );
+    if (!candidates.length) return [];
+    const expandWithTogetherLinks = async selectedItems => {
+        const expanded = [];
+        const seen = new Set();
+        for (const selected of selectedItems) {
+            for (const groupItem of prepackTogetherGroupItems(day, selected)) {
+                if (!groupItem?.id || groupItem.status === 'correct' || seen.has(groupItem.id)) continue;
+                const sourceValue = sourceByMedId.get(groupItem.medId);
+                if (!sourceValue) {
+                    await appAlert(`${groupItem.medName || 'A linked medication'} must be taken together with ${selected.medName || 'the selected medication'}, but it is not available in ${medKitName(kit)}.`);
+                    return null;
+                }
+                expanded.push({ item: groupItem, sourceValue });
+                seen.add(groupItem.id);
+            }
+        }
+        return expanded;
+    };
+    if (candidates.length === 1) return expandWithTogetherLinks(candidates);
+    const rows = candidates.map(item => {
+        const med = db.inventory.find(candidate => candidate.id === item.medId);
+        const unit = med ? med.administrationUnit || inventoryUnitFor(med) : item.unit || 'unit';
+        return `<label class="scan-med-choice-row">
+            <input type="checkbox" name="prepackItemIds" value="${escapeHtml(item.id)}">
+            <span>
+                <strong>${escapeHtml(item.time || '')} - ${escapeHtml(item.medName || med?.name || 'Medication')}</strong>
+                <small>${escapeHtml(formatAmount(prepackItemDoseQty(queue, item)))} ${escapeHtml(unit)} from ${escapeHtml(medKitName(kit))}${item.regimenName ? ` | ${escapeHtml(item.regimenName)}` : ''}</small>
+            </span>
+        </label>`;
+    }).join('');
+    const result = await showActionModal('Choose Med Kit Item(s)', `
+        <div class="scan-med-choice-shell">
+            <div class="form-help">This label belongs to <strong>${escapeHtml(medKitName(kit))}</strong>. Select which due prepack medication(s) you are filling from that kit. Only kit inventory will be reduced.</div>
+            <div class="scan-med-choice-list">${rows}</div>
+        </div>
+    `, 'Use Selected');
+    if (!result) return null;
+    const selectedIds = new Set(asArray(result.prepackItemIds));
+    return expandWithTogetherLinks(candidates.filter(item => selectedIds.has(item.id)));
+}
+
 window.scanPrepackCode = async function(queueId) {
     const queue = db.prepackQueues.find(item => item.id === queueId);
     const input = document.getElementById('prepack-scan-input');
@@ -13198,8 +13584,131 @@ window.scanPrepackCode = async function(queueId) {
         return;
     }
     const day = queue.days[queue.currentDayIndex || 0];
-    const item = day?.items.find(candidate => candidate.status !== 'correct');
+    let item = day?.items.find(candidate => candidate.status !== 'correct');
     if (!day || !item) return;
+    const scannedKit = medKitFromScannedPayload(input.value || scannedCode);
+    if (scannedKit) {
+        const kitScanItems = await choosePrepackItemsFromMedKitScan(queue, day, scannedKit);
+        if (kitScanItems === null) {
+            input.value = '';
+            return;
+        }
+        if (!kitScanItems.length) {
+            input.value = '';
+            await appAlert(`No pending medication in this prepack matches medications available in ${medKitName(scannedKit)}.`);
+            return;
+        }
+        const previous = kitScanItems.map(entry => ({
+            item: entry.item,
+            status: entry.item.status,
+            verificationMethod: entry.item.verificationMethod || '',
+            scannedCode: entry.item.scannedCode || '',
+            scannedAt: entry.item.scannedAt || '',
+            inventorySource: entry.item.inventorySource || ''
+        }));
+        kitScanItems.forEach(entry => {
+            entry.item.inventorySource = entry.sourceValue;
+            entry.item.scannedCode = scannedCode;
+            entry.item.scannedAt = new Date().toISOString();
+            entry.item.status = 'correct';
+            entry.item.verificationMethod = 'kit-label-scan';
+        });
+        const stockCheckItems = kitScanItems.map(entry => entry.item);
+        const shortages = prepackStockShortagesForItems(queue, stockCheckItems);
+        if (shortages.length) {
+            previous.forEach(entry => {
+                entry.item.status = entry.status;
+                entry.item.verificationMethod = entry.verificationMethod;
+                entry.item.scannedCode = entry.scannedCode;
+                entry.item.scannedAt = entry.scannedAt;
+                entry.item.inventorySource = entry.inventorySource;
+            });
+            input.value = '';
+            await appAlert(`Not enough med kit stock to prepack: ${shortages.join(' ')}`);
+            return;
+        }
+        const failed = kitScanItems.some(entry => !applyPrepackStockForReadyGroup(queue, day, entry.item, 'kit-label-scan'));
+        if (failed) {
+            previous.forEach(entry => {
+                entry.item.status = entry.status;
+                entry.item.verificationMethod = entry.verificationMethod;
+                entry.item.scannedCode = entry.scannedCode;
+                entry.item.scannedAt = entry.scannedAt;
+                entry.item.inventorySource = entry.inventorySource;
+            });
+            input.value = '';
+            await appAlert('One or more selected medications do not have enough med kit stock to complete this prepack scan.');
+            return;
+        }
+        input.value = '';
+        updatePrepackQueueStatus(queue);
+        if (queue.status === 'completed') {
+            activePrepackQueueId = nextActivePrepackQueueId(queue.id);
+        } else if (day.status === 'completed') {
+            const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
+            if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
+        }
+        await sync();
+        return;
+    }
+    const multiScanItems = await choosePrepackItemsFromMultiScan(queue, day, scannedCode);
+    if (multiScanItems === null) {
+        input.value = '';
+        return;
+    }
+    if (multiScanItems.length === 1) item = multiScanItems[0];
+    if (multiScanItems.length > 1) {
+        const stockCheckItems = [];
+        const stockCheckIds = new Set();
+        multiScanItems.forEach(candidate => {
+            prepackTogetherGroupItems(day, candidate).forEach(groupItem => {
+                if (stockCheckIds.has(groupItem.id)) return;
+                stockCheckIds.add(groupItem.id);
+                stockCheckItems.push(groupItem);
+            });
+        });
+        const shortages = prepackStockShortagesForItems(queue, stockCheckItems);
+        if (shortages.length) {
+            input.value = '';
+            await appAlert(`Not enough stock to prepack: ${shortages.join(' ')}`);
+            return;
+        }
+        const previous = multiScanItems.map(candidate => ({
+            item: candidate,
+            status: candidate.status,
+            verificationMethod: candidate.verificationMethod || '',
+            scannedCode: candidate.scannedCode || '',
+            scannedAt: candidate.scannedAt || ''
+        }));
+        multiScanItems.forEach(candidate => {
+            candidate.scannedCode = scannedCode;
+            candidate.scannedAt = new Date().toISOString();
+            candidate.status = 'correct';
+            candidate.verificationMethod = 'scan';
+        });
+        const failed = multiScanItems.some(candidate => !applyPrepackStockForReadyGroup(queue, day, candidate, 'scan'));
+        if (failed) {
+            previous.forEach(entry => {
+                entry.item.status = entry.status;
+                entry.item.verificationMethod = entry.verificationMethod;
+                entry.item.scannedCode = entry.scannedCode;
+                entry.item.scannedAt = entry.scannedAt;
+            });
+            input.value = '';
+            await appAlert('One or more selected medications do not have enough stock to complete this linked prepack scan.');
+            return;
+        }
+        input.value = '';
+        updatePrepackQueueStatus(queue);
+        if (queue.status === 'completed') {
+            activePrepackQueueId = nextActivePrepackQueueId(queue.id);
+        } else if (day.status === 'completed') {
+            const nextIndex = queue.days.findIndex((candidate, index) => index > queue.currentDayIndex && candidate.status !== 'completed');
+            if (nextIndex >= 0) queue.currentDayIndex = nextIndex;
+        }
+        await sync();
+        return;
+    }
     const med = db.inventory.find(candidate => candidate.id === item.medId);
     const expectedCodes = med ? medicationCodes(med) : [normalizeMedicationCode(item.barcodeCode)].filter(Boolean);
     item.scannedCode = scannedCode;
@@ -18788,10 +19297,11 @@ window.scanCompoundIngredient = function(recipeId) {
     const message = document.getElementById('compound-scan-message');
     const code = normalizeMedicationCode(input?.value || '');
     if (!code) return;
-    const med = findInventoryByBarcode(code);
-    const row = med
-        ? Array.from(document.querySelectorAll('.compound-prep-ingredient')).find(item => item.dataset.medId === med.id)
+    const matches = findInventoryMatchesByBarcode(code);
+    const row = matches.length
+        ? Array.from(document.querySelectorAll('.compound-prep-ingredient')).find(item => matches.some(med => med.id === item.dataset.medId))
         : null;
+    const med = row ? matches.find(candidate => candidate.id === row.dataset.medId) : matches[0] || null;
     if (row) {
         row.querySelector('.compound-prep-check').checked = true;
         row.classList.add('compound-prep-ready');
@@ -22414,6 +22924,12 @@ function customLabelValues() {
     const value = id => document.getElementById(id)?.value || '';
     const include = field => customLabelFieldEnabled(field);
     const sourceFit = value('custom-label-source-fit') || 'contain';
+    const linkedMeds = customLabelSelectedMeds().map(med => ({
+        id: med.id,
+        name: med.name || inventoryDisplayName(med),
+        strength: formatLabelMedStrength(med, true),
+        onHand: `${formatAmount(parseAmount(med.stock))} ${inventoryUnitFor(med)}`
+    }));
     return {
         size,
         font: customLabelFontById(value('custom-label-font-size')),
@@ -22422,6 +22938,7 @@ function customLabelValues() {
         includeBorder: !!document.getElementById('custom-label-border')?.checked,
         sourceFile: customLabelSourceFile,
         sourceFit,
+        linkedMeds,
         includeName: include('name'),
         includeQuantity: include('quantity'),
         includeDate: include('date'),
@@ -22477,11 +22994,19 @@ function customLabelHtml(values, includePrintStyle = false) {
     const textParts = [];
     const lines = [];
     const line = html => values.includeDividers ? `<div class="custom-label-line">${html}</div>` : html;
+    const linkedMeds = Array.isArray(values.linkedMeds) ? values.linkedMeds : [];
     if (values.includeHeader && values.header) {
         textParts.push(values.header);
         lines.push(line(`<div class="label-title custom-label-header">${escapeHtml(values.header)}</div>`));
     }
-    if (values.includeName && (values.name || values.strength)) {
+    if (values.includeName && linkedMeds.length > 1) {
+        const medRows = linkedMeds.map(med => {
+            const display = [med.name, med.strength].filter(Boolean).join(' ');
+            textParts.push(display);
+            return `<div class="custom-label-linked-row">${escapeHtml(display)}</div>`;
+        }).join('');
+        lines.push(line(`<div class="custom-label-linked-stack">${medRows}</div>`));
+    } else if (values.includeName && (values.name || values.strength)) {
         textParts.push(values.name, values.strength);
         lines.push(line(`<div class="label-title custom-label-main-title">${escapeHtml([values.name, values.strength].filter(Boolean).join(' '))}</div>`));
     }
@@ -22520,7 +23045,7 @@ function customLabelHtml(values, includePrintStyle = false) {
 
     const barcodeDataUrl = values.includeBarcode && values.barcodeCode ? aztecBarcodeDataUrl(values.barcodeCode) : '';
     const sourceFileHtml = customLabelSourceFileHtml(values);
-    const labelClass = `${getLabelClass(textParts, lines.length)} custom-label-page ${values.font.className}${values.includeDividers ? ' has-dividers' : ''}${values.includeBorder ? ' has-outer-border' : ''}${barcodeDataUrl ? ' has-custom-code' : ''}${sourceFileHtml ? ' has-source-file' : ''}`;
+    const labelClass = `${getLabelClass(textParts, lines.length)} custom-label-page ${values.font.className}${values.includeDividers ? ' has-dividers' : ''}${values.includeBorder ? ' has-outer-border' : ''}${barcodeDataUrl ? ' has-custom-code' : ''}${barcodeDataUrl && linkedMeds.length > 1 ? ' has-multi-linked-meds' : ''}${sourceFileHtml ? ' has-source-file' : ''}`;
     const content = lines.length ? lines.join('') : (sourceFileHtml ? '' : '<div class="label-small custom-label-empty">No fields selected.</div>');
     const styleVars = `--custom-label-width:${values.size.width}in; --custom-label-height:${values.size.height}in;`;
     return `${includePrintStyle ? customLabelPrintSizeStyle(values.size) : ''}
@@ -22594,11 +23119,26 @@ window.selectCustomLabelInventory = function(medId = '') {
 
 function applyCustomLabelSelectedMeds() {
     const meds = customLabelSelectedMeds();
-    if (!meds.length) return;
     const set = (id, value) => {
         const element = document.getElementById(id);
         if (element) element.value = value || '';
     };
+    if (!meds.length) {
+        [
+            'custom-label-name',
+            'custom-label-strength',
+            'custom-label-quantity',
+            'custom-label-expiration',
+            'custom-label-instructions',
+            'custom-label-barcode'
+        ].forEach(id => set(id, ''));
+        const storageSelect = document.getElementById('custom-label-storage');
+        if (storageSelect) storageSelect.innerHTML = customLabelStorageOptions('Room Temp');
+        set('custom-label-storage', 'Room Temp');
+        const barcodeCheck = document.querySelector('#action-modal-body input.custom-label-field-toggle[value="barcode"]');
+        if (barcodeCheck) barcodeCheck.checked = false;
+        return;
+    }
     if (meds.length === 1) {
         const med = meds[0];
         set('custom-label-name', med.name || '');
@@ -22610,8 +23150,8 @@ function applyCustomLabelSelectedMeds() {
         set('custom-label-expiration', med.expiry || '');
         set('custom-label-instructions', med.notes || '');
     } else {
-        set('custom-label-name', meds.map(med => med.name || inventoryDisplayName(med)).join(' / '));
-        set('custom-label-strength', meds.map(med => formatLabelMedStrength(med, true)).filter(Boolean).join(' | '));
+        set('custom-label-name', `${meds.length} linked medications`);
+        set('custom-label-strength', '');
         set('custom-label-quantity', `${meds.length} linked inventory items`);
         const sharedStorage = meds.every(med => (med.storage || '') === (meds[0].storage || '')) ? (meds[0].storage || '') : '';
         const storageSelect = document.getElementById('custom-label-storage');
@@ -22629,9 +23169,7 @@ window.removeCustomLabelInventory = function(medId = '') {
     const linked = document.getElementById('custom-label-linked-med-ids');
     if (!linked) return;
     linked.value = customLabelSelectedIds().filter(id => id !== medId).join(',');
-    const meds = customLabelSelectedMeds();
-    const barcodeInput = document.getElementById('custom-label-barcode');
-    if (barcodeInput) barcodeInput.value = customLabelMergedCodeForMeds(meds);
+    applyCustomLabelSelectedMeds();
     window.filterCustomLabelInventory();
     updateCustomLabelPreview();
 };
@@ -22639,8 +23177,7 @@ window.removeCustomLabelInventory = function(medId = '') {
 window.clearCustomLabelInventorySelection = function() {
     const linked = document.getElementById('custom-label-linked-med-ids');
     if (linked) linked.value = '';
-    const barcodeInput = document.getElementById('custom-label-barcode');
-    if (barcodeInput) barcodeInput.value = '';
+    applyCustomLabelSelectedMeds();
     window.filterCustomLabelInventory();
     updateCustomLabelPreview();
 };
@@ -22811,7 +23348,7 @@ window.openCustomLabelBuilder = async function() {
                         <input id="custom-label-linked-med-ids" type="hidden" value="">
                         <div id="custom-label-inventory-results" class="custom-label-inventory-results">${customLabelInventoryResultsHtml()}</div>
                         <div id="custom-label-selected-summary" class="custom-label-selected-summary">${customLabelSelectedSummaryHtml()}</div>
-                        <div class="custom-label-hint">Click one or more items to copy saved details. Multiple linked medications print one merged Aztec code that scans as any selected item.</div>
+                        <div class="custom-label-hint">Click one or more items to copy saved details. Multiple linked medications print one merged Aztec code; scanning it prompts you to choose which medication(s) were actually used.</div>
                     </fieldset>
 
                     <fieldset>
