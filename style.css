@@ -1083,6 +1083,230 @@ button {
     display: none;
 }
 
+.command-scan-terminal label,
+.member-scan-terminal label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-weight: bold;
+    color: #000080;
+}
+
+.command-scan-terminal input,
+.member-scan-terminal input {
+    width: 100%;
+    min-width: 0;
+}
+
+.rail-action-grid.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 6px;
+}
+
+.command-scan-status {
+    margin-top: 6px;
+}
+
+.member-scan-terminal {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 8px;
+    align-items: end;
+    padding: 6px;
+    background: #eaf4ff;
+    border: 1px inset #ffffff;
+}
+
+.member-command-scan-panel {
+    margin-top: 8px;
+}
+
+.command-scan-card {
+    background: #f8fbff;
+    border: 2px inset #ffffff;
+    padding: 8px;
+}
+
+.command-scan-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #808080;
+}
+
+.command-scan-header small {
+    display: block;
+    margin-top: 2px;
+    color: #404040;
+}
+
+.command-scan-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.command-scan-filter-strip {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding: 6px 0;
+}
+
+.command-scan-filter-strip button.active {
+    background: #dfffdf;
+    color: #006000;
+    font-weight: bold;
+}
+
+.command-scan-med-select {
+    padding: 6px 0;
+}
+
+.command-scan-med-select label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 540px;
+    font-weight: bold;
+    color: #000080;
+}
+
+.command-scan-med-select select {
+    width: 100%;
+    min-width: 0;
+    background: #ffffff;
+}
+
+.command-scan-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.42fr) minmax(320px, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.command-scan-subtitle {
+    font-weight: bold;
+    color: #000080;
+    margin-bottom: 4px;
+}
+
+.command-scan-med-list {
+    max-height: 240px;
+    overflow: auto;
+    border: 1px inset #ffffff;
+    background: #ffffff;
+}
+
+.command-scan-med-row {
+    display: block;
+    padding: 6px;
+    border-bottom: 1px dotted #c0c0c0;
+}
+
+.command-scan-med-row small {
+    display: block;
+    color: #404040;
+}
+
+.command-scan-status-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 5px;
+    border: 1px solid #808080;
+    background: #ffffcc;
+    color: #804000;
+    font-size: 10px;
+    font-weight: bold;
+    vertical-align: middle;
+}
+
+.command-scan-status-badge.danger {
+    background: #ffe1e1;
+    border-color: #c00000;
+    color: #c00000;
+}
+
+.command-scan-status-badge.warning {
+    background: #fff2b8;
+    border-color: #b08000;
+    color: #804000;
+}
+
+.command-scan-status-badge.returned {
+    background: #dff0ff;
+    border-color: #0060a8;
+    color: #004080;
+}
+
+.command-scan-history {
+    max-height: 260px;
+    overflow: auto;
+    background: #ffffff;
+    border: 1px inset #ffffff;
+}
+
+.command-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.command-history-table th {
+    position: sticky;
+    top: 0;
+    background: #d0d0d0;
+    border: 1px solid #808080;
+    color: #000080;
+    z-index: 1;
+}
+
+.command-history-table td {
+    border: 1px solid #c0c0c0;
+    padding: 3px 4px;
+    vertical-align: top;
+}
+
+.command-history-administered td:first-child,
+.command-history-prepacked td:first-child {
+    color: #008000;
+    font-weight: bold;
+}
+
+.command-history-returned td:first-child {
+    color: #005fba;
+    font-weight: bold;
+}
+
+.command-history-wasted td:first-child {
+    color: #b00000;
+    font-weight: bold;
+}
+
+.command-history-labels-need-reprint td:nth-child(2),
+.command-history-labels-not-printed td:nth-child(2) {
+    color: #804000;
+    font-weight: bold;
+}
+
+.command-history-not-yet-prepacked td:nth-child(2) {
+    color: #000080;
+    font-weight: bold;
+}
+
+.command-history-discontinued td:nth-child(2) {
+    color: #c00000;
+    font-weight: bold;
+}
+
+.command-history-completed td:nth-child(2) {
+    color: #804000;
+    font-weight: bold;
+}
+
 .tab-list li[draggable="true"] {
     cursor: move;
 }
@@ -6755,7 +6979,7 @@ button {
 
 .return-prepack-modal-grid {
     display: grid;
-    grid-template-columns: minmax(880px, 1fr) minmax(430px, 0.42fr);
+    grid-template-columns: minmax(920px, 1fr) minmax(430px, 0.38fr);
     gap: 10px;
     align-items: start;
 }
@@ -6766,7 +6990,7 @@ button {
 
 .return-prepack-filter-panel {
     display: grid;
-    grid-template-columns: minmax(170px, 1fr) 130px minmax(155px, 0.9fr) minmax(130px, 0.75fr) minmax(130px, 0.75fr) minmax(185px, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
     align-items: end;
     gap: 6px;
     padding: 7px;
@@ -6886,6 +7110,14 @@ button {
     border-color: #008000;
 }
 
+.return-prepack-row.waste-only {
+    background: #fff8d8;
+}
+
+.return-prepack-row.return-blocked {
+    background: #ffe1e1;
+}
+
 .return-prepack-children {
     padding: 2px 0 4px;
 }
@@ -6940,6 +7172,16 @@ button {
     background: #e8ffe8;
     color: #006000;
     font-weight: bold;
+}
+
+.return-prepack-status-error {
+    background: #ffecec;
+    color: #800000;
+}
+
+.return-prepack-status-ok {
+    background: #e8ffe8;
+    color: #006000;
 }
 
 .return-prepack-preview-panel {
@@ -7329,9 +7571,14 @@ button {
     overflow-wrap: anywhere;
 }
 
-.member-schedule-grid .member-grid-today {
+.member-schedule-grid th.member-grid-today,
+.member-schedule-grid td.member-grid-today {
     background: #fff36b;
     color: #004000;
+}
+
+.member-schedule-grid td.member-grid-today {
+    background: #fff9a8;
 }
 
 .member-grid-section-row td {
@@ -7648,6 +7895,14 @@ button {
 
 #label-preview-modal {
     z-index: 50000;
+}
+
+#action-modal {
+    z-index: 60000;
+}
+
+.child-action-modal {
+    z-index: 61000;
 }
 
 .label-preview-window {
@@ -8633,7 +8888,12 @@ button {
     align-items: end;
     padding: 6px;
     border-bottom: 1px dotted #808080;
-    background: #f8fff8;
+    background: #ffffff;
+}
+
+.scan-dose-row.selected {
+    background: #dcffdc;
+    outline: 1px solid #008000;
 }
 
 .scan-dose-row.with-check {

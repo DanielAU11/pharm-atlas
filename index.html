@@ -1603,6 +1603,20 @@
                 <div id="member-calendar-grid" class="member-calendar-grid"></div>
             </fieldset>
 
+            <fieldset data-member-section="orders" class="member-scan-console" style="margin-top:10px;">
+                <legend>Scanned Prepack / Label</legend>
+                <div class="member-scan-terminal">
+                    <label>Scan Aztec / barcode:
+                        <input id="member-command-scan-code" type="text" placeholder="Scan package or medication code"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();scanDailyCommandCode(this.value, { source: 'member' });}">
+                    </label>
+                    <button type="button" onclick="scanDailyCommandCode(document.getElementById('member-command-scan-code')?.value, { source: 'member' })">Open</button>
+                </div>
+                <div id="member-command-scan-panel" class="member-command-scan-panel">
+                    <div class="empty-state">Scan a prepack or medication label to review package contents and action history.</div>
+                </div>
+            </fieldset>
+
             <fieldset data-member-section="summary" style="margin-top:10px;">
                 <legend>Current Meds / Supplements List</legend>
                 <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
