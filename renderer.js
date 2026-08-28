@@ -4859,6 +4859,11 @@ function memberPrescriberIds(member) {
     return Array.isArray(member?.prescriberIds) ? member.prescriberIds.filter(Boolean) : [];
 }
 
+function memberPrimaryPrescriberId(member) {
+    const ids = memberPrescriberIds(member);
+    return ids.includes(member?.primaryPrescriberId) ? member.primaryPrescriberId : '';
+}
+
 function memberPrescriberRecords(member) {
     const ids = new Set(memberPrescriberIds(member));
     return db.prescribers.filter(prescriber => ids.has(prescriber.id));
@@ -4882,6 +4887,11 @@ function pharmacyIdentityKey(pharmacy) {
 
 function memberPharmacyIds(member) {
     return Array.isArray(member?.pharmacyIds) ? member.pharmacyIds.filter(Boolean) : [];
+}
+
+function memberPrimaryPharmacyId(member) {
+    const ids = memberPharmacyIds(member);
+    return ids.includes(member?.primaryPharmacyId) ? member.primaryPharmacyId : '';
 }
 
 function memberPharmacyRecords(member) {
@@ -4948,6 +4958,7 @@ function medicationAllergyMatches(member, med) {
 function prescriberOptionsHtml(selected = '', memberId = '', includeAll = true) {
     const member = db.family.find(item => item.id === memberId);
     const allowedIds = member ? new Set(memberPrescriberIds(member)) : null;
+    const primaryId = memberPrimaryPrescriberId(member);
     const seen = new Set();
     const prescribers = db.prescribers
         .slice()
@@ -4958,9 +4969,9 @@ function prescriberOptionsHtml(selected = '', memberId = '', includeAll = true) 
             seen.add(key);
             return true;
         })
-        .sort((a, b) => prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }));
+        .sort((a, b) => Number(b.id === primaryId) - Number(a.id === primaryId) || prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }));
     return `<option value="">Optional</option>` + prescribers
-        .map(prescriber => `<option value="${prescriber.id}" ${prescriber.id === selected ? 'selected' : ''}>${escapeHtml(prescriberDisplayName(prescriber))}</option>`)
+        .map(prescriber => `<option value="${prescriber.id}" ${prescriber.id === selected ? 'selected' : ''}>${prescriber.id === primaryId ? '&#9733; ' : ''}${escapeHtml(prescriberDisplayName(prescriber))}</option>`)
         .join('');
 }
 
@@ -4972,6 +4983,7 @@ function prescriberNameById(id) {
 function pharmacyOptionsHtml(selected = '', memberId = '', includeAll = true) {
     const member = db.family.find(item => item.id === memberId);
     const allowedIds = member ? new Set(memberPharmacyIds(member)) : null;
+    const primaryId = memberPrimaryPharmacyId(member);
     const seen = new Set();
     const pharmacies = (db.pharmacies || [])
         .slice()
@@ -4982,9 +4994,9 @@ function pharmacyOptionsHtml(selected = '', memberId = '', includeAll = true) {
             seen.add(key);
             return true;
         })
-        .sort((a, b) => pharmacyDisplayName(a).localeCompare(pharmacyDisplayName(b), undefined, { sensitivity: 'base' }));
+        .sort((a, b) => Number(b.id === primaryId) - Number(a.id === primaryId) || pharmacyDisplayName(a).localeCompare(pharmacyDisplayName(b), undefined, { sensitivity: 'base' }));
     return `<option value="">Optional</option>` + pharmacies
-        .map(pharmacy => `<option value="${escapeHtml(pharmacy.id)}" ${pharmacy.id === selected ? 'selected' : ''}>${escapeHtml(pharmacyDisplayName(pharmacy))}</option>`)
+        .map(pharmacy => `<option value="${escapeHtml(pharmacy.id)}" ${pharmacy.id === selected ? 'selected' : ''}>${pharmacy.id === primaryId ? '&#9733; ' : ''}${escapeHtml(pharmacyDisplayName(pharmacy))}</option>`)
         .join('');
 }
 
@@ -5011,6 +5023,10 @@ function setHiddenJson(id, value) {
 
 function currentMemberMedicationList() {
     return getHiddenJson('m-current-med-list-data');
+}
+
+function currentMemberDiscontinuedMedicationList() {
+    return getHiddenJson('m-current-discontinued-med-list-data');
 }
 
 function doseQtyWithParentheses(value) {
@@ -5137,14 +5153,24 @@ function renderMemberContextRail(memberId = currentEditingMemberId) {
     const importantNotes = notes.filter(note => progressNoteFlags(note).important || progressNoteFlags(note).followup || progressNoteFlags(note).provider || progressNoteFlags(note).pinned).slice(0, 3);
     const readings = latestMemberReadingSummary(member.id);
     const goals = memberGoalSnapshot(member);
+    const primaryPrescriberId = memberPrimaryPrescriberId(member);
+    const primaryPharmacyId = memberPrimaryPharmacyId(member);
     const careTeam = [
         ...memberPrescriberIds(member).map(id => {
             const prescriber = db.prescribers.find(item => item.id === id);
-            return prescriber ? prescriberDisplayName(prescriber) : '';
+            return prescriber ? {
+                name: prescriberDisplayName(prescriber),
+                primary: id === primaryPrescriberId,
+                title: 'Primary provider'
+            } : null;
         }),
         ...memberPharmacyIds(member).map(id => {
             const pharmacy = (db.pharmacies || []).find(item => item.id === id);
-            return pharmacy ? pharmacyDisplayName(pharmacy) : '';
+            return pharmacy ? {
+                name: pharmacyDisplayName(pharmacy),
+                primary: id === primaryPharmacyId,
+                title: 'Primary pharmacy'
+            } : null;
         })
     ].filter(Boolean).slice(0, 4);
 
@@ -5175,7 +5201,7 @@ function renderMemberContextRail(memberId = currentEditingMemberId) {
         </fieldset>
         <fieldset class="rail-section">
             <legend>Care Team</legend>
-            <div class="rail-list mini">${careTeam.length ? careTeam.map(item => `<div>${escapeHtml(item)}</div>`).join('') : '<div>No providers or pharmacies added.</div>'}</div>
+            <div class="rail-list mini">${careTeam.length ? careTeam.map(item => `<div>${item.primary ? `<span class="win98-star primary-care-star" title="${escapeHtml(item.title)}">&#9733;</span>` : ''}${escapeHtml(item.name)}</div>`).join('') : '<div>No providers or pharmacies added.</div>'}</div>
         </fieldset>
         <fieldset class="rail-section">
             <legend>Follow-Up Notes</legend>
@@ -5203,7 +5229,7 @@ function renderMemberCurrentMedicationList() {
         .map(item => {
             const med = db.inventory.find(candidate => candidate.id === item.medId);
             if (!med) return '';
-            const prescriber = item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med);
+            const prescriber = item.prescriberName || (item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med));
             const pharmacy = item.pharmacyId ? pharmacyNameById(item.pharmacyId) : medicationSummaryPharmacyName(null, med);
             return `<tr>
                 <td><strong>${escapeHtml(medicationNameWithStrength(med))}</strong></td>
@@ -5212,15 +5238,30 @@ function renderMemberCurrentMedicationList() {
                 <td>${escapeHtml(prescriber || 'Not specified')}</td>
                 <td>${escapeHtml(pharmacy || 'Not specified')}</td>
                 <td>${escapeHtml(item.frequency || '')}</td>
+                <td>${escapeHtml(item.directions || '')}</td>
             </tr>`;
         })
         .filter(Boolean)
         .join('');
     container.innerHTML = `
         <table class="win98-report-table current-med-list-table">
-            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Prescriber</th><th>Pharmacy</th><th>Frequency</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="6">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
-        </table>`;
+            <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Prescriber</th><th>Pharmacy</th><th>Frequency</th><th>Directions / Comments</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="7">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
+        </table>
+        ${currentMemberDiscontinuedMedicationList().length ? `
+            <div class="current-list-discontinued-block">
+                <strong>Discontinued medications / supplements</strong>
+                <ul>
+                    ${currentMemberDiscontinuedMedicationList().map(item => {
+                        const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+                        const name = med ? medicationNameWithStrength(med) : (item.name || item.medication || '');
+                        if (!name) return '';
+                        const prescriber = item.prescriberName ? `Prescriber: ${item.prescriberName}; ` : '';
+                        return `<li><strong>${escapeHtml(name)}</strong> - ${escapeHtml(prescriber)}stopped by ${escapeHtml(item.discontinuedBy || 'not specified')}${item.discontinuedDate ? ` on ${escapeHtml(item.discontinuedDate)}` : ''}${item.directions ? `; ${escapeHtml(item.directions)}` : ''}</li>`;
+                    }).filter(Boolean).join('')}
+                </ul>
+            </div>
+        ` : ''}`;
 }
 
 function currentMedicationListRows(member) {
@@ -5236,9 +5277,10 @@ function currentMedicationListRows(member) {
                 medication: medicationNameWithStrength(med),
                 dose: doseQtyWithParentheses(item.doseQty || ''),
                 usedFor: item.indication || 'Not specified',
-                prescriber: item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med),
+                prescriber: item.prescriberName || (item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med)),
                 pharmacy: item.pharmacyId ? pharmacyNameById(item.pharmacyId) : medicationSummaryPharmacyName(null, med),
-                frequency: item.frequency || ''
+                frequency: item.frequency || '',
+                directions: item.directions || ''
             };
         })
         .filter(Boolean);
@@ -5250,7 +5292,10 @@ const currentMedicationListColumns = [
     { id: 'usedFor', label: 'Used For' },
     { id: 'prescriber', label: 'Prescriber' },
     { id: 'pharmacy', label: 'Pharmacy' },
-    { id: 'frequency', label: 'Frequency' }
+    { id: 'frequency', label: 'Frequency' },
+    { id: 'directions', label: 'Directions / Comments' },
+    { id: 'stoppedBy', label: 'Stopped By', stoppedOnly: true },
+    { id: 'stopDate', label: 'Stop Date', stoppedOnly: true }
 ];
 
 const defaultCurrentMedicationListColumnIds = currentMedicationListColumns.map(column => column.id);
@@ -5265,31 +5310,74 @@ function currentMedicationListSelectedColumns(options = {}) {
 
 function currentMedicationListSelectedRows(member, options = {}) {
     const rows = currentMedicationListRows(member);
-    const selectedMedIds = Array.isArray(options.medIds) && options.medIds.length ? new Set(options.medIds) : null;
-    if (!selectedMedIds) return rows;
-    return rows.filter(item => selectedMedIds.has(item.medId));
+    if (Array.isArray(options.medIds)) {
+        const selectedMedIds = new Set(options.medIds);
+        return rows.filter(item => selectedMedIds.has(item.medId));
+    }
+    return rows;
+}
+
+function currentMedicationDiscontinuedRows(member) {
+    const list = Array.isArray(member?.currentMedicationDiscontinuedList)
+        ? member.currentMedicationDiscontinuedList
+        : [];
+    return list
+        .map(item => {
+            const med = item.medId ? db.inventory.find(candidate => candidate.id === item.medId) : null;
+            const manualName = item.name || item.medication || '';
+            if (!med && !manualName) return null;
+            return {
+                medId: med?.id || item.manualId || item.id || manualName,
+                medication: med ? medicationNameWithStrength(med) : manualName,
+                dose: doseQtyWithParentheses(item.doseQty || ''),
+                usedFor: item.indication || 'Not specified',
+                prescriber: item.prescriberName || 'Not specified',
+                pharmacy: item.pharmacyId ? pharmacyNameById(item.pharmacyId) : (item.pharmacyName || 'Not specified'),
+                frequency: item.frequency || '',
+                stoppedBy: item.discontinuedBy || 'Not specified',
+                stopDate: item.discontinuedDate || '',
+                directions: item.directions || ''
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => String(b.stopDate || '').localeCompare(String(a.stopDate || '')) || a.medication.localeCompare(b.medication));
 }
 
 function memberCurrentMedsReportBody(member, options = {}) {
     const columns = currentMedicationListSelectedColumns(options);
+    const activeColumns = columns.filter(column => !column.stoppedOnly);
+    const discontinuedColumns = columns;
     const rows = currentMedicationListSelectedRows(member, options).map(item => `
         <tr>
-            ${columns.map(column => `<td>${column.id === 'medication' ? `<strong>${escapeHtml(item.medication)}</strong>` : escapeHtml(item[column.id] || '')}</td>`).join('')}
+            ${activeColumns.map(column => `<td>${column.id === 'medication' ? `<strong>${escapeHtml(item.medication)}</strong>` : escapeHtml(item[column.id] || '')}</td>`).join('')}
         </tr>`).join('');
+    const discontinuedRows = options.includeDiscontinued
+        ? currentMedicationDiscontinuedRows(member).map(item => `
+            <tr>
+                ${discontinuedColumns.map(column => `<td>${column.id === 'medication' ? `<strong>${escapeHtml(item.medication)}</strong>` : escapeHtml(item[column.id] || '')}</td>`).join('')}
+            </tr>`).join('')
+        : '';
     return `
         <h2>${escapeHtml(memberDisplayName(member))}</h2>
-        <div class="muted">Inventory-selected medications and supplements the member reports currently taking.</div>
         <h2>Current Meds / Supplements List</h2>
         <table>
-            <thead><tr>${columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
-            <tbody>${rows || `<tr><td colspan="${columns.length}">No current meds or supplements saved.</td></tr>`}</tbody>
-        </table>`;
+            <thead><tr>${activeColumns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
+            <tbody>${rows || `<tr><td colspan="${activeColumns.length || 1}">No current meds or supplements saved.</td></tr>`}</tbody>
+        </table>
+        ${options.includeDiscontinued ? `
+            <h2>Discontinued Medications / Supplements</h2>
+            <table class="discontinued-report-table">
+                <thead><tr>${discontinuedColumns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
+                <tbody>${discontinuedRows || `<tr><td colspan="${discontinuedColumns.length || 1}">No discontinued medications selected.</td></tr>`}</tbody>
+            </table>
+        ` : ''}`;
 }
 
 function currentMedsOptionsFromModalBody(body) {
     const medIds = [...body.querySelectorAll('input[name="currentListMedIds"]:checked')].map(input => input.value);
     const columnIds = [...body.querySelectorAll('input[name="currentListColumnIds"]:checked')].map(input => input.value);
-    return { medIds, columnIds };
+    const includeDiscontinued = body.querySelector('input[name="currentListIncludeDiscontinued"]')?.checked === true;
+    return { medIds, columnIds, includeDiscontinued };
 }
 
 window.refreshCurrentMedsReportPreview = function(memberId) {
@@ -5302,16 +5390,22 @@ window.refreshCurrentMedsReportPreview = function(memberId) {
 
 async function chooseCurrentMedsOutputOptions(member, mode) {
     const rows = currentMedicationListRows(member);
-    const medicationOptions = rows.map(item => `
-        <label class="summary-option-row">
-            <input type="checkbox" name="currentListMedIds" value="${escapeHtml(item.medId)}" checked onchange="refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">
-            <span><strong>${escapeHtml(item.medication)}</strong><small>${escapeHtml([item.dose, item.frequency].filter(Boolean).join(' | '))}</small></span>
-        </label>`).join('');
+    const medicationOptions = rows.map(item => {
+        const inputId = `current-list-med-${item.medId}`;
+        return `<label class="current-list-print-row" for="${escapeHtml(inputId)}">
+            <input id="${escapeHtml(inputId)}" type="checkbox" name="currentListMedIds" value="${escapeHtml(item.medId)}" checked onchange="refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">
+            <span class="current-list-print-copy">
+                <strong>${escapeHtml(item.medication)}</strong>
+                <small>${escapeHtml([item.dose, item.frequency].filter(Boolean).join(' | '))}</small>
+            </span>
+        </label>`;
+    }).join('');
     const columnOptions = currentMedicationListColumns.map(column => `
         <label class="summary-column-chip">
             <input type="checkbox" name="currentListColumnIds" value="${escapeHtml(column.id)}" checked onchange="refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">
             <span>${escapeHtml(column.label)}</span>
         </label>`).join('');
+    const discontinuedCount = currentMedicationDiscontinuedRows(member).length;
     const result = await showActionModal(`${mode === 'pdf' ? 'PDF' : 'Print'} Current Meds / Supplements List`, `
         <div data-action-modal-size="wide" class="medication-summary-output-modal">
             <div class="summary-output-layout">
@@ -5322,25 +5416,32 @@ async function chooseCurrentMedsOutputOptions(member, mode) {
                             <button type="button" onclick="setMedicationSummaryChecks('currentListMedIds', true); refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">Select All</button>
                             <button type="button" onclick="setMedicationSummaryChecks('currentListMedIds', false); refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">Clear</button>
                         </div>
-                        <div class="summary-option-list">${medicationOptions || '<div class="empty-state">No current meds or supplements saved.</div>'}</div>
+                        <div class="summary-option-list current-list-option-list">${medicationOptions || '<div class="empty-state">No current meds or supplements saved.</div>'}</div>
                     </fieldset>
                     <fieldset>
                         <legend>Columns</legend>
                         <div class="summary-column-list">${columnOptions}</div>
                     </fieldset>
+                    <fieldset>
+                        <legend>Optional Sections</legend>
+                        <label class="summary-column-chip report-section-chip">
+                            <input type="checkbox" name="currentListIncludeDiscontinued" ${discontinuedCount ? 'checked' : ''} onchange="refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">
+                            <span>Show discontinued list (${discontinuedCount})</span>
+                        </label>
+                    </fieldset>
                 </div>
                 <fieldset class="summary-preview-fieldset">
                     <legend>Built-in Preview</legend>
                     <div id="current-meds-report-preview" class="summary-report-preview">
-                        ${memberCurrentMedsReportBody(member, { medIds: rows.map(item => item.medId), columnIds: defaultCurrentMedicationListColumnIds })}
+                        ${memberCurrentMedsReportBody(member, { medIds: rows.map(item => item.medId), columnIds: defaultCurrentMedicationListColumnIds, includeDiscontinued: !!discontinuedCount })}
                     </div>
                 </fieldset>
             </div>
         </div>
     `, mode === 'pdf' ? 'Generate PDF' : 'Print', currentMedsOptionsFromModalBody);
     if (!result) return null;
-    if (!result.medIds.length) {
-        await appAlert('Select at least one current medication or supplement to include.');
+    if (!result.medIds.length && !(result.includeDiscontinued && currentMedicationDiscontinuedRows(member).length)) {
+        await appAlert('Select at least one current medication/supplement or include the discontinued list.');
         return chooseCurrentMedsOutputOptions(member, mode);
     }
     if (!result.columnIds.length) {
@@ -5356,7 +5457,7 @@ window.generateMemberCurrentMedsPdfReport = async function(memberId = currentEdi
     const options = await chooseCurrentMedsOutputOptions(member, 'pdf');
     if (!options) return;
     await saveReportPdf(
-        `Current Meds / Supplements List - ${member.firstName} ${member.lastName}`,
+        'Current Meds / Supplements List',
         memberCurrentMedsReportBody(member, options),
         `Current_Meds_Supplements_${member.lastName}_${member.firstName}`,
         { preview: false }
@@ -5372,14 +5473,14 @@ window.printMemberCurrentMedsReport = async function(memberId = currentEditingMe
     const options = await chooseCurrentMedsOutputOptions(member, 'print');
     if (!options) return;
     printReportFromPreview(
-        `Current Meds / Supplements List - ${member.firstName} ${member.lastName}`,
+        'Current Meds / Supplements List',
         memberCurrentMedsReportBody(member, options)
     );
 };
 
 window.filterCurrentMedsBuilder = function() {
     const query = String(document.getElementById('current-meds-builder-search')?.value || '').trim().toLowerCase();
-    document.querySelectorAll('.current-meds-builder-row').forEach(row => {
+    document.querySelectorAll('.current-meds-builder-row, .current-meds-discontinued-row').forEach(row => {
         row.style.display = !query || row.dataset.search.includes(query) ? '' : 'none';
     });
 };
@@ -5389,13 +5490,37 @@ window.currentMedsBuilderSelectionChanged = function(input) {
     renderCurrentMedsBuilderPreview();
 };
 
-window.removeCurrentMedsBuilderSelection = function(medId) {
-    const row = [...document.querySelectorAll('#action-modal-body .current-meds-builder-row')]
+window.currentMedsDiscontinuedSelectionChanged = function(input) {
+    input?.closest('.current-meds-discontinued-row')?.classList.toggle('selected', !!input.checked);
+    renderCurrentMedsBuilderPreview();
+};
+
+window.addManualCurrentMedsDiscontinuedRow = function() {
+    const list = document.getElementById('current-meds-manual-discontinued-list');
+    if (!list) return;
+    const rowId = `manual-disc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    list.insertAdjacentHTML('beforeend', manualCurrentMedsDiscontinuedRowHtml({ manualId: rowId }));
+    renderCurrentMedsBuilderPreview();
+};
+
+window.removeManualCurrentMedsDiscontinuedRow = function(rowId) {
+    document.querySelector(`#action-modal-body .current-meds-manual-discontinued-row[data-row-id="${cssEscape(rowId)}"]`)?.remove();
+    renderCurrentMedsBuilderPreview();
+};
+
+window.removeCurrentMedsBuilderSelection = function(medId, kind = 'active') {
+    const selector = kind === 'discontinued' ? '.current-meds-discontinued-row' : '.current-meds-builder-row';
+    const inputName = kind === 'discontinued' ? 'currentDiscontinuedMedIds' : 'currentMedIds';
+    const row = [...document.querySelectorAll(`#action-modal-body ${selector}`)]
         .find(candidate => candidate.dataset.medId === medId);
-    const input = row?.querySelector('input[name="currentMedIds"]');
+    const input = row?.querySelector(`input[name="${inputName}"]`);
     if (!input) return;
     input.checked = false;
-    currentMedsBuilderSelectionChanged(input);
+    if (kind === 'discontinued') {
+        currentMedsDiscontinuedSelectionChanged(input);
+    } else {
+        currentMedsBuilderSelectionChanged(input);
+    }
 };
 
 window.renderCurrentMedsBuilderPreview = function() {
@@ -5404,14 +5529,18 @@ window.renderCurrentMedsBuilderPreview = function() {
     if (!body || !panel) return;
     const selectedRows = [...body.querySelectorAll('.current-meds-builder-row')]
         .filter(row => row.querySelector('input[name="currentMedIds"]')?.checked);
-    panel.innerHTML = selectedRows.length ? selectedRows.map(row => {
+    const selectedDiscontinuedRows = [...body.querySelectorAll('.current-meds-discontinued-row')]
+        .filter(row => row.querySelector('input[name="currentDiscontinuedMedIds"]')?.checked);
+    const manualDiscontinuedRows = [...body.querySelectorAll('.current-meds-manual-discontinued-row')]
+        .filter(row => row.querySelector('input[name="manualDiscontinuedName"]')?.value.trim());
+    const activeHtml = selectedRows.length ? selectedRows.map(row => {
         const medId = row.dataset.medId || '';
         const name = row.querySelector('.current-meds-builder-name strong')?.textContent || 'Medication';
         const dose = row.querySelector('input[name="currentDoseQty"]')?.value.trim() || 'Dose not entered';
         const indication = row.querySelector('input[name="currentIndication"]')?.value.trim() || 'Use not entered';
         const frequency = row.querySelector('input[name="currentFrequency"]')?.value.trim() || 'Frequency not entered';
-        const prescriberSelect = row.querySelector('select[name="currentPrescriberId"]');
-        const prescriber = prescriberSelect?.selectedOptions?.[0]?.textContent || 'Optional';
+        const directions = row.querySelector('input[name="currentDirections"]')?.value.trim() || '';
+        const prescriber = row.querySelector('input[name="currentPrescriberName"]')?.value.trim() || 'Optional';
         const pharmacySelect = row.querySelector('select[name="currentPharmacyId"]');
         const pharmacy = pharmacySelect?.selectedOptions?.[0]?.textContent || 'Optional';
         return `<div class="current-meds-preview-item">
@@ -5421,11 +5550,63 @@ window.renderCurrentMedsBuilderPreview = function() {
                 <small>Used for: ${escapeHtml(indication)}</small>
                 <small>Prescriber: ${escapeHtml(prescriber)}</small>
                 <small>Pharmacy: ${escapeHtml(pharmacy)}</small>
+                ${directions ? `<small>Directions: ${escapeHtml(directions)}</small>` : ''}
             </div>
             <button type="button" class="inventory-builder-remove" onclick="removeCurrentMedsBuilderSelection('${escapeHtml(medId)}')" title="Remove from selected list">X</button>
         </div>`;
     }).join('') : '<div class="empty-state">Checked medications will appear here.</div>';
+    const discontinuedHtml = [...selectedDiscontinuedRows, ...manualDiscontinuedRows].length ? [...selectedDiscontinuedRows, ...manualDiscontinuedRows].map(row => {
+        const medId = row.dataset.medId || '';
+        const rowId = row.dataset.rowId || '';
+        const manual = row.classList.contains('current-meds-manual-discontinued-row');
+        const name = manual
+            ? row.querySelector('input[name="manualDiscontinuedName"]')?.value.trim() || 'Medication'
+            : row.querySelector('.current-meds-builder-name strong')?.textContent || 'Medication';
+        const prescriber = row.querySelector('input[name="currentDiscontinuedPrescriberName"], input[name="manualDiscontinuedPrescriberName"]')?.value.trim() || 'Not specified';
+        const stoppedBy = row.querySelector('input[name="currentDiscontinuedBy"], input[name="manualDiscontinuedBy"]')?.value.trim() || 'Not specified';
+        const stoppedDate = row.querySelector('input[name="currentDiscontinuedDate"], input[name="manualDiscontinuedDate"]')?.value || '';
+        const dose = row.querySelector('input[name="currentDiscontinuedDoseQty"], input[name="manualDiscontinuedDoseQty"]')?.value.trim() || 'Dose not entered';
+        const indication = row.querySelector('input[name="currentDiscontinuedIndication"], input[name="manualDiscontinuedIndication"]')?.value.trim() || 'Use not entered';
+        const frequency = row.querySelector('input[name="currentDiscontinuedFrequency"], input[name="manualDiscontinuedFrequency"]')?.value.trim() || 'Frequency not entered';
+        const directions = row.querySelector('input[name="currentDiscontinuedDirections"], input[name="manualDiscontinuedDirections"]')?.value.trim() || '';
+        const pharmacySelect = row.querySelector('select[name="currentDiscontinuedPharmacyId"]');
+        const pharmacy = pharmacySelect?.selectedOptions?.[0]?.textContent || row.querySelector('input[name="manualDiscontinuedPharmacyName"]')?.value.trim() || 'Optional';
+        return `<div class="current-meds-preview-item stopped">
+            <div class="current-meds-preview-copy">
+                <strong>${escapeHtml(name)}</strong>
+                <small>${escapeHtml(dose)} | ${escapeHtml(frequency)}</small>
+                <small>Used for: ${escapeHtml(indication)}</small>
+                <small>Prescriber: ${escapeHtml(prescriber)}</small>
+                <small>Stopped by: ${escapeHtml(stoppedBy)}</small>
+                ${stoppedDate ? `<small>Stop date: ${escapeHtml(stoppedDate)}</small>` : ''}
+                <small>Pharmacy: ${escapeHtml(pharmacy)}</small>
+                ${directions ? `<small>Directions: ${escapeHtml(directions)}</small>` : ''}
+            </div>
+            <button type="button" class="inventory-builder-remove" onclick="${manual ? `removeManualCurrentMedsDiscontinuedRow('${escapeHtml(rowId)}')` : `removeCurrentMedsBuilderSelection('${escapeHtml(medId)}', 'discontinued')`}" title="Remove from discontinued list">X</button>
+        </div>`;
+    }).join('') : '<div class="empty-state">Stopped meds selected below will appear here.</div>';
+    panel.innerHTML = `
+        <div class="current-meds-preview-heading">Currently taking</div>
+        ${activeHtml}
+        <div class="current-meds-preview-heading stopped">Discontinued / stopped</div>
+        ${discontinuedHtml}`;
 };
+
+function manualCurrentMedsDiscontinuedRowHtml(item = {}) {
+    const rowId = item.manualId || item.id || `manual-disc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `<div class="current-meds-manual-discontinued-row" data-row-id="${escapeHtml(rowId)}">
+        <label>Name / strength<input name="manualDiscontinuedName" type="text" placeholder="e.g. Lisinopril 10mg" value="${escapeHtml(item.name || item.medication || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Dose / Qty<input name="manualDiscontinuedDoseQty" type="text" placeholder="e.g. 1 tablet" value="${escapeHtml(item.doseQty || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Used For<input name="manualDiscontinuedIndication" type="text" placeholder="e.g. blood pressure" value="${escapeHtml(item.indication || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Prescriber<input name="manualDiscontinuedPrescriberName" type="text" list="current-discontinued-provider-options" placeholder="Choose provider or type name" value="${escapeHtml(item.prescriberName || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Stopped by<input name="manualDiscontinuedBy" type="text" list="current-discontinued-provider-options" placeholder="Choose provider or type name" value="${escapeHtml(item.discontinuedBy || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Stop date (optional)<input name="manualDiscontinuedDate" type="date" value="${escapeHtml(item.discontinuedDate || '')}" onchange="renderCurrentMedsBuilderPreview()"></label>
+        <label>Pharmacy<input name="manualDiscontinuedPharmacyName" type="text" placeholder="Optional pharmacy" value="${escapeHtml(item.pharmacyName || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Frequency<input name="manualDiscontinuedFrequency" type="text" placeholder="e.g. daily, PRN" value="${escapeHtml(item.frequency || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <label>Directions / comments<input name="manualDiscontinuedDirections" type="text" placeholder="Reason, directions, or comment" value="${escapeHtml(item.directions || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+        <button type="button" class="inventory-builder-remove" onclick="removeManualCurrentMedsDiscontinuedRow('${escapeHtml(rowId)}')">X</button>
+    </div>`;
+}
 
 window.openMemberCurrentMedsBuilder = async function() {
     let seedList = currentMemberMedicationList();
@@ -5433,17 +5614,20 @@ window.openMemberCurrentMedsBuilder = async function() {
         seedList = defaultCurrentMedicationListForMember(currentEditingMemberId);
     }
     const existing = new Map(seedList.map(item => [item.medId, item]));
+    const discontinuedSeedList = currentMemberDiscontinuedMedicationList();
+    const existingDiscontinued = new Map(discontinuedSeedList.filter(item => item.medId).map(item => [item.medId, item]));
+    const manualDiscontinuedRows = discontinuedSeedList
+        .filter(item => !item.medId)
+        .map(item => manualCurrentMedsDiscontinuedRowHtml(item))
+        .join('');
     const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
     const memberProviderIds = member ? new Set(memberPrescriberIds(member)) : new Set();
     const memberPharmacyIdsSet = member ? new Set(memberPharmacyIds(member)) : new Set();
-    const memberPrescriberOptions = selected => {
-        const options = db.prescribers
-            .filter(prescriber => memberProviderIds.has(prescriber.id))
-            .sort((a, b) => prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }))
-            .map(prescriber => `<option value="${escapeHtml(prescriber.id)}" ${prescriber.id === selected ? 'selected' : ''}>${escapeHtml(prescriberDisplayName(prescriber))}</option>`)
-            .join('');
-        return `<option value="">Optional</option>${options}`;
-    };
+    const memberProviderNameOptions = db.prescribers
+        .filter(prescriber => memberProviderIds.has(prescriber.id))
+        .sort((a, b) => prescriberDisplayName(a).localeCompare(prescriberDisplayName(b), undefined, { sensitivity: 'base' }))
+        .map(prescriber => `<option value="${escapeHtml(prescriberDisplayName(prescriber))}"></option>`)
+        .join('');
     const memberPharmacyOptions = selected => {
         const options = (db.pharmacies || [])
             .filter(pharmacy => memberPharmacyIdsSet.has(pharmacy.id))
@@ -5459,6 +5643,7 @@ window.openMemberCurrentMedsBuilder = async function() {
             const saved = existing.get(med.id) || {};
             const inputId = `current-med-${med.id}`;
             const searchText = `${med.name} ${formatMedStrength(med)} ${formatInventoryUnits(med)}`.toLowerCase();
+            const savedPrescriberName = saved.prescriberName || (saved.prescriberId ? prescriberNameById(saved.prescriberId) : '');
             return `<div class="formulary-item inventory-builder-source-item current-meds-builder-row ${saved.medId ? 'selected' : ''}" data-med-id="${escapeHtml(med.id)}" data-search="${escapeHtml(searchText)}">
                 <input id="${escapeHtml(inputId)}" name="currentMedIds" type="checkbox" value="${escapeHtml(med.id)}" ${saved.medId ? 'checked' : ''} onchange="currentMedsBuilderSelectionChanged(this)">
                 <label class="current-meds-builder-name" for="${escapeHtml(inputId)}">
@@ -5467,21 +5652,62 @@ window.openMemberCurrentMedsBuilder = async function() {
                 <div class="current-meds-builder-fields">
                     <label>Dose / Qty<input name="currentDoseQty" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. 1 tablet, 5 mL, 2 puffs" value="${escapeHtml(saved.doseQty || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
                     <label>Used For<input name="currentIndication" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. allergies, migraine" value="${escapeHtml(saved.indication || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
-                    <label>Prescriber<select name="currentPrescriberId" data-med-id="${escapeHtml(med.id)}" onchange="renderCurrentMedsBuilderPreview()">${memberPrescriberOptions(saved.prescriberId || '')}</select></label>
+                    <label>Prescriber<input name="currentPrescriberName" data-med-id="${escapeHtml(med.id)}" type="text" list="current-discontinued-provider-options" placeholder="Choose provider or type name" value="${escapeHtml(savedPrescriberName)}" oninput="renderCurrentMedsBuilderPreview()"></label>
                     <label>Pharmacy<select name="currentPharmacyId" data-med-id="${escapeHtml(med.id)}" onchange="renderCurrentMedsBuilderPreview()">${memberPharmacyOptions(saved.pharmacyId || med.pharmacyId || '')}</select></label>
                     <label>Frequency<input name="currentFrequency" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. daily, PRN, weekly" value="${escapeHtml(saved.frequency || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label class="current-meds-directions-field">Directions / comments<input name="currentDirections" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. Take 1 tablet twice daily" value="${escapeHtml(saved.directions || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                </div>
+            </div>`;
+        })
+        .join('');
+    const discontinuedRows = db.inventory
+        .slice()
+        .sort((a, b) => inventoryDisplayName(a).localeCompare(inventoryDisplayName(b), undefined, { sensitivity: 'base' }))
+        .map(med => {
+            const saved = existingDiscontinued.get(med.id) || {};
+            const inputId = `current-disc-med-${med.id}`;
+            const searchText = `${med.name} ${formatMedStrength(med)} ${formatInventoryUnits(med)}`.toLowerCase();
+            const savedPrescriberName = saved.prescriberName || '';
+            const savedStoppedBy = saved.discontinuedBy || '';
+            return `<div class="formulary-item inventory-builder-source-item current-meds-discontinued-row ${saved.medId ? 'selected' : ''}" data-med-id="${escapeHtml(med.id)}" data-search="${escapeHtml(searchText)}">
+                <input id="${escapeHtml(inputId)}" name="currentDiscontinuedMedIds" type="checkbox" value="${escapeHtml(med.id)}" ${saved.medId ? 'checked' : ''} onchange="currentMedsDiscontinuedSelectionChanged(this)">
+                <label class="current-meds-builder-name" for="${escapeHtml(inputId)}">
+                    <span><strong>${escapeHtml(medicationNameWithStrength(med))}</strong><small>${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</small></span>
+                </label>
+                <div class="current-meds-discontinued-fields">
+                    <label>Dose / Qty<input name="currentDiscontinuedDoseQty" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. 1 tablet" value="${escapeHtml(saved.doseQty || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Used For<input name="currentDiscontinuedIndication" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. sleep, pain" value="${escapeHtml(saved.indication || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Prescriber<input name="currentDiscontinuedPrescriberName" data-med-id="${escapeHtml(med.id)}" type="text" list="current-discontinued-provider-options" placeholder="Choose provider or type name" value="${escapeHtml(savedPrescriberName)}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Stopped by<input name="currentDiscontinuedBy" data-med-id="${escapeHtml(med.id)}" type="text" list="current-discontinued-provider-options" placeholder="Choose provider or type name" value="${escapeHtml(savedStoppedBy)}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Stop date (optional)<input name="currentDiscontinuedDate" data-med-id="${escapeHtml(med.id)}" type="date" value="${escapeHtml(saved.discontinuedDate || '')}" onchange="renderCurrentMedsBuilderPreview()"></label>
+                    <label>Pharmacy<select name="currentDiscontinuedPharmacyId" data-med-id="${escapeHtml(med.id)}" onchange="renderCurrentMedsBuilderPreview()">${memberPharmacyOptions(saved.pharmacyId || med.pharmacyId || '')}</select></label>
+                    <label>Frequency<input name="currentDiscontinuedFrequency" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="e.g. daily, PRN" value="${escapeHtml(saved.frequency || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
+                    <label class="current-meds-discontinued-directions-field">Directions / comments<input name="currentDiscontinuedDirections" data-med-id="${escapeHtml(med.id)}" type="text" placeholder="Reason, directions, or comment" value="${escapeHtml(saved.directions || '')}" oninput="renderCurrentMedsBuilderPreview()"></label>
                 </div>
             </div>`;
         })
         .join('');
     const modalPromise = showActionModal('Create/Edit Current Meds & Supplements List', `
         <div data-action-modal-size="wide" class="current-meds-builder inventory-builder-layout">
+            <datalist id="current-discontinued-provider-options">${memberProviderNameOptions}</datalist>
             <div class="current-meds-builder-source inventory-builder-source">
                 <div class="current-meds-builder-toolbar">
                     <label>Search inventory</label>
                     <input id="current-meds-builder-search" type="text" placeholder="Find medication or supplement..." oninput="filterCurrentMedsBuilder()">
                 </div>
-                <div class="current-meds-builder-list">${inventoryRows || '<div class="empty-state">No inventory items available.</div>'}</div>
+                <fieldset class="current-meds-builder-section">
+                    <legend>Currently Taking</legend>
+                    <div class="current-meds-builder-list">${inventoryRows || '<div class="empty-state">No inventory items available.</div>'}</div>
+                </fieldset>
+                <fieldset class="current-meds-builder-section stopped">
+                    <legend>Discontinued / Stopped</legend>
+                    <div class="current-meds-builder-list discontinued">${discontinuedRows || '<div class="empty-state">No inventory items available.</div>'}</div>
+                    <div class="manual-discontinued-toolbar">
+                        <button type="button" onclick="addManualCurrentMedsDiscontinuedRow()">+ Add manual stopped med</button>
+                        <span>Use this for medications/supplements not stored in inventory.</span>
+                    </div>
+                    <div id="current-meds-manual-discontinued-list" class="current-meds-manual-discontinued-list">${manualDiscontinuedRows}</div>
+                </fieldset>
             </div>
             <div class="current-meds-builder-selected">
                 <div class="inventory-builder-panel-title">Selected medications</div>
@@ -5490,21 +5716,54 @@ window.openMemberCurrentMedsBuilder = async function() {
         </div>
     `, 'Save List', body => {
         const selectedIds = new Set([...body.querySelectorAll('input[name="currentMedIds"]:checked')].map(input => input.value));
-        return [...selectedIds].map(medId => ({
-            medId,
-            doseQty: body.querySelector(`input[name="currentDoseQty"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
-            indication: body.querySelector(`input[name="currentIndication"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
-            prescriberId: body.querySelector(`select[name="currentPrescriberId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
-            pharmacyId: body.querySelector(`select[name="currentPharmacyId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
-            frequency: body.querySelector(`input[name="currentFrequency"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || ''
-        }));
+        const discontinuedIds = new Set([...body.querySelectorAll('input[name="currentDiscontinuedMedIds"]:checked')].map(input => input.value));
+        return {
+            activeList: [...selectedIds].map(medId => ({
+                medId,
+                doseQty: body.querySelector(`input[name="currentDoseQty"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                indication: body.querySelector(`input[name="currentIndication"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                prescriberName: body.querySelector(`input[name="currentPrescriberName"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                pharmacyId: body.querySelector(`select[name="currentPharmacyId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
+                frequency: body.querySelector(`input[name="currentFrequency"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                directions: body.querySelector(`input[name="currentDirections"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || ''
+            })),
+            discontinuedList: [
+                ...[...discontinuedIds].map(medId => ({
+                    medId,
+                    doseQty: body.querySelector(`input[name="currentDiscontinuedDoseQty"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                    indication: body.querySelector(`input[name="currentDiscontinuedIndication"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                    prescriberName: body.querySelector(`input[name="currentDiscontinuedPrescriberName"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                    discontinuedBy: body.querySelector(`input[name="currentDiscontinuedBy"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                    discontinuedDate: body.querySelector(`input[name="currentDiscontinuedDate"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
+                    pharmacyId: body.querySelector(`select[name="currentDiscontinuedPharmacyId"][data-med-id="${cssEscape(medId)}"]`)?.value || '',
+                    frequency: body.querySelector(`input[name="currentDiscontinuedFrequency"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || '',
+                    directions: body.querySelector(`input[name="currentDiscontinuedDirections"][data-med-id="${cssEscape(medId)}"]`)?.value.trim() || ''
+                })),
+                ...[...body.querySelectorAll('.current-meds-manual-discontinued-row')]
+                    .map(row => ({
+                        manualId: row.dataset.rowId || `manual-disc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                        name: row.querySelector('input[name="manualDiscontinuedName"]')?.value.trim() || '',
+                        doseQty: row.querySelector('input[name="manualDiscontinuedDoseQty"]')?.value.trim() || '',
+                        indication: row.querySelector('input[name="manualDiscontinuedIndication"]')?.value.trim() || '',
+                        prescriberName: row.querySelector('input[name="manualDiscontinuedPrescriberName"]')?.value.trim() || '',
+                        discontinuedBy: row.querySelector('input[name="manualDiscontinuedBy"]')?.value.trim() || '',
+                        discontinuedDate: row.querySelector('input[name="manualDiscontinuedDate"]')?.value || '',
+                        pharmacyName: row.querySelector('input[name="manualDiscontinuedPharmacyName"]')?.value.trim() || '',
+                        frequency: row.querySelector('input[name="manualDiscontinuedFrequency"]')?.value.trim() || '',
+                        directions: row.querySelector('input[name="manualDiscontinuedDirections"]')?.value.trim() || ''
+                    }))
+                    .filter(item => item.name)
+            ]
+        };
     });
     renderCurrentMedsBuilderPreview();
     const result = await modalPromise;
     if (!result) return;
-    setHiddenJson('m-current-med-list-data', result);
+    setHiddenJson('m-current-med-list-data', result.activeList || []);
+    setHiddenJson('m-current-discontinued-med-list-data', result.discontinuedList || []);
     if (member) {
-        member.currentMedicationList = result;
+        member.currentMedicationList = result.activeList || [];
+        member.currentMedicationDiscontinuedList = result.discontinuedList || [];
         await sync();
     }
     renderMemberCurrentMedicationList();
@@ -6855,6 +7114,12 @@ window.printMemberProgressNotesReport = async function(memberId = currentEditing
 function renderMemberCareLists() {
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
     const pharmacyIds = getHiddenJson('m-pharmacy-ids-data');
+    const primaryPrescriberInput = document.getElementById('m-primary-prescriber-id');
+    const primaryPharmacyInput = document.getElementById('m-primary-pharmacy-id');
+    const primaryPrescriberId = prescriberIds.includes(primaryPrescriberInput?.value) ? primaryPrescriberInput.value : '';
+    const primaryPharmacyId = pharmacyIds.includes(primaryPharmacyInput?.value) ? primaryPharmacyInput.value : '';
+    if (primaryPrescriberInput && primaryPrescriberInput.value !== primaryPrescriberId) primaryPrescriberInput.value = primaryPrescriberId;
+    if (primaryPharmacyInput && primaryPharmacyInput.value !== primaryPharmacyId) primaryPharmacyInput.value = primaryPharmacyId;
     const diagnoses = getHiddenJson('m-diagnoses-data');
     const allergies = document.getElementById('m-allergies-data')
         ? getHiddenJson('m-allergies-data')
@@ -6868,9 +7133,11 @@ function renderMemberCareLists() {
         prescriberList.innerHTML = prescriberIds.length
             ? prescriberIds.map(id => {
                 const prescriber = db.prescribers.find(item => item.id === id);
+                const isPrimary = id === primaryPrescriberId;
                 return `<div class="med-item-row care-list-row" style="font-size:11px;">
-                    <span>${escapeHtml(prescriber ? prescriberDisplayName(prescriber) : 'Unknown prescriber')}</span>
+                    <span>${isPrimary ? '<span class="win98-star primary-care-star" title="Primary provider">&#9733;</span>' : ''}${escapeHtml(prescriber ? prescriberDisplayName(prescriber) : 'Unknown prescriber')}</span>
                     <span class="care-list-actions">
+                        <button type="button" class="primary-care-button ${isPrimary ? 'primary' : ''}" onclick="togglePrimaryPrescriber('${escapeHtml(id)}')" title="${isPrimary ? 'Remove primary provider star' : 'Mark as primary provider'}">${isPrimary ? '&#9733;' : '&#9734;'}</button>
                         ${prescriber ? `<button type="button" onclick="editPrescriberProfile('${escapeHtml(id)}')">Edit</button>` : ''}
                         <button type="button" onclick="deleteMemberPrescriber('${escapeHtml(id)}')">Delete</button>
                     </span>
@@ -6883,9 +7150,11 @@ function renderMemberCareLists() {
         pharmacyList.innerHTML = pharmacyIds.length
             ? pharmacyIds.map(id => {
                 const pharmacy = (db.pharmacies || []).find(item => item.id === id);
+                const isPrimary = id === primaryPharmacyId;
                 return `<div class="med-item-row care-list-row" style="font-size:11px;">
-                    <span>${escapeHtml(pharmacy ? pharmacyDisplayName(pharmacy) : 'Unknown pharmacy')}</span>
+                    <span>${isPrimary ? '<span class="win98-star primary-care-star" title="Primary pharmacy">&#9733;</span>' : ''}${escapeHtml(pharmacy ? pharmacyDisplayName(pharmacy) : 'Unknown pharmacy')}</span>
                     <span class="care-list-actions">
+                        <button type="button" class="primary-care-button ${isPrimary ? 'primary' : ''}" onclick="togglePrimaryPharmacy('${escapeHtml(id)}')" title="${isPrimary ? 'Remove primary pharmacy star' : 'Mark as primary pharmacy'}">${isPrimary ? '&#9733;' : '&#9734;'}</button>
                         ${pharmacy ? `<button type="button" onclick="editPharmacyProfile('${escapeHtml(id)}')">Edit</button>` : ''}
                         <button type="button" onclick="deleteMemberPharmacy('${escapeHtml(id)}')">Delete</button>
                     </span>
@@ -7099,10 +7368,28 @@ window.addMemberPrescriber = async function() {
         db.prescribers.push(prescriber);
     }
     const ids = getHiddenJson('m-prescriber-ids-data');
-    setHiddenJson('m-prescriber-ids-data', Array.from(new Set([...ids, prescriber.id])));
+    const nextIds = Array.from(new Set([...ids, prescriber.id]));
+    setHiddenJson('m-prescriber-ids-data', nextIds);
+    const primaryInput = document.getElementById('m-primary-prescriber-id');
+    if (primaryInput && !primaryInput.value && nextIds.length === 1) primaryInput.value = prescriber.id;
     renderMemberCareLists();
     renderSchedulePrescriberOptions();
     await sync();
+    renderMemberCareLists();
+};
+
+window.togglePrimaryPrescriber = async function(id) {
+    const ids = getHiddenJson('m-prescriber-ids-data');
+    if (!ids.includes(id)) return;
+    const input = document.getElementById('m-primary-prescriber-id');
+    if (!input) return;
+    input.value = input.value === id ? '' : id;
+    const member = db.family.find(item => item.id === currentEditingMemberId);
+    if (member) {
+        member.prescriberIds = ids;
+        member.primaryPrescriberId = input.value;
+        await sync();
+    }
     renderMemberCareLists();
 };
 
@@ -7124,6 +7411,7 @@ window.editPrescriberProfile = async function(id) {
 function clearPrescriberReferences(id) {
     db.family.forEach(member => {
         member.prescriberIds = memberPrescriberIds(member).filter(item => item !== id);
+        if (member.primaryPrescriberId === id) member.primaryPrescriberId = '';
     });
     db.inventory.forEach(med => {
         if (med.prescriberId === id) med.prescriberId = '';
@@ -7145,6 +7433,8 @@ window.deleteMemberPrescriber = async function(id) {
     clearPrescriberReferences(id);
     db.prescribers = db.prescribers.filter(item => item.id !== id);
     setHiddenJson('m-prescriber-ids-data', getHiddenJson('m-prescriber-ids-data').filter(item => item !== id));
+    const primaryInput = document.getElementById('m-primary-prescriber-id');
+    if (primaryInput?.value === id) primaryInput.value = '';
     renderMemberCareLists();
     renderSchedulePrescriberOptions();
     await sync();
@@ -7153,6 +7443,8 @@ window.deleteMemberPrescriber = async function(id) {
 
 window.removeMemberPrescriber = function(id) {
     setHiddenJson('m-prescriber-ids-data', getHiddenJson('m-prescriber-ids-data').filter(item => item !== id));
+    const primaryInput = document.getElementById('m-primary-prescriber-id');
+    if (primaryInput?.value === id) primaryInput.value = '';
     renderMemberCareLists();
 };
 
@@ -7200,9 +7492,27 @@ window.addMemberPharmacy = async function() {
         db.pharmacies.push(pharmacy);
     }
     const ids = getHiddenJson('m-pharmacy-ids-data');
-    setHiddenJson('m-pharmacy-ids-data', Array.from(new Set([...ids, pharmacy.id])));
+    const nextIds = Array.from(new Set([...ids, pharmacy.id]));
+    setHiddenJson('m-pharmacy-ids-data', nextIds);
+    const primaryInput = document.getElementById('m-primary-pharmacy-id');
+    if (primaryInput && !primaryInput.value && nextIds.length === 1) primaryInput.value = pharmacy.id;
     renderMemberCareLists();
     await sync();
+    renderMemberCareLists();
+};
+
+window.togglePrimaryPharmacy = async function(id) {
+    const ids = getHiddenJson('m-pharmacy-ids-data');
+    if (!ids.includes(id)) return;
+    const input = document.getElementById('m-primary-pharmacy-id');
+    if (!input) return;
+    input.value = input.value === id ? '' : id;
+    const member = db.family.find(item => item.id === currentEditingMemberId);
+    if (member) {
+        member.pharmacyIds = ids;
+        member.primaryPharmacyId = input.value;
+        await sync();
+    }
     renderMemberCareLists();
 };
 
@@ -7224,6 +7534,7 @@ window.editPharmacyProfile = async function(id) {
 function clearPharmacyReferences(id) {
     db.family.forEach(member => {
         member.pharmacyIds = memberPharmacyIds(member).filter(item => item !== id);
+        if (member.primaryPharmacyId === id) member.primaryPharmacyId = '';
     });
     db.inventory.forEach(med => {
         if (med.pharmacyId === id) med.pharmacyId = '';
@@ -7245,6 +7556,8 @@ window.deleteMemberPharmacy = async function(id) {
     clearPharmacyReferences(id);
     db.pharmacies = (db.pharmacies || []).filter(item => item.id !== id);
     setHiddenJson('m-pharmacy-ids-data', getHiddenJson('m-pharmacy-ids-data').filter(item => item !== id));
+    const primaryInput = document.getElementById('m-primary-pharmacy-id');
+    if (primaryInput?.value === id) primaryInput.value = '';
     renderMemberCareLists();
     await sync();
     renderMemberCareLists();
@@ -7252,6 +7565,8 @@ window.deleteMemberPharmacy = async function(id) {
 
 window.removeMemberPharmacy = function(id) {
     setHiddenJson('m-pharmacy-ids-data', getHiddenJson('m-pharmacy-ids-data').filter(item => item !== id));
+    const primaryInput = document.getElementById('m-primary-pharmacy-id');
+    if (primaryInput?.value === id) primaryInput.value = '';
     renderMemberCareLists();
 };
 
@@ -8117,6 +8432,8 @@ function collectMemberFormData() {
     const diagnosesList = Array.from(new Set([...getHiddenJson('m-diagnoses-data'), ...typedDiagnoses]));
     const prescriberIds = getHiddenJson('m-prescriber-ids-data');
     const pharmacyIds = getHiddenJson('m-pharmacy-ids-data');
+    const primaryPrescriberRaw = document.getElementById('m-primary-prescriber-id')?.value || '';
+    const primaryPharmacyRaw = document.getElementById('m-primary-pharmacy-id')?.value || '';
     const allergies = normalizeMemberAllergies({ allergies: getHiddenJson('m-allergies-data') });
     const firstName = document.getElementById('m-first').value.trim();
     const lastName = document.getElementById('m-last').value.trim();
@@ -8145,12 +8462,15 @@ function collectMemberFormData() {
         email: document.getElementById('m-email').value,
         careNotes: document.getElementById('m-care-notes')?.value || '',
         prescriberIds,
+        primaryPrescriberId: prescriberIds.includes(primaryPrescriberRaw) ? primaryPrescriberRaw : '',
         pharmacyIds,
+        primaryPharmacyId: pharmacyIds.includes(primaryPharmacyRaw) ? primaryPharmacyRaw : '',
         notificationPrefs: {
             medicationReminders: document.getElementById('m-notify-enabled')?.checked !== false,
             emailReminders: document.getElementById('m-email-reminders')?.checked === true
         },
         currentMedicationList: currentMemberMedicationList(),
+        currentMedicationDiscontinuedList: currentMemberDiscontinuedMedicationList(),
         labDocuments: currentMemberLabDocuments(),
         progressNotes: currentMemberProgressNotes(),
         calendarColor: document.getElementById('m-calendar-color').value || '#000080',
@@ -8245,10 +8565,13 @@ window.openMemberModal = async function(id = null, initialTab = null) {
     safeSet('m-progress-note-date', localDateKey());
     safeSet('m-progress-note-time', defaultProgressNoteTime());
     setHiddenJson('m-prescriber-ids-data', []);
+    safeSet('m-primary-prescriber-id', '');
     setHiddenJson('m-pharmacy-ids-data', []);
+    safeSet('m-primary-pharmacy-id', '');
     setHiddenJson('m-diagnoses-data', []);
     setHiddenJson('m-allergies-data', []);
     setHiddenJson('m-current-med-list-data', []);
+    setHiddenJson('m-current-discontinued-med-list-data', []);
     setHiddenJson('m-lab-documents-data', []);
     setHiddenJson('m-progress-notes-data', []);
     activeProgressNotePreviewId = null;
@@ -8306,10 +8629,13 @@ window.openMemberModal = async function(id = null, initialTab = null) {
             if (notifyEnabled) notifyEnabled.checked = notifications.medicationReminders !== false;
             if (emailReminders) emailReminders.checked = notifications.emailReminders === true;
             setHiddenJson('m-prescriber-ids-data', memberPrescriberIds(m));
+            safeSet('m-primary-prescriber-id', memberPrimaryPrescriberId(m));
             setHiddenJson('m-pharmacy-ids-data', memberPharmacyIds(m));
+            safeSet('m-primary-pharmacy-id', memberPrimaryPharmacyId(m));
             setHiddenJson('m-diagnoses-data', normalizeMemberDiagnoses(m));
             setHiddenJson('m-allergies-data', normalizeMemberAllergies(m));
             setHiddenJson('m-current-med-list-data', Array.isArray(m.currentMedicationList) ? m.currentMedicationList : []);
+            setHiddenJson('m-current-discontinued-med-list-data', Array.isArray(m.currentMedicationDiscontinuedList) ? m.currentMedicationDiscontinuedList : []);
             setHiddenJson('m-lab-documents-data', Array.isArray(m.labDocuments) ? m.labDocuments : []);
             setHiddenJson('m-progress-notes-data', Array.isArray(m.progressNotes) ? m.progressNotes : []);
             renderMemberCareLists();
