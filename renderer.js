@@ -5385,20 +5385,36 @@ window.refreshCurrentMedsReportPreview = function(memberId) {
     const body = document.getElementById('action-modal-body');
     const preview = document.getElementById('current-meds-report-preview');
     if (!member || !body || !preview) return;
+    body.querySelectorAll('.current-list-print-table input[name="currentListMedIds"]').forEach(input => {
+        input.closest('tr')?.classList.toggle('selected', input.checked);
+    });
     preview.innerHTML = memberCurrentMedsReportBody(member, currentMedsOptionsFromModalBody(body));
+};
+
+window.toggleCurrentListPrintRow = function(event, row, memberId) {
+    if (event?.target?.tagName === 'INPUT' || event?.target?.tagName === 'BUTTON') return;
+    const input = row?.querySelector('input[name="currentListMedIds"]');
+    if (!input) return;
+    input.checked = !input.checked;
+    row.classList.toggle('selected', input.checked);
+    refreshCurrentMedsReportPreview(memberId);
 };
 
 async function chooseCurrentMedsOutputOptions(member, mode) {
     const rows = currentMedicationListRows(member);
     const medicationOptions = rows.map(item => {
         const inputId = `current-list-med-${item.medId}`;
-        return `<label class="current-list-print-row" for="${escapeHtml(inputId)}">
-            <input id="${escapeHtml(inputId)}" type="checkbox" name="currentListMedIds" value="${escapeHtml(item.medId)}" checked onchange="refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">
-            <span class="current-list-print-copy">
-                <strong>${escapeHtml(item.medication)}</strong>
-                <small>${escapeHtml([item.dose, item.frequency].filter(Boolean).join(' | '))}</small>
-            </span>
-        </label>`;
+        return `<tr class="current-list-print-row selected" onclick="toggleCurrentListPrintRow(event, this, '${escapeHtml(member.id)}')">
+            <td class="current-list-print-check-cell">
+                <input id="${escapeHtml(inputId)}" type="checkbox" name="currentListMedIds" value="${escapeHtml(item.medId)}" checked onchange="refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">
+            </td>
+            <td class="current-list-print-copy-cell">
+                <div class="current-list-print-copy">
+                    <strong>${escapeHtml(item.medication)}</strong>
+                    <small>${escapeHtml([item.dose, item.frequency].filter(Boolean).join(' | '))}</small>
+                </div>
+            </td>
+        </tr>`;
     }).join('');
     const columnOptions = currentMedicationListColumns.map(column => `
         <label class="summary-column-chip">
@@ -5416,7 +5432,11 @@ async function chooseCurrentMedsOutputOptions(member, mode) {
                             <button type="button" onclick="setMedicationSummaryChecks('currentListMedIds', true); refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">Select All</button>
                             <button type="button" onclick="setMedicationSummaryChecks('currentListMedIds', false); refreshCurrentMedsReportPreview('${escapeHtml(member.id)}')">Clear</button>
                         </div>
-                        <div class="summary-option-list current-list-option-list">${medicationOptions || '<div class="empty-state">No current meds or supplements saved.</div>'}</div>
+                        <div class="summary-option-list current-list-option-list">${
+                            medicationOptions
+                                ? `<table class="current-list-print-table"><colgroup><col class="check-col"><col></colgroup><tbody>${medicationOptions}</tbody></table>`
+                                : '<div class="empty-state">No current meds or supplements saved.</div>'
+                        }</div>
                     </fieldset>
                     <fieldset>
                         <legend>Columns</legend>

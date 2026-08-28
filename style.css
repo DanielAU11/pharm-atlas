@@ -668,39 +668,57 @@ button {
     overflow-wrap: break-word;
 }
 
-.current-list-print-row {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr);
-    column-gap: 6px;
-    align-items: start;
-    width: 100%;
+.current-list-option-list {
+    overflow: auto;
     min-width: 0;
+    background: #ffffff;
+}
+
+.current-list-print-table {
+    width: 100%;
+    min-width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    background: #ffffff;
+}
+
+.current-list-print-table .check-col {
+    width: 24px;
+}
+
+.current-list-print-row {
     min-height: 34px;
-    padding: 6px 8px;
-    border-bottom: 1px dotted #c0c0c0;
-    box-sizing: border-box;
     cursor: pointer;
+    background: #f3f3f3;
+    color: #606060;
+}
+
+.current-list-print-row.selected,
+.current-list-print-row:has(input:checked) {
+    background: #e6ffe6;
+    color: #006000;
 }
 
 .current-list-print-row:hover {
     background: #e6f1ff;
 }
 
-.current-list-print-row:has(input:checked) {
-    background: #e6ffe6;
-    color: #006000;
-}
-
+.current-list-print-row.selected strong,
 .current-list-print-row:has(input:checked) strong {
     color: #006000;
 }
 
-.current-list-print-row:has(input:not(:checked)) {
-    background: #f3f3f3;
-    color: #606060;
+.current-list-print-check-cell {
+    width: 24px;
+    min-width: 24px;
+    max-width: 24px;
+    padding: 6px 3px 6px 6px;
+    vertical-align: top;
+    border-bottom: 1px dotted #c0c0c0;
+    box-sizing: border-box;
 }
 
-.current-list-print-row input[type="checkbox"] {
+.current-list-print-check-cell input[type="checkbox"] {
     display: block;
     width: 13px !important;
     min-width: 13px !important;
@@ -708,18 +726,28 @@ button {
     height: 13px !important;
     min-height: 13px !important;
     max-height: 13px !important;
-    margin: 2px 0 0 0 !important;
-    appearance: checkbox !important;
+    margin: 0 !important;
+    appearance: auto !important;
     -webkit-appearance: checkbox !important;
     cursor: pointer;
 }
 
-.current-list-print-copy {
-    display: block;
+.current-list-print-copy-cell {
+    padding: 5px 8px 6px 2px;
+    vertical-align: top;
+    border-bottom: 1px dotted #c0c0c0;
     min-width: 0;
-    width: 100%;
+    box-sizing: border-box;
+}
+
+.current-list-print-copy {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
     line-height: 1.15;
     color: inherit;
+    font-weight: normal;
 }
 
 .current-list-print-copy strong,
@@ -742,6 +770,7 @@ button {
 .current-list-print-copy small {
     color: #404040;
     margin-top: 2px;
+    font-size: 10px;
 }
 
 .summary-column-list {
