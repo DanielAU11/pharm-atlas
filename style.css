@@ -4956,17 +4956,18 @@ button {
     overflow-y: auto;
     background: #ffffff;
     border: 2px inset #c0c0c0;
-    padding: 3px;
+    padding: 5px;
 }
 
 .monitoring-parameter-toggle-row {
     display: grid;
-    grid-template-columns: 16px 28px 1fr;
-    gap: 4px;
+    grid-template-columns: 18px 34px minmax(0, 1fr);
+    gap: 5px;
     align-items: center;
-    padding: 3px;
+    padding: 5px;
     margin-bottom: 2px;
     border: 1px solid transparent;
+    background: #fdfdfd;
     cursor: pointer;
 }
 
@@ -4981,12 +4982,17 @@ button {
     width: 13px;
     height: 13px;
     margin: 0;
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
 }
 
 .monitoring-parameter-toggle-text {
     display: flex;
     flex-direction: column;
-    line-height: 1.05;
+    min-width: 0;
+    line-height: 1.15;
+    word-break: normal;
+    overflow-wrap: normal;
 }
 
 .monitoring-parameter-schedule-list {
@@ -5007,6 +5013,9 @@ button {
     gap: 5px;
     margin-bottom: 5px;
     color: #000080;
+    background: #e6f2ff;
+    border-bottom: 1px dotted #9eb4d0;
+    padding: 3px 4px;
 }
 
 .monitoring-reminder-schedule {
@@ -5022,7 +5031,8 @@ button {
 }
 
 .monitoring-hold-rule {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 72px auto minmax(96px, auto);
     align-items: center;
     gap: 6px;
     margin-top: 6px;
@@ -6077,17 +6087,37 @@ button {
 
 .monitoring-type-manager-row {
     display: grid;
-    grid-template-columns: minmax(170px, 1fr) 54px minmax(140px, 0.8fr) 52px 105px minmax(150px, 0.8fr) 70px auto;
+    grid-template-columns: minmax(180px, 1.2fr) 64px minmax(150px, 0.9fr) 60px 128px minmax(150px, 0.9fr) 75px auto;
     gap: 6px;
-    align-items: center;
+    align-items: end;
     padding: 5px;
     border-bottom: 1px dotted #a0a0a0;
+    background: #fbfbff;
 }
 
 .monitoring-type-manager-row input,
 .monitoring-type-manager-row select {
     width: 100%;
     box-sizing: border-box;
+}
+
+.monitoring-type-manager-row label:not(.monitoring-type-hold-toggle) {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    color: #000080;
+    font-weight: bold;
+}
+
+.monitoring-type-manager-row label:not(.monitoring-type-hold-toggle) span {
+    font-size: 10px;
+}
+
+.monitoring-type-manager-row label:not(.monitoring-type-hold-toggle) input,
+.monitoring-type-manager-row label:not(.monitoring-type-hold-toggle) select {
+    color: #000000;
+    font-weight: normal;
 }
 
 .monitoring-type-hold-toggle {
@@ -6106,7 +6136,7 @@ button {
     align-items: center;
     gap: 5px;
     width: max-content;
-    max-width: 120px;
+    max-width: 128px;
     padding: 2px 5px;
     border: 2px outset #ffffff;
     background: #fff7f7;
@@ -6117,7 +6147,8 @@ button {
     position: static !important;
     opacity: 1 !important;
     pointer-events: auto !important;
-    appearance: auto !important;
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
     width: 13px;
     min-width: 13px;
     max-width: 13px;
