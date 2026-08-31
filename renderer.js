@@ -4749,6 +4749,11 @@ async function requestScheduledDoseDocumentation(schedule, title) {
         await appAlert("That scheduled dose instance has already been documented.");
         return null;
     }
+    const timingCheck = scheduledDoseTimingValidation(result);
+    if (!timingCheck.ok) {
+        await appAlert(timingCheck.message);
+        return null;
+    }
     normalizeScheduledDoseActualTime(result);
     return result;
 }
@@ -4760,6 +4765,33 @@ function normalizeScheduledDoseActualTime(actual) {
         actual.actualTime = actual.scheduledTime;
     }
     return actual;
+}
+
+function scheduledDoseTimingDeltaMinutes(actual) {
+    const scheduled = dateTimeFromParts(actual?.scheduledDate, actual?.scheduledTime);
+    const documented = dateTimeFromParts(actual?.actualDate, actual?.actualTime);
+    if (!scheduled || !documented) return NaN;
+    return Math.round((documented.getTime() - scheduled.getTime()) / 60000);
+}
+
+function scheduledDoseTimingValidation(actual) {
+    const status = actual?.doseStatus || 'given';
+    if (!['late', 'early'].includes(status)) return { ok: true };
+    const delta = scheduledDoseTimingDeltaMinutes(actual);
+    if (!Number.isFinite(delta) || delta === 0) return { ok: true };
+    if (status === 'late' && delta < 0) {
+        return {
+            ok: false,
+            message: 'The documented time is before the scheduled dose. Use Given early or adjust the date/time.'
+        };
+    }
+    if (status === 'early' && delta > 0) {
+        return {
+            ok: false,
+            message: 'The documented time is after the scheduled dose. Use Given late or adjust the date/time.'
+        };
+    }
+    return { ok: true };
 }
 
 function formatActualTimestamp(actual) {
@@ -8361,7 +8393,7 @@ window.removeCompletedSchedule = async function(scheduleId) {
     db.schedules = db.schedules.filter(item => item.id !== scheduleId);
     replaceCareRemindersForSource('schedule', scheduleId, []);
     await sync();
-    if (currentEditingMemberId) await openMemberModal(currentEditingMemberId, 'orders');
+    renderCalendar();
 };
 
 window.removeCompletedLinkedSchedules = async function(scheduleId) {
@@ -8376,7 +8408,7 @@ window.removeCompletedLinkedSchedules = async function(scheduleId) {
     db.schedules = db.schedules.filter(item => !removeIds.has(item.id));
     [...removeIds].forEach(id => replaceCareRemindersForSource('schedule', id, []));
     await sync();
-    if (currentEditingMemberId) await openMemberModal(currentEditingMemberId, 'orders');
+    renderCalendar();
 };
 
 window.removeCompletedOrderSet = async function(orderSetId) {
@@ -8389,7 +8421,7 @@ window.removeCompletedOrderSet = async function(orderSetId) {
     db.schedules = db.schedules.filter(item => item.orderSetId !== orderSetId);
     replaceCareRemindersForSource('orderSet', orderSetId, []);
     await sync();
-    if (currentEditingMemberId) await openMemberModal(currentEditingMemberId, 'orders');
+    renderCalendar();
 };
 
 function memberTaskIdFor(memberId) {
@@ -8755,6 +8787,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                         <div style="text-align:right; margin-top:3px;">
                             <button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button>
                             <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${schedule.id}')">Audit</button>
+                            <button onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Modify</button>
                             <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${schedule.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                             <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${schedule.id}')">Waste</button>
                             <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${schedule.id}')">&#8635; Reorder</button>
@@ -8802,6 +8835,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
                         <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
+                        <button onclick="event.stopPropagation(); openOrderModifier('${s.id}')">Modify</button>
                         <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${s.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                         <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${s.id}')">Waste</button>
                         <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${s.id}')">&#8635; Reorder</button>
@@ -9034,7 +9068,7 @@ window.saveOrderModification = async function() {
         linkedSchedulesUpdated.forEach(linkedSchedule => createCareRemindersForSchedule(linkedSchedule));
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
-        await openMemberModal(sched.memberId, 'orders'); // Refresh member profile and return to Scheduled Medications
+        renderCalendar();
     }
 };
 
@@ -10482,6 +10516,14 @@ function orderSetRowPreviewItem(row, index) {
         cycleStartDate: cycleMode === 'dates' ? (row.querySelector('.os-cycle-start-date')?.value || '') : '',
         cycleEndDate: cycleMode === 'dates' ? (row.querySelector('.os-cycle-end-date')?.value || '') : ''
     };
+    const itemWindow = orderSetItemDateWindow(proxy, header.startDate || localDateKey(), header.endDate || 'Ongoing');
+    const reportSchedule = {
+        ...proxy,
+        id: `regimen-builder-${index}`,
+        startDate: itemWindow.startDate || header.startDate || localDateKey(),
+        endDate: itemWindow.endDate || header.endDate || 'Ongoing',
+        startTime: proxy.times?.[0] || ''
+    };
     const linkMode = row.querySelector('.os-link-mode')?.value || '';
     const linkTargets = selectedOptionValues(row.querySelector('.os-link-target'))
         .map(rowId => document.querySelector(`#order-set-med-list .order-set-med-row[data-row-id="${cssEscape(rowId)}"]`))
@@ -10497,6 +10539,7 @@ function orderSetRowPreviewItem(row, index) {
         cycle: regimenCycleText(proxy, header.startDate, header.endDate),
         indication: row.querySelector('.os-indication')?.value.trim() || '',
         instructions: row.querySelector('.os-instructions')?.value.trim() || '',
+        instances: regimenReportInstancesForSchedule(reportSchedule, header.startDate, header.endDate, index),
         linkText: linkMode && linkTargets.length
             ? `${linkMode === 'together' ? 'Take together with' : 'Choose only one from'}: ${linkTargets.join(', ')}`
             : ''
@@ -10562,6 +10605,58 @@ function regimenReminderReportHtml(types, note = '', memberId = '') {
     </div>`;
 }
 
+function regimenReportWindow(startDate, endDate) {
+    const start = startDate || localDateKey();
+    let end = endDate && endDate !== 'Ongoing' ? endDate : dateKeyPlusDays(start, 13);
+    const startDateObj = parseLocal(start);
+    const endDateObj = parseLocal(end);
+    if (startDateObj && endDateObj && endDateObj < startDateObj) end = start;
+    const maxDays = 31;
+    const days = Math.min(Math.max(daysBetween(end, start) + 1, 1), maxDays);
+    const keys = [];
+    for (let i = 0; i < days; i++) keys.push(dateKeyPlusDays(start, i));
+    return { start, end, keys, capped: days === maxDays && end !== keys[keys.length - 1] };
+}
+
+function regimenReportInstancesForSchedule(schedule, regimenStart = '', regimenEnd = '', index = 0) {
+    const start = schedule.startDate || regimenStart || localDateKey();
+    const end = schedule.endDate && schedule.endDate !== 'Ongoing'
+        ? schedule.endDate
+        : (regimenEnd && regimenEnd !== 'Ongoing' ? regimenEnd : dateKeyPlusDays(start, 13));
+    const window = regimenReportWindow(start, end);
+    return getScheduleInstancesInRange({ ...schedule, id: schedule.id || `regimen-report-${index}` }, window.start, window.keys[window.keys.length - 1]);
+}
+
+function regimenReportCalendarHtml(items, startDate, endDate) {
+    const window = regimenReportWindow(startDate, endDate);
+    const rows = (items || []).map(item => {
+        const byDate = new Map();
+        (item.instances || []).forEach(instance => {
+            if (!byDate.has(instance.date)) byDate.set(instance.date, []);
+            byDate.get(instance.date).push(instance.time);
+        });
+        const cells = window.keys.map(dateKey => {
+            const times = (byDate.get(dateKey) || [])
+                .slice()
+                .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+            return `<td>${times.map(time => `<span class="regimen-calendar-dose">${escapeHtml(time)}</span>`).join('') || '&nbsp;'}</td>`;
+        }).join('');
+        return `<tr>
+            <td><strong>${escapeHtml(item.name)}</strong><br><small>${escapeHtml([item.dose, item.quantity].filter(Boolean).join(' | '))}</small></td>
+            ${cells}
+        </tr>`;
+    }).join('');
+    return `<h2>Regimen Calendar</h2>
+        ${window.capped ? '<div class="regimen-calendar-note">Calendar preview is capped at 31 days for readability.</div>' : ''}
+        <table class="regimen-calendar-table">
+            <thead><tr><th>Medication</th>${window.keys.map(dateKey => {
+                const date = parseLocal(dateKey);
+                return `<th>${escapeHtml(date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }))}</th>`;
+            }).join('')}</tr></thead>
+            <tbody>${rows || `<tr><td colspan="${window.keys.length + 1}">No scheduled medication dates found.</td></tr>`}</tbody>
+        </table>`;
+}
+
 function regimenReportBody(title, memberText, startDate, endDate, items, reminderTypes = [], reminderNote = '', memberId = '', options = {}) {
     const selectedItems = regimenReportSelectedItems(items, options);
     const columns = regimenReportSelectedColumns(options);
@@ -10578,6 +10673,7 @@ function regimenReportBody(title, memberText, startDate, endDate, items, reminde
                 <thead><tr>${columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
                 <tbody>${rows || `<tr><td colspan="${columns.length}">No medications added to this regimen.</td></tr>`}</tbody>
             </table>
+            ${regimenReportCalendarHtml(selectedItems, startDate, endDate)}
         </div>`;
 }
 
@@ -10609,9 +10705,8 @@ function regimenPreviewFilenamePrefix(name) {
 let regimenReportPreviewContext = null;
 
 function regimenReportOptionsFromModalBody(body) {
-    const itemIndexes = [...body.querySelectorAll('input[name="regimenReportItemIndexes"]:checked')].map(input => input.value);
     const columnIds = [...body.querySelectorAll('input[name="regimenReportColumnIds"]:checked')].map(input => input.value);
-    return { itemIndexes, columnIds };
+    return { columnIds };
 }
 
 window.refreshRegimenReportOptionsPreview = function() {
@@ -10640,11 +10735,6 @@ function regimenReportSourceFromBuilder() {
 
 async function chooseRegimenReportOutputOptions(source, mode) {
     regimenReportPreviewContext = source;
-    const itemOptions = source.items.map(item => `
-        <label class="summary-option-row">
-            <input type="checkbox" name="regimenReportItemIndexes" value="${escapeHtml(item.index)}" checked onchange="refreshRegimenReportOptionsPreview()">
-            <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml([item.dose, item.schedule, item.cycle].filter(Boolean).join(' | '))}</small></span>
-        </label>`).join('');
     const columnOptions = regimenReportColumns.map(column => `
         <label class="summary-column-chip">
             <input type="checkbox" name="regimenReportColumnIds" value="${escapeHtml(column.id)}" checked onchange="refreshRegimenReportOptionsPreview()">
@@ -10655,14 +10745,6 @@ async function chooseRegimenReportOutputOptions(source, mode) {
             <div class="summary-output-layout">
                 <div class="summary-output-options">
                     <fieldset>
-                        <legend>Regimen Medications</legend>
-                        <div class="summary-select-actions">
-                            <button type="button" onclick="setMedicationSummaryChecks('regimenReportItemIndexes', true); refreshRegimenReportOptionsPreview()">Select All</button>
-                            <button type="button" onclick="setMedicationSummaryChecks('regimenReportItemIndexes', false); refreshRegimenReportOptionsPreview()">Clear</button>
-                        </div>
-                        <div class="summary-option-list">${itemOptions || '<div class="empty-state">No regimen medications added.</div>'}</div>
-                    </fieldset>
-                    <fieldset>
                         <legend>Columns</legend>
                         <div class="summary-column-list">${columnOptions}</div>
                     </fieldset>
@@ -10670,7 +10752,7 @@ async function chooseRegimenReportOutputOptions(source, mode) {
                 <fieldset class="summary-preview-fieldset">
                     <legend>Built-in Preview</legend>
                     <div id="regimen-report-options-preview" class="summary-report-preview regimen-report-options-preview">
-                        ${regimenReportBody(source.title, source.memberText, source.startDate, source.endDate, source.items, source.reminderTypes, source.reminderNote, source.memberId, { itemIndexes: source.items.map(item => item.index), columnIds: defaultRegimenReportColumnIds })}
+                        ${regimenReportBody(source.title, source.memberText, source.startDate, source.endDate, source.items, source.reminderTypes, source.reminderNote, source.memberId, { columnIds: defaultRegimenReportColumnIds })}
                     </div>
                 </fieldset>
             </div>
@@ -10678,10 +10760,6 @@ async function chooseRegimenReportOutputOptions(source, mode) {
     `, mode === 'pdf' ? 'Generate PDF' : mode === 'email' ? 'Continue' : 'Print', regimenReportOptionsFromModalBody);
     regimenReportPreviewContext = null;
     if (!result) return null;
-    if (!result.itemIndexes.length) {
-        await appAlert('Select at least one regimen medication to include.');
-        return chooseRegimenReportOutputOptions(source, mode);
-    }
     if (!result.columnIds.length) {
         await appAlert('Select at least one column to include.');
         return chooseRegimenReportOutputOptions(source, mode);
@@ -11466,10 +11544,7 @@ window.deleteOrderSet = async function(id) {
     db.schedules = db.schedules.filter(schedule => schedule.orderSetId !== id);
     replaceCareRemindersForSource('orderSet', id, []);
     await sync();
-    const memberModal = document.getElementById('member-modal');
-    if (currentEditingMemberId && memberModal?.style.display === 'flex') {
-        await openMemberModal(currentEditingMemberId, 'orders');
-    }
+    renderCalendar();
 };
 
 window.printOrderSetLabel = function(id) {
@@ -11592,6 +11667,7 @@ function regimenReportItemsFromOrderSet(set) {
             cycle: regimenCycleText(item, set.startDate, set.endDate),
             indication: item.indication || '',
             instructions: item.instructions || '',
+            instances: regimenReportInstancesForSchedule(item, set.startDate, set.endDate, index + 1),
             linkText: linkedSchedulesFor(item, sourceItems).length
                 ? regimenLinkedDetailsText(item, sourceItems)
                 : ''
@@ -16771,6 +16847,11 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
     }
     result.scheduledDate = scheduledDate;
     result.scheduledTime = scheduledTime;
+    const timingCheck = scheduledDoseTimingValidation(result);
+    if (!timingCheck.ok) {
+        await appAlert(timingCheck.message);
+        return;
+    }
     normalizeScheduledDoseActualTime(result);
     const documented = await administerScheduleRecord(
         schedule,
@@ -16910,7 +16991,7 @@ function memberScheduleGridHtml(memberId) {
                 <div class="member-grid-actions">
                     <button type="button" onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Label</button>
                     <button type="button" onclick="event.stopPropagation(); administerDose('${schedule.medId}','${schedule.id}')">Administer</button>
-                    <button type="button" onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Edit</button>
+                    <button type="button" onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Modify</button>
                 </div>
             </td>
             ${cells}
@@ -19029,6 +19110,31 @@ window.reorderMedicationSchedule = async function(scheduleId) {
     if (pendingList) pendingList.scrollIntoView({ block: 'nearest' });
 };
 
+window.scheduleMedicationForCurrentMember = async function() {
+    if (!currentEditingMemberId) {
+        await appAlert('Save this member before scheduling medications.');
+        return;
+    }
+    const memberModal = document.getElementById('member-modal');
+    if (memberModal?.style.display === 'flex') {
+        const saved = await saveMemberFromProfile({ closeAfter: false });
+        if (!saved) return;
+        captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
+        memberModal.style.display = 'none';
+        if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+    }
+    switchTab('schedules');
+    const select = document.getElementById('select-member');
+    if (select) {
+        select.value = currentEditingMemberId;
+        renderSchedulePrescriberOptions();
+        renderScheduleLinkOptions();
+        renderPendingScheduleOrders();
+        updateScheduleMedicationPreview();
+    }
+    document.getElementById('med-search-input')?.focus();
+};
+
 window.finalizePendingScheduleOrders = async function() {
     const container = document.getElementById('pending-schedule-list');
     const selectedIds = Array.from(container?.querySelectorAll('input[name="pendingScheduleIds"]:checked') || []).map(input => input.value);
@@ -19483,9 +19589,6 @@ window.toggleMedicationHold = async function(scheduleId) {
         });
     }
     await sync();
-    if (currentEditingMemberId && document.getElementById('member-modal')?.style.display === 'flex') {
-        await openMemberModal(currentEditingMemberId, 'orders');
-    }
     renderCalendar();
 };
 
@@ -19538,9 +19641,6 @@ window.toggleOrderSetHold = async function(orderSetId) {
         });
     }
     await sync();
-    if (currentEditingMemberId && document.getElementById('member-modal')?.style.display === 'flex') {
-        await openMemberModal(currentEditingMemberId, 'orders');
-    }
     renderCalendar();
 };
 
@@ -19863,6 +19963,11 @@ window.editAdministration = async function(entryId) {
     if (schedule?.freq !== 'PRN' && entry.scheduledDate && entry.scheduledTime) {
         result.scheduledDate = entry.scheduledDate;
         result.scheduledTime = entry.scheduledTime;
+        const timingCheck = scheduledDoseTimingValidation(result);
+        if (!timingCheck.ok) {
+            await appAlert(timingCheck.message);
+            return;
+        }
         normalizeScheduledDoseActualTime(result);
     }
 
@@ -20045,10 +20150,7 @@ window.finishTopicalContainer = async function(scheduleId) {
     });
     markScheduleCompleted(schedule);
     await sync();
-    const memberModal = document.getElementById('member-modal');
-    if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
-        await openMemberModal(schedule.memberId, 'orders');
-    }
+    renderCalendar();
 };
 
 window.setScheduleContainerOpenState = async function(scheduleId) {
@@ -20236,10 +20338,7 @@ window.deleteSchedule = async function(id) {
     });
     await sync();
 
-    const memberModal = document.getElementById('member-modal');
-    if (currentEditingMemberId === schedule.memberId && memberModal?.style.display === 'flex') {
-        await openMemberModal(schedule.memberId, 'orders');
-    }
+    renderCalendar();
 };
 
 function recipeId() {
