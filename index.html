@@ -1601,11 +1601,15 @@
                     <strong id="member-calendar-range"></strong>
                     <button type="button" onclick="shiftMemberCalendar(7)">Next 7 Days</button>
                     <button type="button" onclick="resetMemberCalendar()">Today</button>
-                    <button type="button" class="schedule-medications-button" onclick="scheduleMedicationForCurrentMember()">Schedule Medication</button>
+                    <button type="button" class="schedule-medications-button" onclick="scheduleMedicationForCurrentMember()"><span class="win98-icon icon-order"></span> Schedule</button>
                     <span id="member-calendar-view-toggle" class="calendar-view-toggle"></span>
                 </div>
                 <div id="member-calendar-grid" class="member-calendar-grid"></div>
             </fieldset>
+
+            <aside id="member-order-work-dock" class="member-order-work-dock" aria-hidden="true">
+                <div id="member-order-worklist"></div>
+            </aside>
 
             <fieldset data-member-section="orders" class="member-scan-console" style="margin-top:10px;">
                 <legend>Scanned Prepack / Label</legend>

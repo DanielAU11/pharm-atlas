@@ -249,6 +249,8 @@ let activeMedKitId = null;
 let activeCompoundRecipeId = null;
 let prepackScanTimer = null;
 let pendingScheduleOrders = [];
+let pendingProfileScheduleActions = [];
+let memberAdherencePeriod = 'week';
 let scheduleReorderSourceId = '';
 let pendingNewMedImage = null;
 let pendingModalMedImage = null;
@@ -5115,7 +5117,15 @@ window.switchMemberProfileTab = function(tab = 'main') {
     }
     updateProgressNoteSidePanel();
     renderMemberContextRail(currentEditingMemberId);
-    if (tab === 'orders') renderMemberCommandScanPanel();
+    if (tab === 'orders') {
+        renderMemberOrderWorklist(currentEditingMemberId);
+        renderMemberCommandScanPanel();
+        const hasPendingOrderWork = pendingScheduleOrders.some(order => order.memberId === currentEditingMemberId)
+            || pendingProfileActionsForMember(currentEditingMemberId).length > 0;
+        if (hasPendingOrderWork) setMemberMedicationWorkPanelOpen(true);
+    } else {
+        setMemberMedicationWorkPanelOpen(false);
+    }
 };
 
 function latestMemberReading(memberId, types) {
@@ -7941,6 +7951,29 @@ async function chooseLinkedMedications(title, choices, selectedValues) {
     return result.linkIds || [];
 }
 
+async function chooseLinkedMedicationsChild(title, choices, selectedValues) {
+    if (choices.length === 0) {
+        await appAlert('There are no other medications available to link.');
+        return null;
+    }
+    const selected = new Set(uniqueValues(selectedValues));
+    const result = await showChildActionModal(title, `
+        <div class="form-help" style="margin-bottom:6px;">Check each medication that should be linked to this order.</div>
+        <div class="sunken-panel link-picker-list">
+            ${choices.map((choice, index) => {
+                const inputId = `profile-link-picker-${index}`;
+                return `<div class="link-picker-item ${choice.isPending ? 'pending-link-choice' : ''}" onclick="toggleLinkPickerCheckbox('${inputId}')">
+                    <input id="${inputId}" name="linkIds" type="checkbox" value="${escapeHtml(choice.id)}" ${selected.has(choice.id) ? 'checked' : ''} onclick="event.stopPropagation(); updateLinkPickerRow(this);">
+                    <span class="link-picker-check" aria-hidden="true"></span>
+                    <label for="${inputId}" onclick="event.stopPropagation();">${escapeHtml(choice.label)}</label>
+                </div>`;
+            }).join('')}
+        </div>
+    `, 'Apply');
+    if (!result) return null;
+    return result.linkIds || [];
+}
+
 window.updateLinkPickerRow = function(input) {
     input?.closest('.link-picker-item')?.classList.toggle('checked', !!input.checked);
 };
@@ -8254,6 +8287,7 @@ async function sync() {
         renderMemberMedicationReview(currentEditingMemberId);
         renderMemberMedicationTimelines();
         renderMemberCalendar(currentEditingMemberId);
+        renderMemberOrderWorklist(currentEditingMemberId);
         renderMemberCommandScanPanel();
     }
 }
@@ -8861,6 +8895,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
             renderMemberAdministrationLog(m.id);
             renderMemberMedicationTimelines();
             renderMemberCalendar(m.id);
+            renderMemberOrderWorklist(m.id);
             renderMemberCommandScanPanel();
         }
     } else {
@@ -8880,6 +8915,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
         renderMemberCommandScanPanel();
         if (prnMedsContainer) prnMedsContainer.innerHTML = '<div style="font-size:11px; padding:5px;">Save member before adding PRN medications.</div>';
         renderMemberCareReminders(null);
+        renderMemberOrderWorklist(null);
     }
 
     if (modal) {
@@ -9066,9 +9102,17 @@ window.saveOrderModification = async function() {
         });
         createCareRemindersForSchedule(sched);
         linkedSchedulesUpdated.forEach(linkedSchedule => createCareRemindersForSchedule(linkedSchedule));
+        const profileWasOpen = document.getElementById('member-modal')?.style.display === 'flex' && currentEditingMemberId === sched.memberId;
+        if (profileWasOpen) captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
         await sync();
         document.getElementById('order-modifier-modal').style.display = 'none';
         renderCalendar();
+        if (profileWasOpen) {
+            window.switchMemberProfileTab('orders');
+            renderMemberOrderWorklist(currentEditingMemberId);
+            renderMemberCalendar(currentEditingMemberId);
+            renderMemberMedicationTimelines();
+        }
     }
 };
 
@@ -10611,7 +10655,7 @@ function regimenReportWindow(startDate, endDate) {
     const startDateObj = parseLocal(start);
     const endDateObj = parseLocal(end);
     if (startDateObj && endDateObj && endDateObj < startDateObj) end = start;
-    const maxDays = 31;
+    const maxDays = 14;
     const days = Math.min(Math.max(daysBetween(end, start) + 1, 1), maxDays);
     const keys = [];
     for (let i = 0; i < days; i++) keys.push(dateKeyPlusDays(start, i));
@@ -10629,32 +10673,42 @@ function regimenReportInstancesForSchedule(schedule, regimenStart = '', regimenE
 
 function regimenReportCalendarHtml(items, startDate, endDate) {
     const window = regimenReportWindow(startDate, endDate);
-    const rows = (items || []).map(item => {
-        const byDate = new Map();
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const byDate = new Map(window.keys.map(key => [key, []]));
+    (items || []).forEach(item => {
         (item.instances || []).forEach(instance => {
-            if (!byDate.has(instance.date)) byDate.set(instance.date, []);
-            byDate.get(instance.date).push(instance.time);
+            if (!byDate.has(instance.date)) return;
+            byDate.get(instance.date).push({
+                time: instance.time || '',
+                name: item.name || 'Medication',
+                dose: item.dose || item.quantity || ''
+            });
         });
-        const cells = window.keys.map(dateKey => {
-            const times = (byDate.get(dateKey) || [])
+    });
+    const firstDate = parseLocal(window.keys[0]);
+    const leadingBlanks = firstDate ? firstDate.getDay() : 0;
+    const cells = [
+        ...Array.from({ length: leadingBlanks }, () => '<div class="regimen-calendar-day regimen-calendar-empty">&nbsp;</div>'),
+        ...window.keys.map(dateKey => {
+            const date = parseLocal(dateKey);
+            const entries = (byDate.get(dateKey) || [])
                 .slice()
-                .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
-            return `<td>${times.map(time => `<span class="regimen-calendar-dose">${escapeHtml(time)}</span>`).join('') || '&nbsp;'}</td>`;
-        }).join('');
-        return `<tr>
-            <td><strong>${escapeHtml(item.name)}</strong><br><small>${escapeHtml([item.dose, item.quantity].filter(Boolean).join(' | '))}</small></td>
-            ${cells}
-        </tr>`;
-    }).join('');
+                .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || String(a.name).localeCompare(String(b.name)));
+            return `<div class="regimen-calendar-day${dateKey === localDateKey() ? ' regimen-calendar-today' : ''}">
+                <div class="regimen-calendar-day-title">${date ? `${date.getMonth() + 1}/${date.getDate()}` : escapeHtml(dateKey)}</div>
+                ${entries.length
+                    ? entries.map(entry => `<div class="regimen-calendar-dose"><i>${escapeHtml(entry.time)}</i><span>${escapeHtml(entry.name)}${entry.dose ? ` - ${escapeHtml(entry.dose)}` : ''}</span></div>`).join('')
+                    : '<div class="regimen-calendar-no-dose">No scheduled doses</div>'}
+            </div>`;
+        })
+    ];
+    while (cells.length % 7 !== 0) cells.push('<div class="regimen-calendar-day regimen-calendar-empty">&nbsp;</div>');
     return `<h2>Regimen Calendar</h2>
-        ${window.capped ? '<div class="regimen-calendar-note">Calendar preview is capped at 31 days for readability.</div>' : ''}
-        <table class="regimen-calendar-table">
-            <thead><tr><th>Medication</th>${window.keys.map(dateKey => {
-                const date = parseLocal(dateKey);
-                return `<th>${escapeHtml(date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }))}</th>`;
-            }).join('')}</tr></thead>
-            <tbody>${rows || `<tr><td colspan="${window.keys.length + 1}">No scheduled medication dates found.</td></tr>`}</tbody>
-        </table>`;
+        ${window.capped ? '<div class="regimen-calendar-note">Calendar preview is capped at 14 days for readability.</div>' : ''}
+        <div class="regimen-calendar-board">
+            ${days.map(day => `<div class="regimen-calendar-header">${day}</div>`).join('')}
+            ${cells.join('')}
+        </div>`;
 }
 
 function regimenReportBody(title, memberText, startDate, endDate, items, reminderTypes = [], reminderNote = '', memberId = '', options = {}) {
@@ -11501,24 +11555,7 @@ window.assignOrderSet = async function(id) {
         return;
     }
 
-    const assignedSet = {
-        ...source,
-        id: Date.now().toString(),
-        templateId: source.templateId || source.id,
-        memberId: result.memberId,
-        startDate: result.startDate,
-        endDate: result.endDate || 'Ongoing',
-        monitoringReminderSchedule: rebaseMonitoringReminderSchedule(source.monitoringReminderSchedule, source.startDate, result.startDate, result.endDate || 'Ongoing'),
-        monitoringHoldRule: source.monitoringHoldRule || null,
-        items: source.items.map(item => {
-            const timingFreq = scheduleTimingFrequency(item) || item.freq;
-            if (!['QW', 'Monthly'].includes(timingFreq) || !item.anchorDate || !source.startDate) return { ...item };
-            const offset = Math.max(daysBetween(item.anchorDate, source.startDate), 0);
-            const rebasedAnchor = parseLocal(result.startDate);
-            rebasedAnchor.setDate(rebasedAnchor.getDate() + offset);
-            return { ...item, anchorDate: localDateKey(rebasedAnchor) };
-        })
-    };
+    const assignedSet = buildAssignedOrderSetFromTemplate(source, result.memberId, result.startDate, result.endDate || 'Ongoing');
     const invalidAnchor = assignedSet.items.find(item =>
         ['QW', 'Monthly'].includes(scheduleTimingFrequency(item) || item.freq) &&
         item.anchorDate &&
@@ -11537,6 +11574,27 @@ window.assignOrderSet = async function(id) {
     createCareRemindersForOrderSet(assignedSet);
     await sync();
 };
+
+function buildAssignedOrderSetFromTemplate(source, memberId, startDate, endDate = 'Ongoing') {
+    return {
+        ...source,
+        id: Date.now().toString(),
+        templateId: source.templateId || source.id,
+        memberId,
+        startDate,
+        endDate: endDate || 'Ongoing',
+        monitoringReminderSchedule: rebaseMonitoringReminderSchedule(source.monitoringReminderSchedule, source.startDate, startDate, endDate || 'Ongoing'),
+        monitoringHoldRule: source.monitoringHoldRule || null,
+        items: (source.items || []).map(item => {
+            const timingFreq = scheduleTimingFrequency(item) || item.freq;
+            if (!['QW', 'Monthly'].includes(timingFreq) || !item.anchorDate || !source.startDate) return { ...item };
+            const offset = Math.max(daysBetween(item.anchorDate, source.startDate), 0);
+            const rebasedAnchor = parseLocal(startDate);
+            rebasedAnchor.setDate(rebasedAnchor.getDate() + offset);
+            return { ...item, anchorDate: localDateKey(rebasedAnchor) };
+        })
+    };
+}
 
 window.deleteOrderSet = async function(id) {
     if (!await appConfirm("Delete this regimen and its related schedules?", "Delete Regimen")) return;
@@ -16572,14 +16630,32 @@ function renderMemberVitalProfile(memberId) {
     renderMemberVitalCharts(memberId, document.getElementById('member-vitals-trends'));
 }
 
-function memberAdherenceRows(memberId, days = 14) {
+function adherenceDateRange(period = 'week') {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(today);
+    const days = { week: 7, month: 30, year: 365 }[period] || 7;
     start.setDate(start.getDate() - (days - 1));
+    return {
+        period,
+        days,
+        startDate: localDateKey(start),
+        endDate: localDateKey(today)
+    };
+}
+
+function adherencePeriodLabel(period = 'week') {
+    return { week: 'Week', month: 'Month', year: 'Year' }[period] || 'Week';
+}
+
+function memberAdherenceRowsForRange(memberId, startDate, endDate) {
+    const start = parseLocal(startDate);
+    const end = parseLocal(endDate);
+    if (!start || !end || end < start) return [];
     const now = new Date();
     const rows = [];
     const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq !== 'PRN');
+    const days = Math.floor((end - start) / 86400000) + 1;
 
     for (let i = 0; i < days; i++) {
         const cursor = new Date(start);
@@ -16612,6 +16688,55 @@ function memberAdherenceRows(memberId, days = 14) {
     return rows;
 }
 
+function memberAdherenceRows(memberId, days = 14) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(today);
+    start.setDate(start.getDate() - (days - 1));
+    return memberAdherenceRowsForRange(memberId, localDateKey(start), localDateKey(today));
+}
+
+function summarizeAdherenceRows(rows) {
+    const totalDue = rows.reduce((sum, row) => sum + row.due, 0);
+    const totalGiven = rows.reduce((sum, row) => sum + row.given, 0);
+    const totalExceptions = rows.reduce((sum, row) => sum + row.exceptions, 0);
+    const missed = rows.reduce((sum, row) => sum + row.missed, 0);
+    return {
+        totalDue,
+        totalGiven,
+        totalExceptions,
+        missed,
+        overall: totalDue > 0 ? Math.round((totalGiven / totalDue) * 100) : null
+    };
+}
+
+function aggregateAdherenceRows(rows, mode = 'daily') {
+    if (mode !== 'month') return rows;
+    const buckets = new Map();
+    rows.forEach(row => {
+        const date = parseLocal(row.date);
+        if (!date) return;
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        if (!buckets.has(monthKey)) {
+            buckets.set(monthKey, { date: monthKey, due: 0, given: 0, exceptions: 0, missed: 0, label: date.toLocaleString(undefined, { month: 'short', year: '2-digit' }) });
+        }
+        const bucket = buckets.get(monthKey);
+        bucket.due += row.due;
+        bucket.given += row.given;
+        bucket.exceptions += row.exceptions;
+        bucket.missed += row.missed;
+    });
+    return Array.from(buckets.values()).map(row => ({
+        ...row,
+        percent: row.due > 0 ? Math.round((row.given / row.due) * 100) : null
+    }));
+}
+
+function adherenceStatusClass(percent) {
+    if (percent === null) return 'empty';
+    return percent >= 90 ? 'good' : percent >= 75 ? 'watch' : 'risk';
+}
+
 function renderMemberAdherenceProfile(memberId) {
     const container = document.getElementById('member-adherence-chart');
     if (!container) return;
@@ -16620,21 +16745,31 @@ function renderMemberAdherenceProfile(memberId) {
         container.innerHTML = '<div class="empty-state">Save member before tracking adherence.</div>';
         return;
     }
-    const rows = memberAdherenceRows(memberId, 14);
-    const totalDue = rows.reduce((sum, row) => sum + row.due, 0);
-    const totalGiven = rows.reduce((sum, row) => sum + row.given, 0);
-    const totalExceptions = rows.reduce((sum, row) => sum + row.exceptions, 0);
-    const overall = totalDue > 0 ? Math.round((totalGiven / totalDue) * 100) : null;
+    const range = adherenceDateRange(memberAdherencePeriod);
+    const rows = memberAdherenceRowsForRange(memberId, range.startDate, range.endDate);
+    const chartRows = aggregateAdherenceRows(rows, memberAdherencePeriod === 'year' ? 'month' : 'daily');
+    const { totalDue, totalGiven, totalExceptions, missed, overall } = summarizeAdherenceRows(rows);
+    const toolbar = `
+        <div class="adherence-toolbar">
+            <div class="adherence-periods">
+                ${['week', 'month', 'year'].map(period => `<button type="button" class="${memberAdherencePeriod === period ? 'active' : ''}" onclick="setMemberAdherencePeriod('${period}')">${adherencePeriodLabel(period)}</button>`).join('')}
+            </div>
+            <div class="adherence-actions">
+                <button type="button" onclick="generateMemberAdherencePdfReport('${escapeHtml(memberId)}')">PDF</button>
+                <button type="button" onclick="emailMemberAdherenceReport('${escapeHtml(memberId)}')">Email</button>
+                <button type="button" onclick="printMemberAdherenceReport('${escapeHtml(memberId)}')">Print</button>
+            </div>
+        </div>`;
     if (totalDue === 0) {
-        container.innerHTML = '<div class="empty-state">No scheduled non-PRN doses were due in the last 14 days.</div>';
+        container.innerHTML = `${toolbar}<div class="empty-state">No scheduled non-PRN doses were due for this ${adherencePeriodLabel(memberAdherencePeriod).toLowerCase()} view.</div>`;
         return;
     }
-    const statusClass = overall >= 90 ? 'good' : overall >= 75 ? 'watch' : 'risk';
-    const bars = rows.map(row => {
+    const statusClass = adherenceStatusClass(overall);
+    const bars = chartRows.map(row => {
         const labelDate = parseLocal(row.date);
-        const label = labelDate ? `${labelDate.getMonth() + 1}/${labelDate.getDate()}` : row.date;
+        const label = row.label || (labelDate ? `${labelDate.getMonth() + 1}/${labelDate.getDate()}` : row.date);
         const width = row.percent === null ? 0 : Math.max(2, row.percent);
-        const barClass = row.percent === null ? 'empty' : row.percent >= 90 ? 'good' : row.percent >= 75 ? 'watch' : 'risk';
+        const barClass = adherenceStatusClass(row.percent);
         const title = row.due
             ? `${row.date}: ${row.given}/${row.due} documented, ${row.exceptions} skipped/missed`
             : `${row.date}: no doses due`;
@@ -16644,17 +16779,103 @@ function renderMemberAdherenceProfile(memberId) {
         </div>`;
     }).join('');
     container.innerHTML = `
+        ${toolbar}
         <div class="adherence-summary ${statusClass}">
-            <div><strong>${overall}%</strong><span>Last 14 days</span></div>
-            <div>${totalGiven}/${totalDue} scheduled doses documented as given${totalExceptions ? `; ${totalExceptions} skipped/missed documented` : ''}.</div>
+            <div><strong>${overall}%</strong><span>${adherencePeriodLabel(memberAdherencePeriod)} view</span></div>
+            <div>${totalGiven}/${totalDue} scheduled doses documented as given. ${totalExceptions} skipped/refused/held and ${missed} not documented yet.</div>
         </div>
-        <div class="adherence-chart">${bars}</div>
+        <div class="adherence-chart" style="--adherence-columns:${Math.max(1, Math.min(chartRows.length, 31))};">${bars}</div>
         <div class="adherence-legend">
             <span><i class="good"></i>90%+</span>
             <span><i class="watch"></i>75-89%</span>
             <span><i class="risk"></i>Below 75%</span>
         </div>`;
 }
+
+window.setMemberAdherencePeriod = function(period) {
+    memberAdherencePeriod = ['week', 'month', 'year'].includes(period) ? period : 'week';
+    renderMemberAdherenceProfile(currentEditingMemberId);
+};
+
+function memberAdherenceReportBody(member, period = memberAdherencePeriod) {
+    const range = adherenceDateRange(period);
+    const rows = memberAdherenceRowsForRange(member.id, range.startDate, range.endDate);
+    const { totalDue, totalGiven, totalExceptions, missed, overall } = summarizeAdherenceRows(rows);
+    const chartRows = aggregateAdherenceRows(rows, period === 'year' ? 'month' : 'daily');
+    const trendRows = chartRows.map(row => `
+        <tr>
+            <td>${escapeHtml(row.label || row.date)}</td>
+            <td>${row.due}</td>
+            <td>${row.given}</td>
+            <td>${row.exceptions}</td>
+            <td>${row.missed}</td>
+            <td>${row.percent === null ? 'N/A' : `${row.percent}%`}</td>
+        </tr>`).join('');
+    return `
+        <h2>${escapeHtml(member.lastName)}, ${escapeHtml(member.firstName)}</h2>
+        <div class="muted">Adherence period: ${escapeHtml(adherencePeriodLabel(period))} (${escapeHtml(range.startDate)} to ${escapeHtml(range.endDate)})</div>
+        <h2>Medication Adherence</h2>
+        <table>
+            <tbody>
+                <tr><th>Scheduled doses due</th><td>${totalDue}</td></tr>
+                <tr><th>Documented as given</th><td>${totalGiven}</td></tr>
+                <tr><th>Skipped / refused / held</th><td>${totalExceptions}</td></tr>
+                <tr><th>Not documented yet</th><td>${missed}</td></tr>
+                <tr><th>Adherence</th><td><strong>${overall === null ? 'N/A' : `${overall}%`}</strong></td></tr>
+            </tbody>
+        </table>
+        <h2>${period === 'year' ? 'Monthly Trend' : 'Daily Trend'}</h2>
+        <table>
+            <thead>
+                <tr><th>Date</th><th>Due</th><th>Given</th><th>Documented Exceptions</th><th>Not Documented</th><th>Adherence</th></tr>
+            </thead>
+            <tbody>${trendRows || '<tr><td colspan="6">No due doses in this period.</td></tr>'}</tbody>
+        </table>`;
+}
+
+window.generateMemberAdherencePdfReport = async function(memberId = currentEditingMemberId) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return appAlert('Open a saved member profile before generating an adherence PDF.');
+    await saveReportPdf(
+        `Medication Adherence - ${member.firstName} ${member.lastName}`,
+        memberAdherenceReportBody(member, memberAdherencePeriod),
+        `Medication_Adherence_${member.lastName}_${member.firstName}`
+    );
+};
+
+window.printMemberAdherenceReport = function(memberId = currentEditingMemberId) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return void appAlert('Open a saved member profile before printing adherence.');
+    printReportFromPreview(`Medication Adherence - ${member.firstName} ${member.lastName}`, memberAdherenceReportBody(member, memberAdherencePeriod));
+};
+
+window.emailMemberAdherenceReport = async function(memberId = currentEditingMemberId) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return appAlert('Open a saved member profile before emailing adherence.');
+    const result = await showActionModal('Email Medication Adherence Report', `
+        <div class="field-row-stacked">
+            <label>Email address:</label>
+            <input name="email" type="email" value="${escapeHtml(member.email || '')}" style="width:100%;" placeholder="caregiver@example.com">
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Message:</label>
+            <textarea name="message" rows="4" style="width:100%; resize:none;">Attached is the medication adherence report for ${escapeHtml(member.firstName)} ${escapeHtml(member.lastName)}.</textarea>
+        </div>
+    `, 'Send Email');
+    if (!result) return;
+    const email = String(result.email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        await appAlert('Enter a valid email address.');
+        return;
+    }
+    await emailReportPdf(
+        `Medication Adherence - ${member.firstName} ${member.lastName}`,
+        memberAdherenceReportBody(member, memberAdherencePeriod),
+        `Medication_Adherence_${member.lastName}_${member.firstName}`,
+        email,
+        result.message
+    );
+};
 
 function renderMemberAdministrationLog(memberId) {
     const container = document.getElementById('member-admin-log');
@@ -19030,12 +19251,14 @@ window.clearPendingScheduleOrders = async function() {
     if (!await appConfirm('Remove all pending scheduled medications for the selected member?', 'Remove Pending')) return;
     pendingScheduleOrders = pendingScheduleOrders.filter(order => memberId && order.memberId !== memberId);
     renderPendingScheduleOrders();
+    renderMemberOrderWorklist(currentEditingMemberId);
 };
 
 window.removePendingScheduleOrder = function(index) {
     if (index < 0 || index >= pendingScheduleOrders.length) return;
     pendingScheduleOrders.splice(index, 1);
     renderPendingScheduleOrders();
+    renderMemberOrderWorklist(currentEditingMemberId);
 };
 
 function loadScheduleIntoScheduleEntry(order, { reorder = false } = {}) {
@@ -19078,6 +19301,7 @@ window.editPendingScheduleOrder = function(index) {
     const order = pendingScheduleOrders[index];
     if (!order) return;
     pendingScheduleOrders.splice(index, 1);
+    renderMemberOrderWorklist(currentEditingMemberId);
     loadScheduleIntoScheduleEntry(order, { reorder: !!order.reorderSourceId });
 };
 
@@ -19096,18 +19320,63 @@ window.reorderMedicationSchedule = async function(scheduleId) {
         reorderSourceId: schedule.id
     };
     const memberModal = document.getElementById('member-modal');
-    if (memberModal?.style.display === 'flex') {
-        if (currentEditingMemberId) {
-            const saved = await saveMemberFromProfile({ closeAfter: false });
-            if (!saved) return;
-        }
-        memberModal.style.display = 'none';
-        if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+    if (memberModal?.style.display === 'flex' && currentEditingMemberId === schedule.memberId) {
+        const saved = await saveMemberFromProfile({ closeAfter: false });
+        if (!saved) return;
+        pendingScheduleOrders.push(order);
+        renderPendingScheduleOrders();
+        captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
+        window.switchMemberProfileTab('orders');
+        openMemberMedicationWorkPanel(currentEditingMemberId);
+        await appAlert('This medication was added to Orders to Modify / Reorder. Approve Changes when ready.', 'Reorder Staged');
+        return;
     }
     switchTab('schedules');
     loadScheduleIntoScheduleEntry(order, { reorder: true });
     const pendingList = document.getElementById('pending-schedule-list');
     if (pendingList) pendingList.scrollIntoView({ block: 'nearest' });
+};
+
+function setMemberMedicationWorkPanelOpen(open) {
+    const body = document.querySelector('#member-modal .member-profile-body');
+    const dock = document.getElementById('member-order-work-dock');
+    if (!body || !dock) return;
+    body.classList.toggle('order-work-open', Boolean(open));
+    dock.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if (open) {
+        if (!body.dataset.orderDockGeometryBound) {
+            body.addEventListener('scroll', updateMemberMedicationWorkDockGeometry, { passive: true });
+            window.addEventListener('resize', updateMemberMedicationWorkDockGeometry);
+            body.dataset.orderDockGeometryBound = 'true';
+        }
+        updateMemberMedicationWorkDockGeometry();
+        requestAnimationFrame(updateMemberMedicationWorkDockGeometry);
+    }
+}
+
+function updateMemberMedicationWorkDockGeometry() {
+    const body = document.querySelector('#member-modal .member-profile-body');
+    const dock = document.getElementById('member-order-work-dock');
+    if (!body || !dock || !body.classList.contains('order-work-open')) return;
+    const calendarSection = body.querySelector('[data-member-section="orders"]:not(.member-scan-console)');
+    const modal = document.getElementById('member-modal');
+    const modalRect = modal?.getBoundingClientRect();
+    const calendarRect = calendarSection?.getBoundingClientRect();
+    const fallbackTop = (modalRect?.top || 0) + 132;
+    const top = Math.max(fallbackTop, calendarRect?.top || fallbackTop);
+    const bottom = Math.max(8, window.innerHeight - ((modalRect?.bottom || window.innerHeight) - 8));
+    dock.style.setProperty('--member-order-dock-top', `${Math.round(top)}px`);
+    dock.style.setProperty('--member-order-dock-bottom', `${Math.round(bottom)}px`);
+}
+
+window.openMemberMedicationWorkPanel = function(memberId = currentEditingMemberId) {
+    if (!memberId) return;
+    renderMemberOrderWorklist(memberId);
+    setMemberMedicationWorkPanelOpen(true);
+};
+
+window.closeMemberMedicationWorkPanel = function() {
+    setMemberMedicationWorkPanelOpen(false);
 };
 
 window.scheduleMedicationForCurrentMember = async function() {
@@ -19120,8 +19389,9 @@ window.scheduleMedicationForCurrentMember = async function() {
         const saved = await saveMemberFromProfile({ closeAfter: false });
         if (!saved) return;
         captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
-        memberModal.style.display = 'none';
-        if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
+        window.switchMemberProfileTab('orders');
+        openMemberMedicationWorkPanel(currentEditingMemberId);
+        return;
     }
     switchTab('schedules');
     const select = document.getElementById('select-member');
@@ -19135,9 +19405,7 @@ window.scheduleMedicationForCurrentMember = async function() {
     document.getElementById('med-search-input')?.focus();
 };
 
-window.finalizePendingScheduleOrders = async function() {
-    const container = document.getElementById('pending-schedule-list');
-    const selectedIds = Array.from(container?.querySelectorAll('input[name="pendingScheduleIds"]:checked') || []).map(input => input.value);
+async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {}) {
     if (selectedIds.length === 0) {
         await appAlert('Check at least one pending order to sign.');
         return;
@@ -19175,7 +19443,14 @@ window.finalizePendingScheduleOrders = async function() {
     pendingScheduleOrders = pendingScheduleOrders.filter(order => !selectedIds.includes(order.id));
     await sync();
     renderPendingScheduleOrders();
-    await appAlert(`${selected.length} medication${selected.length === 1 ? '' : 's'} added to the member profile.`, 'Medications Scheduled');
+    renderMemberOrderWorklist(currentEditingMemberId);
+    if (!silent) await appAlert(`${selected.length} medication${selected.length === 1 ? '' : 's'} added to the member profile.`, 'Medications Scheduled');
+}
+
+window.finalizePendingScheduleOrders = async function() {
+    const container = document.getElementById('pending-schedule-list');
+    const selectedIds = Array.from(container?.querySelectorAll('input[name="pendingScheduleIds"]:checked') || []).map(input => input.value);
+    await commitPendingScheduleOrderIds(selectedIds);
 };
 
 window.addSchedule = async function() {
@@ -19186,6 +19461,812 @@ window.addSchedule = async function() {
     pendingScheduleOrders.push(schedule);
     clearScheduleEntryFields();
     renderPendingScheduleOrders();
+};
+
+function pendingProfileActionsForMember(memberId) {
+    return pendingProfileScheduleActions.filter(action => action.memberId === memberId);
+}
+
+function profileOrderActionSummary(action) {
+    if (action.type === 'discontinue') {
+        const schedule = db.schedules.find(item => item.id === action.scheduleId) || action.snapshot || {};
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        const linkedCount = Array.isArray(action.linkedScheduleIds) ? action.linkedScheduleIds.length : 0;
+        return `
+            <strong>${escapeHtml(med ? `${med.name} ${formatMedStrength(med)}` : action.medLabel || 'Medication')}</strong>
+            <small>${linkedCount ? `Will discontinue this medication and ${linkedCount} linked medication${linkedCount === 1 ? '' : 's'}.` : 'Will discontinue this medication.'}</small>
+        `;
+    }
+    if (action.type === 'assignRegimen') {
+        const set = db.orderSets.find(item => item.id === action.templateId) || action.snapshot || {};
+        return `
+            <strong>${escapeHtml(set.name || 'Regimen')}</strong>
+            <small>Assign from ${escapeHtml(action.startDate || localDateKey())} through ${escapeHtml(action.endDate || 'Ongoing')}.</small>
+            <small>${escapeHtml((set.items || []).length)} medication${(set.items || []).length === 1 ? '' : 's'} in this regimen.</small>
+        `;
+    }
+    if (action.type === 'monitoring') {
+        const type = monitoringParameterTypeById(action.reminder?.type, action.memberId);
+        const reminder = action.reminder || {};
+        return `
+            <strong>${escapeHtml(type.label || 'Monitoring parameter')}</strong>
+            <small>${escapeHtml(formatFrequency(reminder))} ${escapeHtml(getScheduleTimes(reminder).join(', ') || 'No time set')}</small>
+            <small>${escapeHtml(reminder.startDate || localDateKey())} - ${escapeHtml(reminder.endDate || 'Ongoing')}</small>
+        `;
+    }
+    return '<strong>Medication change</strong><small>Pending review.</small>';
+}
+
+function profileOrderActionTone(action) {
+    if (action.type === 'discontinue') return 'discontinue';
+    if (action.type === 'assignRegimen') return 'regimen';
+    if (action.type === 'monitoring') return 'monitoring';
+    return 'modify';
+}
+
+function profileOrderActionTitle(action) {
+    if (action.type === 'discontinue') return 'Discontinue';
+    if (action.type === 'assignRegimen') return 'Assign Regimen';
+    if (action.type === 'monitoring') return 'Add Monitoring';
+    return 'Change';
+}
+
+function profileOrderActionGlyph(action) {
+    if (action.type === 'discontinue') return '&#10006;';
+    if (action.type === 'assignRegimen') return '&#10010;';
+    if (action.type === 'monitoring') return '&#10010;';
+    return '&#8635;';
+}
+
+function profileOrderSection(title, tone, items, emptyText) {
+    return `<section class="profile-order-section profile-command-section ${escapeHtml(tone)}">
+        <h4>${escapeHtml(title)} <span>${items.length}</span></h4>
+        <div class="profile-command-section-body">
+            ${items.length ? items.join('') : `<div class="empty-state">${escapeHtml(emptyText)}</div>`}
+        </div>
+    </section>`;
+}
+
+function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
+    const container = document.getElementById('member-order-worklist');
+    if (!container) return;
+    if (!memberId) {
+        container.innerHTML = '<div class="empty-state">Save this member before managing scheduled medications.</div>';
+        return;
+    }
+    const member = db.family.find(item => item.id === memberId);
+    const newOrders = pendingScheduleOrders.filter(order => order.memberId === memberId && !order.reorderSourceId);
+    const modifyOrders = pendingScheduleOrders.filter(order => order.memberId === memberId && order.reorderSourceId);
+    const discontinues = pendingProfileActionsForMember(memberId).filter(action => action.type === 'discontinue');
+    const regimenActions = pendingProfileActionsForMember(memberId).filter(action => action.type === 'assignRegimen');
+    const monitoringActions = pendingProfileActionsForMember(memberId).filter(action => action.type === 'monitoring');
+    const profileActions = [...regimenActions, ...monitoringActions, ...discontinues];
+    const totalChanges = newOrders.length + modifyOrders.length + profileActions.length;
+    const orderCard = (order, typeLabel) => {
+        const index = pendingScheduleOrders.findIndex(item => item.id === order.id);
+        const summary = scheduleSummaryLine(order);
+        const tone = typeLabel === 'New' ? 'new' : 'modify';
+        const badge = typeLabel === 'New' ? '&#10010;' : '&#8635;';
+        const label = typeLabel === 'New' ? 'New medication schedule' : 'Modify / reorder';
+        return `<div class="member-order-change-card profile-work-row ${tone}" role="listitem">
+            <span class="member-order-change-icon profile-work-symbol" aria-hidden="true">${badge}</span>
+            <div class="member-order-change-copy profile-work-copy">
+                <div class="profile-work-label">${escapeHtml(label)}</div>
+                <div class="member-order-change-title">${summary.html}</div>
+            </div>
+            <div class="member-order-change-actions profile-work-actions">
+                <button type="button" onclick="editPendingProfileScheduleOrder(${index}, '${escapeHtml(memberId)}')">Modify</button>
+                <button type="button" onclick="removePendingScheduleOrder(${index}); renderMemberOrderWorklist('${escapeHtml(memberId)}')">Remove</button>
+            </div>
+        </div>`;
+    };
+    const actionCard = action => `<div class="member-order-change-card profile-work-row ${profileOrderActionTone(action)}" role="listitem">
+        <span class="member-order-change-icon profile-work-symbol" aria-hidden="true">${profileOrderActionGlyph(action)}</span>
+        <div class="member-order-change-copy profile-work-copy">
+            <div class="profile-work-label">${escapeHtml(profileOrderActionTitle(action))}</div>
+            <div class="member-order-change-title">${profileOrderActionSummary(action)}</div>
+        </div>
+        <div class="member-order-change-actions profile-work-actions">
+            <button type="button" onclick="removePendingProfileScheduleAction('${escapeHtml(action.id)}')">Remove</button>
+        </div>
+    </div>`;
+    const activeSchedules = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule)).length;
+    const activeRegimens = db.orderSets.filter(set => set.memberId === memberId && set.status !== 'completed').length;
+    const activeMonitoring = ensureCareReminderStore().filter(reminder => reminder.memberId === memberId && reminder.enabled !== false).length;
+    const workItems = [
+        ...newOrders.map(order => orderCard(order, 'New')),
+        ...modifyOrders.map(order => orderCard(order, 'Modify')),
+        ...profileActions.map(actionCard)
+    ];
+
+    container.innerHTML = `
+        <aside class="profile-orders-side epic-order-side-panel">
+            <div class="epic-side-titlebar">
+                <strong>Medication Work${member ? ` - ${escapeHtml(memberDisplayName(member))}` : ''}</strong>
+                <span>${totalChanges}</span>
+                <button type="button" class="epic-side-close" aria-label="Close" onclick="closeMemberMedicationWorkPanel()">&times;</button>
+            </div>
+            <div class="epic-side-search-row">
+                <button type="button" class="profile-order-add-button" onclick="openProfileScheduleComposer('${escapeHtml(memberId)}')"><span class="win98-icon icon-order"></span> New Medication</button>
+                <button type="button" onclick="openProfileRegimenAssignment('${escapeHtml(memberId)}')"><span class="win98-icon icon-regimen"></span> Regimen</button>
+                <button type="button" onclick="openProfileMonitoringComposer('${escapeHtml(memberId)}')"><span class="win98-icon icon-monitor"></span> Monitoring</button>
+            </div>
+            <div class="profile-orders-overview compact">
+                <button type="button" onclick="switchMemberProfileTab('orders')"><strong>${activeSchedules}</strong><span>Active</span></button>
+                <button type="button" onclick="openProfileRegimenAssignment('${escapeHtml(memberId)}')"><strong>${activeRegimens}</strong><span>Regimens</span></button>
+                <button type="button" onclick="switchMemberProfileTab('monitoring')"><strong>${activeMonitoring}</strong><span>Monitoring</span></button>
+            </div>
+            <div class="epic-side-hint">Stage changes here, then approve them together.</div>
+            <div class="profile-order-worklist" role="list" aria-label="Pending medication work">
+                ${workItems.length ? workItems.join('') : '<div class="profile-work-empty">No pending medication work. Use the buttons above to stage medications, regimens, monitoring, or discontinuations.</div>'}
+            </div>
+            <div class="profile-orders-side-footer">
+                <button type="button" onclick="approveMemberScheduleChanges('${escapeHtml(memberId)}')" class="profile-approve-orders" ${totalChanges ? '' : 'disabled'}>&#10003; Approve Changes</button>
+                <button type="button" onclick="clearMemberScheduleWork('${escapeHtml(memberId)}')" ${totalChanges ? '' : 'disabled'}>Clear Work</button>
+            </div>
+        </aside>`;
+    enhanceButtonIcons(container);
+}
+
+function reusableRegimenOptionsHtml(selected = '') {
+    return db.orderSets
+        .filter(set => !set.memberId)
+        .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
+        .map(set => `<option value="${escapeHtml(set.id)}" ${set.id === selected ? 'selected' : ''}>${set.favorite ? '&#9733; ' : ''}${escapeHtml(set.name || 'Untitled regimen')} (${(set.items || []).length})</option>`)
+        .join('');
+}
+
+window.openProfileRegimenAssignment = async function(memberId = currentEditingMemberId) {
+    if (!memberId) return;
+    const templates = db.orderSets.filter(set => !set.memberId);
+    if (!templates.length) {
+        const createNow = await appConfirm('No reusable regimens exist yet. Open the Regimens tab to build one?', 'Create Regimen');
+        if (createNow) {
+            switchTab('order-sets');
+            const select = document.getElementById('order-set-member');
+            if (select) select.value = '';
+            document.getElementById('order-set-name')?.focus();
+        }
+        return;
+    }
+    const result = await showActionModal('Add Regimen to Pending Changes', `
+        <div data-action-modal-size="medium" class="profile-regimen-stage-modal">
+            <div class="form-help">Choose a reusable regimen and review it with this member's medication changes before approving.</div>
+            <label>Regimen
+                <select name="templateId">${reusableRegimenOptionsHtml()}</select>
+            </label>
+            <div class="profile-modal-date-grid">
+                <label>Start<input name="startDate" type="date" value="${escapeHtml(localDateKey())}"></label>
+                <label>End<input name="endDate" type="date"></label>
+            </div>
+            <button type="button" class="open-regimen-builder-button" onclick="document.getElementById('action-modal-cancel')?.click(); setTimeout(() => switchTab('order-sets'), 0)">Open Regimen Builder</button>
+        </div>
+    `, 'Stage Regimen');
+    if (!result) return;
+    const source = db.orderSets.find(set => set.id === result.templateId);
+    if (!source || !result.startDate) {
+        await appAlert('Choose a regimen and start date before staging it.');
+        return;
+    }
+    pendingProfileScheduleActions.push({
+        id: `profile_action_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        type: 'assignRegimen',
+        memberId,
+        templateId: source.id,
+        startDate: result.startDate,
+        endDate: result.endDate || 'Ongoing',
+        snapshot: { ...source, items: (source.items || []).map(item => ({ ...item })) }
+    });
+    renderMemberOrderWorklist(memberId);
+};
+
+function monitoringParameterProfileOptionsHtml(memberId, selected = 'bp') {
+    return monitoringParameterTypes(memberId)
+        .map(type => `<option value="${escapeHtml(type.id)}" ${type.id === selected ? 'selected' : ''}>${escapeHtml(type.label)}</option>`)
+        .join('');
+}
+
+window.renderProfileMonitoringModalTimes = function() {
+    const modal = document.querySelector('.profile-monitoring-stage-modal');
+    if (!modal) return;
+    const freq = modal.querySelector('[name="freq"]')?.value || 'QD';
+    const container = modal.querySelector('[data-monitoring-modal-times]');
+    if (!container) return;
+    const count = freq === 'QXH' ? 1 : getExpectedTimeCount(freq);
+    const defaults = careReminderTimeDefaults(freq);
+    const startDate = modal.querySelector('[name="startDate"]')?.value || localDateKey();
+    const defaultWeekday = parseLocal(startDate)?.getDay() ?? 0;
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        .map((day, index) => `<label class="weekday-option"><input name="weekday" type="checkbox" value="${index}" ${index === defaultWeekday ? 'checked' : ''}>${day}</label>`)
+        .join('');
+    container.innerHTML = `
+        <div class="profile-modal-date-grid" style="${freq === 'QOD' ? '' : 'display:none;'}">
+            <label>Every-other-day start<input name="qodStart" type="date" value="${escapeHtml(startDate)}"></label>
+        </div>
+        <div class="profile-modal-date-grid" style="${freq === 'Monthly' ? '' : 'display:none;'}">
+            <label>First monthly check<input name="monthlyAnchor" type="date" value="${escapeHtml(startDate)}"></label>
+        </div>
+        <div class="profile-modal-date-grid" style="${freq === 'QXH' ? '' : 'display:none;'}">
+            <label>Every<input name="intervalHours" type="number" min="1" max="24" step="1" value="8"></label><span>hours</span>
+        </div>
+        <div class="profile-modal-date-grid" style="${freq === 'QXW' ? '' : 'display:none;'}">
+            <label>Every<input name="intervalWeeks" type="number" min="1" max="52" step="1" value="2"></label><span>weeks</span>
+        </div>
+        <div class="profile-modal-date-grid" style="${freq === 'XPW' ? '' : 'display:none;'}">
+            <label>Times per week<input name="timesPerWeek" type="number" min="1" max="7" step="1" value="1"></label>
+        </div>
+        <div class="weekday-picker profile-monitoring-weekdays" style="${['QXW', 'XPW'].includes(freq) ? '' : 'display:none;'}">${weekdays}</div>
+        <div class="profile-modal-time-grid">
+            ${Array.from({ length: count }, (_, index) => `<label>${freq === 'QXH' ? 'Start time' : `Time ${index + 1}`}<input name="time" type="time" value="${escapeHtml(defaults[index] || '08:00')}"></label>`).join('')}
+        </div>
+    `;
+};
+
+window.openProfileMonitoringComposer = async function(memberId = currentEditingMemberId) {
+    if (!memberId) return;
+    setTimeout(() => renderProfileMonitoringModalTimes(), 0);
+    const result = await showActionModal('Add Monitoring Parameter to Pending Changes', `
+        <div data-action-modal-size="medium" class="profile-monitoring-stage-modal">
+            <div class="form-help">Stage a monitoring check such as BP, blood sugar, weight, INR, medication level, or a custom reminder. It will be created only after Approve Changes.</div>
+            <label>Parameter
+                <select name="type">${monitoringParameterProfileOptionsHtml(memberId)}</select>
+            </label>
+            <div class="profile-modal-date-grid">
+                <label>Start<input name="startDate" type="date" value="${escapeHtml(localDateKey())}" onchange="renderProfileMonitoringModalTimes()"></label>
+                <label>End<input name="endDate" type="date"></label>
+            </div>
+            <label>Frequency
+                <select name="freq" onchange="renderProfileMonitoringModalTimes()">
+                    <option value="QD">Daily</option>
+                    <option value="BID">Twice daily</option>
+                    <option value="TID">3 times daily</option>
+                    <option value="QID">4 times daily</option>
+                    <option value="Nightly">Nightly</option>
+                    <option value="QOD">Every other day</option>
+                    <option value="QW">Weekly</option>
+                    <option value="QXW">Every X weeks</option>
+                    <option value="XPW">X times per week</option>
+                    <option value="QXH">Every X hours</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="ONCE">Once</option>
+                </select>
+            </label>
+            <div data-monitoring-modal-times></div>
+            <label>Monitoring note
+                <input name="note" type="text" placeholder="Optional instruction shown with the reminder">
+            </label>
+            <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Parameter Types</button>
+        </div>
+    `, 'Stage Monitoring', body => ({
+        type: body.querySelector('[name="type"]')?.value || 'bp',
+        freq: body.querySelector('[name="freq"]')?.value || 'QD',
+        startDate: body.querySelector('[name="startDate"]')?.value || localDateKey(),
+        endDate: body.querySelector('[name="endDate"]')?.value || 'Ongoing',
+        rawTimes: Array.from(body.querySelectorAll('[name="time"]')).map(input => input.value).filter(Boolean),
+        intervalHours: parseInt(body.querySelector('[name="intervalHours"]')?.value, 10),
+        intervalWeeks: parseInt(body.querySelector('[name="intervalWeeks"]')?.value, 10),
+        monthlyAnchor: body.querySelector('[name="monthlyAnchor"]')?.value || '',
+        weekdays: Array.from(body.querySelectorAll('[name="weekday"]:checked')).map(input => parseInt(input.value, 10)).sort(),
+        timesPerWeek: parseInt(body.querySelector('[name="timesPerWeek"]')?.value, 10),
+        qodStart: body.querySelector('[name="qodStart"]')?.value || '',
+        note: body.querySelector('[name="note"]')?.value.trim() || ''
+    }));
+    if (!result) return;
+    if (result.endDate !== 'Ongoing' && result.endDate < result.startDate) return appAlert('Monitoring end date cannot be before the start date.');
+    if (result.freq === 'QXH' && (!Number.isInteger(result.intervalHours) || result.intervalHours < 1 || result.intervalHours > 24)) return appAlert('Every X hours must be between 1 and 24.');
+    if (result.freq === 'QXW' && (!Number.isInteger(result.intervalWeeks) || result.intervalWeeks < 1 || result.intervalWeeks > 52)) return appAlert('Every X weeks must be between 1 and 52.');
+    if (result.freq === 'XPW' && (!Number.isInteger(result.timesPerWeek) || result.timesPerWeek < 1 || result.timesPerWeek > 7)) return appAlert('Times per week must be between 1 and 7.');
+    if (['QXW', 'XPW'].includes(result.freq) && !result.weekdays.length) return appAlert('Select at least one weekday.');
+    if (result.freq === 'XPW' && result.weekdays.length !== result.timesPerWeek) return appAlert(`Select exactly ${result.timesPerWeek} weekday${result.timesPerWeek === 1 ? '' : 's'}.`);
+    if (result.freq === 'Monthly' && !result.monthlyAnchor) return appAlert('Enter the first monthly monitoring date.');
+    if (result.rawTimes.length !== (result.freq === 'QXH' ? 1 : getExpectedTimeCount(result.freq))) return appAlert('Enter all monitoring times.');
+    const times = result.freq === 'QXH' ? generateIntervalTimes(result.rawTimes[0], result.intervalHours) : Array.from(new Set(result.rawTimes)).sort();
+    if (times.length !== result.rawTimes.length && result.freq !== 'QXH') return appAlert('Monitoring times cannot be duplicated.');
+    const type = monitoringParameterTypeById(result.type, memberId);
+    const reminder = {
+        id: `care_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        memberId,
+        type: result.type,
+        enabled: true,
+        startDate: result.startDate,
+        endDate: result.endDate,
+        freq: result.freq,
+        times,
+        intervalHours: result.freq === 'QXH' ? result.intervalHours : null,
+        intervalWeeks: result.freq === 'QXW' ? result.intervalWeeks : null,
+        monthlyAnchor: result.freq === 'Monthly' ? result.monthlyAnchor : '',
+        timesPerWeek: result.freq === 'XPW' ? result.timesPerWeek : null,
+        weekdays: ['QXW', 'XPW'].includes(result.freq) ? result.weekdays : [],
+        qodStart: result.freq === 'QOD' ? (result.qodStart || result.startDate) : '',
+        startTime: result.freq === 'QXH' ? result.rawTimes[0] : (times[0] || ''),
+        note: result.note,
+        title: type.label,
+        sourceType: 'member',
+        sourceId: memberId,
+        sourceLabel: 'Member profile'
+    };
+    pendingProfileScheduleActions.push({
+        id: `profile_action_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+        type: 'monitoring',
+        memberId,
+        reminder
+    });
+    renderMemberOrderWorklist(memberId);
+};
+
+window.removePendingProfileScheduleAction = function(actionId) {
+    pendingProfileScheduleActions = pendingProfileScheduleActions.filter(action => action.id !== actionId);
+    renderMemberOrderWorklist(currentEditingMemberId);
+};
+
+window.clearMemberScheduleWork = async function(memberId = currentEditingMemberId) {
+    const count = pendingScheduleOrders.filter(order => order.memberId === memberId).length + pendingProfileActionsForMember(memberId).length;
+    if (!count) return;
+    if (!await appConfirm(`Clear ${count} pending medication change${count === 1 ? '' : 's'} for this profile?`, 'Clear Medication Work')) return;
+    pendingScheduleOrders = pendingScheduleOrders.filter(order => order.memberId !== memberId);
+    pendingProfileScheduleActions = pendingProfileScheduleActions.filter(action => action.memberId !== memberId);
+    renderPendingScheduleOrders();
+    renderMemberOrderWorklist(memberId);
+};
+
+window.approveMemberScheduleChanges = async function(memberId = currentEditingMemberId) {
+    const selectedIds = pendingScheduleOrders.filter(order => order.memberId === memberId).map(order => order.id);
+    const discontinues = pendingProfileActionsForMember(memberId).filter(action => action.type === 'discontinue');
+    const regimenAssignments = pendingProfileActionsForMember(memberId).filter(action => action.type === 'assignRegimen');
+    const monitoringAdds = pendingProfileActionsForMember(memberId).filter(action => action.type === 'monitoring');
+    if (!selectedIds.length && !discontinues.length && !regimenAssignments.length && !monitoringAdds.length) {
+        await appAlert('No medication changes are pending.');
+        return;
+    }
+    if (selectedIds.length) {
+        await commitPendingScheduleOrderIds(selectedIds, { silent: true });
+    }
+    discontinues.forEach(action => {
+        const ids = uniqueValues([action.scheduleId, ...(action.linkedScheduleIds || [])]);
+        ids.forEach(scheduleId => {
+            const item = db.schedules.find(schedule => schedule.id === scheduleId);
+            if (!item || isScheduleArchived(item)) return;
+            item.status = 'discontinued';
+            item.completedAt = new Date().toISOString();
+            if (!item.endDate || item.endDate === 'Ongoing') item.endDate = localDateKey();
+            const itemMed = db.inventory.find(inv => inv.id === item.medId);
+            addAudit('Medication discontinued', itemMed?.name || 'Medication', 'Approved from member profile medication changes', {
+                scheduleId: item.id,
+                medId: item.medId,
+                memberId: item.memberId
+            });
+            replaceCareRemindersForSource('schedule', item.id, []);
+        });
+    });
+    for (const action of regimenAssignments) {
+        const source = db.orderSets.find(set => set.id === action.templateId) || action.snapshot;
+        if (!source) continue;
+        const assignedSet = buildAssignedOrderSetFromTemplate(source, memberId, action.startDate || localDateKey(), action.endDate || 'Ongoing');
+        const invalidAnchor = assignedSet.items.find(item =>
+            ['QW', 'Monthly'].includes(scheduleTimingFrequency(item) || item.freq) &&
+            item.anchorDate &&
+            (() => {
+                const window = orderSetItemDateWindow(item, assignedSet.startDate, assignedSet.endDate);
+                return item.anchorDate < window.startDate || (window.endDate !== 'Ongoing' && item.anchorDate > window.endDate);
+            })()
+        );
+        if (invalidAnchor) {
+            await appAlert(`The assigned date range is too short for ${source.name || 'this regimen'}. Extend the end date or edit the regimen.`);
+            return;
+        }
+        db.orderSets.push(assignedSet);
+        db.schedules.push(...assignedSet.items.map((item, index) => orderSetItemToSchedule(assignedSet, item, index)));
+        createCareRemindersForOrderSet(assignedSet);
+        addAudit('Regimen assigned', source.name || 'Regimen', `Assigned from member profile medication changes`, { memberId, orderSetId: assignedSet.id });
+    }
+    if (monitoringAdds.length) {
+        ensureCareReminderStore();
+        monitoringAdds.forEach(action => {
+            if (!action.reminder) return;
+            db.careReminders.push({ ...action.reminder });
+            addAudit('Monitoring parameter added', careReminderTypeLabel(action.reminder.type, memberId), 'Approved from member profile medication changes', { memberId, reminderId: action.reminder.id });
+        });
+    }
+    pendingProfileScheduleActions = pendingProfileScheduleActions.filter(action => action.memberId !== memberId);
+    await sync();
+    renderPendingScheduleOrders();
+    if (memberId && document.getElementById('member-modal')?.style.display === 'flex' && currentEditingMemberId === memberId) {
+        captureMemberProfileState(memberId, { activeTab: 'orders' });
+        window.switchMemberProfileTab('orders');
+        renderMemberOrderWorklist(memberId);
+        renderMemberCalendar(memberId);
+        renderMemberMedicationTimelines();
+        renderMemberCommandScanPanel();
+    } else if (memberId) {
+        openMemberModal(memberId, 'orders');
+    }
+};
+
+window.editPendingProfileScheduleOrder = async function(index, memberId = currentEditingMemberId) {
+    const order = pendingScheduleOrders[index];
+    if (!order) return;
+    pendingScheduleOrders.splice(index, 1);
+    renderPendingScheduleOrders();
+    renderMemberOrderWorklist(memberId);
+    await openProfileScheduleComposer(memberId, order);
+};
+
+function profileScheduleMedicationChoices(memberId) {
+    return db.inventory
+        .filter(med => medicationAssignedToMember(med, memberId))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+function profileScheduleMedicationOptions(memberId, selectedId = '') {
+    return profileScheduleMedicationChoices(memberId)
+        .map(med => `<option value="${escapeHtml(med.id)}" ${med.id === selectedId ? 'selected' : ''}>${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</option>`)
+        .join('');
+}
+
+function profileScheduleMedicationSearchLabel(med) {
+    return `${med?.name || ''} ${formatMedStrength(med || {})}`.trim();
+}
+
+function profileScheduleMedicationDatalistOptions(memberId) {
+    return profileScheduleMedicationChoices(memberId)
+        .map(med => `<option value="${escapeHtml(profileScheduleMedicationSearchLabel(med))}"></option>`)
+        .join('');
+}
+
+function profileScheduleSelectedMedication(body, memberId = currentEditingMemberId) {
+    const hiddenId = body?.querySelector('[name="medId"]')?.value || '';
+    const searchValue = (body?.querySelector('[name="medSearch"]')?.value || '').trim().toLowerCase();
+    const choices = profileScheduleMedicationChoices(memberId);
+    const exact = searchValue
+        ? choices.find(med =>
+            profileScheduleMedicationSearchLabel(med).toLowerCase() === searchValue ||
+            String(med.name || '').toLowerCase() === searchValue
+        )
+        : null;
+    if (exact) return exact;
+    if (!searchValue && hiddenId) return choices.find(item => item.id === hiddenId) || null;
+    if (hiddenId) {
+        const hiddenMatch = choices.find(item => item.id === hiddenId);
+        if (hiddenMatch && profileScheduleMedicationSearchLabel(hiddenMatch).toLowerCase() === searchValue) return hiddenMatch;
+    }
+    return null;
+}
+
+function profileScheduleMedicationPreviewHtml(med, doseQty = '') {
+    if (!med) {
+        return `<div class="schedule-med-photo"><div class="schedule-med-no-photo">No Photo</div></div>
+            <div class="schedule-med-details">
+                <div><b>Select a medication</b></div>
+                <div>Medication photo and inventory details appear here.</div>
+            </div>`;
+    }
+    const image = med.imagePath
+        ? `<img src="${imageSrc(med.imagePath)}" alt="${escapeHtml(med.name)}">`
+        : '<div class="schedule-med-no-photo">No Photo</div>';
+    const calculatedDose = doseQty ? formatPrescribedDose(med, doseQty) : '';
+    return `
+        <div class="schedule-med-photo">${image}</div>
+        <div class="schedule-med-details">
+            <div><b>${escapeHtml(med.name)}</b></div>
+            <div>${escapeHtml(formatMedStrength(med) || 'No strength entered')}</div>
+            <div>On hand: ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))}</div>
+            ${calculatedDose ? `<div>Dose preview: <b>${escapeHtml(calculatedDose)}</b></div>` : ''}
+            <div>Expires: ${escapeHtml(med.expiry || 'N/A')}</div>
+        </div>`;
+}
+
+window.renderProfileScheduleLinkOptions = function(selected = '') {
+    const body = document.getElementById('action-modal-body');
+    const panel = body?.querySelector('[data-profile-schedule-link-target]');
+    if (!panel) return;
+    const memberId = body.querySelector('[name="memberId"]')?.value || currentEditingMemberId;
+    const selectedValues = Array.isArray(selected) ? selected : (selected ? [selected] : selectedOptionValues(panel));
+    renderLinkChoicePanel(panel, scheduleLinkChoices(memberId), selectedValues, 'openProfileScheduleLinkPicker()');
+};
+
+window.openProfileScheduleLinkPicker = async function() {
+    const body = document.getElementById('action-modal-body');
+    const panel = body?.querySelector('[data-profile-schedule-link-target]');
+    if (!panel) return;
+    const memberId = body.querySelector('[name="memberId"]')?.value || currentEditingMemberId;
+    const selected = await chooseLinkedMedicationsChild('Choose Linked Medications', scheduleLinkChoices(memberId), selectedOptionValues(panel));
+    if (selected === null) return;
+    renderLinkChoicePanel(panel, scheduleLinkChoices(memberId), selected, 'openProfileScheduleLinkPicker()');
+};
+
+window.updateProfileScheduleComposer = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const med = profileScheduleSelectedMedication(body, body.querySelector('[name="memberId"]')?.value || currentEditingMemberId);
+    const hidden = body.querySelector('[name="medId"]');
+    if (hidden) hidden.value = med?.id || '';
+    const strength = body.querySelector('[data-profile-schedule-strength]');
+    const unit = body.querySelector('[data-profile-schedule-unit]');
+    const dosePreview = body.querySelector('[data-profile-schedule-dose]');
+    const medPreview = body.querySelector('[data-profile-schedule-med-preview]');
+    if (strength) {
+        strength.innerHTML = med
+            ? `<span class="profile-schedule-selected-name">${escapeHtml(med.name || 'Medication')}</span><span class="profile-schedule-selected-strength">${escapeHtml(formatMedStrength(med) || 'No strength entered')}</span>`
+            : '<span class="profile-schedule-selected-name">Choose medication</span><span class="profile-schedule-selected-strength">Search by name, strength, or inventory details.</span>';
+    }
+    if (unit) unit.textContent = med ? (med.administrationUnit || med.formulation || 'unit(s)') : 'unit(s)';
+    const qty = parseAmount(body.querySelector('[name="doseQty"]')?.value, NaN);
+    if (dosePreview) dosePreview.value = med && Number.isFinite(qty) ? formatPrescribedDose(med, qty) : '';
+    if (medPreview) medPreview.innerHTML = profileScheduleMedicationPreviewHtml(med, Number.isFinite(qty) ? qty : '');
+};
+
+function renderProfileScheduleIntervalPreview() {
+    const body = document.getElementById('action-modal-body');
+    const preview = body?.querySelector('[data-profile-schedule-interval-preview]');
+    if (!body || !preview) return;
+    const freq = body.querySelector('[name="freq"]')?.value || 'QD';
+    if (freq !== 'QXH') {
+        preview.innerHTML = '';
+        preview.style.display = 'none';
+        return;
+    }
+    preview.style.display = '';
+    const startDate = body.querySelector('[name="startDate"]')?.value || localDateKey();
+    const endValue = body.querySelector('[name="endDate"]')?.value || '';
+    const startTime = body.querySelector('input[name="time"]')?.value || '';
+    const intervalHours = parseInt(body.querySelector('[name="intervalHours"]')?.value, 10);
+    if (!startDate || !startTime || !Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24) {
+        preview.innerHTML = '<div class="interval-preview-empty">Enter a start date, start time, and hour interval to preview upcoming doses.</div>';
+        return;
+    }
+    const previewEnd = parseLocal(startDate);
+    previewEnd.setDate(previewEnd.getDate() + 2);
+    const explicitEnd = endValue ? parseLocal(endValue) : null;
+    const through = explicitEnd && explicitEnd < previewEnd ? explicitEnd : previewEnd;
+    through.setHours(23, 59, 59, 999);
+    const schedule = {
+        id: 'profile-preview',
+        freq: 'QXH',
+        startDate,
+        endDate: endValue || 'Ongoing',
+        startTime,
+        times: [startTime],
+        intervalHours
+    };
+    const from = dateTimeFromParts(startDate, startTime);
+    const grouped = rollingIntervalInstancesBetween(schedule, from, through)
+        .map(dateTimeParts)
+        .filter(item => isScheduleDueOnDate(schedule, item.date))
+        .reduce((map, item) => {
+            if (!map.has(item.date)) map.set(item.date, []);
+            map.get(item.date).push(item.time);
+            return map;
+        }, new Map());
+    preview.innerHTML = grouped.size
+        ? `<table class="interval-preview-table"><thead><tr><th>Date</th><th>Administration times</th></tr></thead><tbody>${Array.from(grouped.entries()).map(([date, times]) => `<tr><td>${escapeHtml(date)}</td><td>${times.map(escapeHtml).join(', ')}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="interval-preview-empty">No doses fall inside this date range.</div>';
+}
+
+window.renderProfileScheduleIntervalPreview = renderProfileScheduleIntervalPreview;
+
+window.renderProfileScheduleComposerTimes = function() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const freq = body.querySelector('[name="freq"]')?.value || 'QD';
+    const timeWrap = body.querySelector('[data-profile-schedule-times]');
+    const intervalWrap = body.querySelector('[data-profile-schedule-interval]');
+    const weeklyWrap = body.querySelector('[data-profile-schedule-weekdays]');
+    const monthlyWrap = body.querySelector('[data-profile-schedule-monthly]');
+    if (!timeWrap) return;
+    if (intervalWrap) intervalWrap.style.display = freq === 'QXH' ? '' : 'none';
+    if (weeklyWrap) weeklyWrap.style.display = ['QXW', 'XPW'].includes(freq) ? '' : 'none';
+    if (monthlyWrap) monthlyWrap.style.display = freq === 'Monthly' ? '' : 'none';
+    const count = freq === 'QXH' ? 1 : getExpectedTimeCount(freq);
+    if (freq === 'PRN') {
+        timeWrap.innerHTML = '<span class="empty-state">As-needed medication: no scheduled time required.</span>';
+        const prnWrap = body.querySelector('[data-profile-schedule-prn-controls]');
+        if (prnWrap) prnWrap.style.display = '';
+        renderProfileScheduleIntervalPreview();
+        return;
+    }
+    const prnWrap = body.querySelector('[data-profile-schedule-prn-controls]');
+    if (prnWrap) prnWrap.style.display = 'none';
+    timeWrap.innerHTML = Array.from({ length: Math.max(1, count || 1) }, (_, index) => `
+        <label>${freq === 'QXH' ? 'Start time' : `Dose ${index + 1}`}<input name="time" type="time" value="${escapeHtml(defaultTimeForIndex(index, freq))}" oninput="renderProfileScheduleIntervalPreview()"></label>
+    `).join('') + '<div data-profile-schedule-interval-preview class="interval-preview sunken-panel profile-schedule-interval-preview"></div>';
+    renderProfileScheduleIntervalPreview();
+};
+
+function collectProfileScheduleComposer(body, memberId) {
+    const med = profileScheduleSelectedMedication(body, memberId);
+    const medId = med?.id || '';
+    const freq = body.querySelector('[name="freq"]')?.value || 'QD';
+    const startDate = body.querySelector('[name="startDate"]')?.value || '';
+    const rawEndDate = body.querySelector('[name="endDate"]')?.value || 'Ongoing';
+    const doseQty = body.querySelector('[name="doseQty"]')?.value || '';
+    if (!med || !startDate || !doseQty) {
+        appAlert('Choose a medication, dose quantity, and start date.');
+        return false;
+    }
+    const times = Array.from(body.querySelectorAll('input[name="time"]')).map(input => input.value).filter(Boolean).sort();
+    const intervalHours = freq === 'QXH' ? parseInt(body.querySelector('[name="intervalHours"]')?.value, 10) : null;
+    const weekdays = ['QXW', 'XPW'].includes(freq)
+        ? Array.from(body.querySelectorAll('input[name="weekdays"]:checked')).map(input => parseInt(input.value, 10)).sort()
+        : [];
+    if (freq !== 'PRN' && freq !== 'QXH' && times.length !== getExpectedTimeCount(freq)) {
+        appAlert('Enter the required administration time(s).');
+        return false;
+    }
+    if (freq === 'QXH' && (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24 || !times[0])) {
+        appAlert('Every X hours needs a start time and an interval between 1 and 24 hours.');
+        return false;
+    }
+    if (['QXW', 'XPW'].includes(freq) && weekdays.length === 0) {
+        appAlert('Select at least one weekday.');
+        return false;
+    }
+    const selectedLinkTargetIds = selectedOptionValues(body.querySelector('[data-profile-schedule-link-target]'));
+    const linkMode = body.querySelector('[name="linkMode"]')?.value || '';
+    const linkTargetIds = linkMode ? selectedLinkTargetIds : [];
+    const targetChoice = scheduleLinkChoices(memberId).find(choice => choice.id === linkTargetIds[0]);
+    const linkGroup = linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
+    if (selectedLinkTargetIds.length > 0 && !linkMode) {
+        appAlert('Choose what the medication link means: must take together or choose only one.');
+        return false;
+    }
+    if (linkMode && linkTargetIds.length === 0) {
+        appAlert('Select the medication this one is linked to.');
+        return false;
+    }
+    const schedule = {
+        id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        memberId,
+        medId,
+        doseQty,
+        prescriberId: body.querySelector('[name="prescriberId"]')?.value || med.prescriberId || '',
+        freq,
+        startDate,
+        endDate: freq === 'ONCE' ? startDate : rawEndDate,
+        indication: body.querySelector('[name="indication"]')?.value.trim() || '',
+        instructions: body.querySelector('[name="instructions"]')?.value || '',
+        linkGroup,
+        linkMode,
+        linkTargetIds,
+        linkTargetId: linkTargetIds[0] || '',
+        linkRules: linkRulesFromTargets(linkTargetIds, linkMode),
+        qodStart: freq === 'QOD' ? startDate : '',
+        times: freq === 'QXH' ? generateIntervalTimes(times[0], intervalHours) : times,
+        intervalHours: freq === 'QXH' ? intervalHours : null,
+        intervalWeeks: freq === 'QXW' ? parseInt(body.querySelector('[name="intervalWeeks"]')?.value, 10) || 1 : null,
+        monthlyAnchor: freq === 'Monthly' ? (body.querySelector('[name="monthlyAnchor"]')?.value || startDate) : '',
+        timesPerWeek: freq === 'XPW' ? weekdays.length : null,
+        weekdays,
+        prnScheduleFreq: '',
+        prnMaxDoses: freq === 'PRN' ? (parseInt(body.querySelector('[name="prnMaxDoses"]')?.value, 10) || null) : null,
+        prnWindowHours: freq === 'PRN' ? (parseInt(body.querySelector('[name="prnWindowHours"]')?.value, 10) || 24) : 24,
+        monitoringReminders: [],
+        monitoringReminderNote: '',
+        monitoringReminderSchedule: null,
+        monitoringHoldRule: null,
+        reorderSourceId: body.querySelector('[name="reorderSourceId"]')?.value || '',
+        startTime: times[0] || '',
+        isOneTime: freq === 'ONCE'
+    };
+    if (schedule.endDate !== 'Ongoing' && schedule.endDate < schedule.startDate) {
+        appAlert('End date cannot be before start date.');
+        return false;
+    }
+    if (linkMode === 'together') {
+        const allChoices = [...db.schedules, ...pendingScheduleOrders];
+        const mismatchedTarget = linkTargetIds
+            .map(targetId => allChoices.find(choice => choice.id === targetId))
+            .find(target => target && !schedulesHaveAlignedTiming(schedule, target));
+        if (mismatchedTarget) {
+            appAlert(`Must-take-together medications need the same date, frequency, and administration time.\n\nThis order: ${timingMismatchLabel(schedule)}\nLinked order: ${timingMismatchLabel(mismatchedTarget)}`);
+            return false;
+        }
+    }
+    pendingScheduleOrders.push(schedule);
+    renderPendingScheduleOrders();
+    renderMemberOrderWorklist(memberId);
+    return true;
+}
+
+window.openProfileScheduleComposer = async function(memberId = currentEditingMemberId, existingOrder = null) {
+    const member = db.family.find(item => item.id === memberId);
+    if (!member) return appAlert('Save this member before scheduling medications.');
+    const today = localDateKey();
+    const composerTitle = existingOrder ? `Modify Medication - ${memberDisplayName(member)}` : `New Medication - ${memberDisplayName(member)}`;
+    const modalPromise = showActionModal(composerTitle, `
+        <div data-action-modal-size="wide" class="profile-schedule-composer">
+            <input type="hidden" name="reorderSourceId" value="${escapeHtml(existingOrder?.reorderSourceId || '')}">
+            <input type="hidden" name="memberId" value="${escapeHtml(memberId)}">
+            <div class="profile-schedule-composer-banner">
+                <strong>${existingOrder ? 'Modify scheduled medication' : 'New medication schedule'}</strong>
+                <span>Review the order here, then add it to the worklist. The profile changes only after Approve Changes.</span>
+            </div>
+            <div class="profile-schedule-form">
+                <fieldset class="profile-schedule-medication-card">
+                    <legend>Medication</legend>
+                    <input type="hidden" name="medId" value="${escapeHtml(existingOrder?.medId || '')}">
+                    <div class="profile-schedule-medication-layout">
+                        <div data-profile-schedule-med-preview class="schedule-med-preview profile-schedule-med-preview">
+                            ${profileScheduleMedicationPreviewHtml(existingOrder?.medId ? db.inventory.find(item => item.id === existingOrder.medId) : null, existingOrder?.doseQty || '')}
+                        </div>
+                        <div class="profile-schedule-med-controls">
+                            <label>Medication
+                                <div class="profile-schedule-med-search-row">
+                                    <input name="medSearch" list="profile-schedule-med-options" placeholder="Search inventory..." value="${escapeHtml(existingOrder?.medId ? profileScheduleMedicationSearchLabel(db.inventory.find(item => item.id === existingOrder.medId)) : '')}" oninput="updateProfileScheduleComposer()">
+                                    <button type="button" onclick="this.previousElementSibling.value=''; updateProfileScheduleComposer()">Clear</button>
+                                </div>
+                            </label>
+                            <datalist id="profile-schedule-med-options">${profileScheduleMedicationDatalistOptions(memberId)}</datalist>
+                            <div class="profile-schedule-strength"><strong data-profile-schedule-strength>Choose medication</strong></div>
+                        </div>
+                    </div>
+                </fieldset>
+                <fieldset class="profile-schedule-dose-card">
+                    <legend>Dose</legend>
+                    <label>Dose Qty<input name="doseQty" type="number" min="0" step="any" value="${escapeHtml(existingOrder?.doseQty || '')}" oninput="updateProfileScheduleComposer()"></label>
+                    <span data-profile-schedule-unit>unit(s)</span>
+                    <label>Calculated Dose<input data-profile-schedule-dose readonly></label>
+                    <label>Provider
+                        <select name="prescriberId">${prescriberOptionsHtml(existingOrder?.prescriberId || '', memberId, false)}</select>
+                    </label>
+                </fieldset>
+                <fieldset class="profile-schedule-timing-card">
+                    <legend>Schedule</legend>
+                    <div class="profile-schedule-row">
+                        <label>Frequency<select name="freq" onchange="renderProfileScheduleComposerTimes()">${frequencyOptionsHtml(existingOrder?.freq || 'QD')}</select></label>
+                        <label>Start<input name="startDate" type="date" value="${escapeHtml(existingOrder?.startDate || today)}" onchange="renderProfileScheduleIntervalPreview()"></label>
+                        <label>End<input name="endDate" type="date" value="${escapeHtml(existingOrder?.endDate === 'Ongoing' ? '' : (existingOrder?.endDate || ''))}" onchange="renderProfileScheduleIntervalPreview()"></label>
+                    </div>
+                    <div data-profile-schedule-interval style="display:none;"><label>Every <input name="intervalHours" type="number" min="1" max="24" value="${escapeHtml(existingOrder?.intervalHours || 8)}" oninput="renderProfileScheduleIntervalPreview()"> hours</label></div>
+                    <div data-profile-schedule-monthly style="display:none;"><label>First monthly date <input name="monthlyAnchor" type="date" value="${escapeHtml(existingOrder?.monthlyAnchor || existingOrder?.startDate || today)}"></label></div>
+                    <div data-profile-schedule-weekdays class="profile-schedule-weekdays" style="display:none;">
+                        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day, index) => `<label class="weekday-option"><input name="weekdays" type="checkbox" value="${index}" ${(existingOrder?.weekdays || []).map(Number).includes(index) ? 'checked' : ''}>${day}</label>`).join('')}
+                        <label>Every <input name="intervalWeeks" type="number" min="1" max="52" value="${escapeHtml(existingOrder?.intervalWeeks || 1)}"> week(s)</label>
+                    </div>
+                    <div data-profile-schedule-times class="profile-schedule-times"></div>
+                    <div data-profile-schedule-prn-controls class="profile-schedule-prn" style="display:none;">
+                        <label>PRN max doses<input name="prnMaxDoses" type="number" min="1" value="${escapeHtml(existingOrder?.prnMaxDoses || '')}"></label>
+                        <label>per hours<input name="prnWindowHours" type="number" min="1" max="168" value="${escapeHtml(existingOrder?.prnWindowHours || 24)}"></label>
+                    </div>
+                </fieldset>
+                <fieldset class="profile-schedule-links-card">
+                    <legend>Linked Orders</legend>
+                    <div class="profile-schedule-link-grid">
+                        <label>Link meaning
+                            <select name="linkMode" onchange="renderProfileScheduleLinkOptions()">
+                                <option value="" ${!existingOrder?.linkMode ? 'selected' : ''}>No link</option>
+                                <option value="together" ${existingOrder?.linkMode === 'together' ? 'selected' : ''}>Must take together</option>
+                                <option value="choose-one" ${existingOrder?.linkMode === 'choose-one' ? 'selected' : ''}>Choose only one</option>
+                            </select>
+                        </label>
+                        <div>
+                            <label>Linked medication(s)</label>
+                            <div data-profile-schedule-link-target class="link-choice-panel"></div>
+                        </div>
+                    </div>
+                </fieldset>
+                <fieldset class="profile-schedule-instructions-card">
+                    <legend>Instructions</legend>
+                    <label>Used for / Indication<input name="indication" type="text" value="${escapeHtml(existingOrder?.indication || '')}" placeholder="Reason this medication/supplement is used"></label>
+                    <label>Instructions<textarea name="instructions" rows="3" placeholder="Patient-facing directions, notes, or administration instructions">${escapeHtml(existingOrder?.instructions || '')}</textarea></label>
+                </fieldset>
+            </div>
+        </div>
+    `, existingOrder ? 'Update Worklist' : 'Add to Worklist', body => collectProfileScheduleComposer(body, memberId));
+    window.renderProfileScheduleComposerTimes();
+    window.renderProfileScheduleLinkOptions(existingOrder?.linkTargetIds?.length ? existingOrder.linkTargetIds : (existingOrder?.linkTargetId || ''));
+    if (existingOrder) {
+        const body = document.getElementById('action-modal-body');
+        const existingTimes = scheduleTimingFrequency(existingOrder) === 'QXH'
+            ? [existingOrder.startTime || getScheduleTimes(existingOrder)[0] || '08:00']
+            : getScheduleTimes(existingOrder);
+        Array.from(body?.querySelectorAll('input[name="time"]') || []).forEach((input, index) => {
+            input.value = existingTimes[index] || input.value;
+        });
+    }
+    window.updateProfileScheduleComposer();
+    const result = await modalPromise;
+    renderMemberOrderWorklist(memberId);
+    return result;
 };
 
 
@@ -20320,6 +21401,30 @@ window.deleteSchedule = async function(id) {
         if (!result) return;
         scope = result.scope || 'single';
     } else if (!await appConfirm(`Discontinue ${medLabel}?`, 'Discontinue Order')) {
+        return;
+    }
+
+    const memberModal = document.getElementById('member-modal');
+    if (memberModal?.style.display === 'flex' && currentEditingMemberId === schedule.memberId) {
+        const linkedScheduleIds = scope === 'linked' ? linked.map(item => item.id) : [];
+        const stagedIds = new Set([schedule.id, ...linkedScheduleIds]);
+        pendingProfileScheduleActions = pendingProfileScheduleActions.filter(action =>
+            !(action.memberId === schedule.memberId && action.type === 'discontinue' && stagedIds.has(action.scheduleId))
+        );
+        pendingProfileScheduleActions.push({
+            id: `profile-action-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            type: 'discontinue',
+            memberId: schedule.memberId,
+            scheduleId: schedule.id,
+            linkedScheduleIds,
+            medLabel,
+            snapshot: { ...schedule },
+            createdAt: new Date().toISOString()
+        });
+        captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
+        window.switchMemberProfileTab('orders');
+        openMemberMedicationWorkPanel(schedule.memberId);
+        await appAlert('Discontinuation added to Orders to Discontinue. Approve Changes when ready.', 'Discontinue Staged');
         return;
     }
 

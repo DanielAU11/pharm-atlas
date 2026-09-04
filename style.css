@@ -214,7 +214,12 @@ fieldset {
     margin-bottom: 15px;
 }
 
+.hidden {
+    display: none !important;
+}
+
 .weekday-picker {
+    display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
@@ -676,8 +681,9 @@ button {
 
 .regimen-calendar-table {
     width: 100%;
+    min-width: 760px;
     border-collapse: collapse;
-    table-layout: fixed;
+    table-layout: auto;
     font-size: 10px;
     background: #ffffff;
 }
@@ -698,7 +704,8 @@ button {
 
 .regimen-calendar-table th:first-child,
 .regimen-calendar-table td:first-child {
-    width: 24%;
+    width: 170px;
+    min-width: 170px;
 }
 
 .regimen-calendar-dose {
@@ -710,6 +717,80 @@ button {
     color: #004000;
     text-align: center;
     font-weight: bold;
+    white-space: nowrap;
+}
+
+.regimen-calendar-board {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(72px, 1fr));
+    gap: 2px;
+    padding: 2px;
+    border: 2px inset #ffffff;
+    background: #808080;
+    font-size: 9px;
+}
+
+.regimen-calendar-header {
+    padding: 3px 2px;
+    border: 1px outset #ffffff;
+    background: #d9d9d9;
+    color: #000080;
+    text-align: center;
+    font-weight: bold;
+}
+
+.regimen-calendar-day {
+    min-height: 76px;
+    padding: 2px;
+    border: 1px inset #808080;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.regimen-calendar-empty {
+    background: #eeeeee;
+}
+
+.regimen-calendar-today {
+    background: #fff7be;
+}
+
+.regimen-calendar-day-title {
+    margin-bottom: 2px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.regimen-calendar-board .regimen-calendar-dose {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 2px;
+    align-items: start;
+    margin: 1px 0;
+    padding: 1px 2px;
+    border: 0;
+    border-bottom: 1px dotted #808080;
+    background: transparent;
+    color: #000000;
+    text-align: left;
+    white-space: normal;
+    line-height: 1.12;
+}
+
+.regimen-calendar-board .regimen-calendar-dose i {
+    color: #0000aa;
+    font-style: italic;
+    white-space: nowrap;
+}
+
+.regimen-calendar-board .regimen-calendar-dose span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.regimen-calendar-no-dose {
+    color: #808080;
+    font-size: 9px;
 }
 
 .current-list-option-list {
@@ -3846,6 +3927,10 @@ button {
 
 .action-modal-window-wide:has(.custom-event-editor) {
     width: min(1580px, calc(100vw - 12px));
+}
+
+.action-modal-window-wide:has(.profile-schedule-composer) {
+    width: min(1040px, calc(100vw - 26px));
 }
 
 .return-prepack-modal {
@@ -7919,6 +8004,33 @@ button {
     max-height: calc(100vh - 142px);
 }
 
+.member-order-work-dock {
+    display: none;
+    position: fixed;
+    top: var(--member-order-dock-top, 142px);
+    right: 6px;
+    bottom: var(--member-order-dock-bottom, 12px);
+    width: clamp(430px, 30vw, 540px);
+    min-width: 430px;
+    max-width: calc(100vw - 44px);
+    z-index: 10035;
+    box-sizing: border-box;
+}
+
+.member-profile-body.order-work-open .member-order-work-dock {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.member-profile-body.order-work-open [data-member-section="orders"] {
+    margin-right: clamp(448px, calc(30vw + 20px), 560px);
+}
+
+.member-profile-body.order-work-open .member-order-work-dock {
+    margin-right: 0;
+}
+
 #member-active-meds-list {
     height: auto;
     min-height: 320px;
@@ -8272,6 +8384,714 @@ button {
     font-size: 11px;
 }
 
+.adherence-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.adherence-periods,
+.adherence-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.adherence-toolbar button.active {
+    background: #dfffe0;
+    color: #006000;
+    font-weight: bold;
+}
+
+.profile-orders-shell {
+    display: grid;
+    grid-template-columns: minmax(480px, 1fr) minmax(330px, 390px);
+    gap: 10px;
+    padding: 8px;
+    border: 2px inset #fff;
+    background: #f5f0c8;
+    align-items: start;
+}
+
+.profile-orders-main {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.profile-orders-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border: 2px outset #fff;
+    background: #ffffdf;
+}
+
+.profile-orders-toolbar strong,
+.profile-orders-toolbar small {
+    display: block;
+}
+
+.profile-orders-toolbar strong {
+    color: #000080;
+}
+
+.profile-orders-toolbar-copy {
+    min-width: 0;
+}
+
+.profile-orders-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-end;
+}
+
+.profile-order-add-button {
+    color: #006000;
+    font-weight: bold;
+}
+
+.profile-orders-overview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+    gap: 6px;
+}
+
+.profile-orders-overview.compact {
+    grid-template-columns: repeat(3, 1fr);
+    padding: 6px;
+    background: #ffffdf;
+    border-bottom: 1px solid #c0c080;
+}
+
+.profile-orders-overview button {
+    min-height: 52px;
+    text-align: left;
+    background: #eef8ff;
+}
+
+.profile-orders-overview.compact button {
+    min-height: 44px;
+    padding: 4px 6px;
+}
+
+.profile-orders-overview strong,
+.profile-orders-overview span {
+    display: block;
+}
+
+.profile-orders-overview strong {
+    color: #000080;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.profile-orders-empty-guide {
+    display: grid;
+    gap: 4px;
+    min-height: 68px;
+    padding: 10px;
+    border: 2px inset #fff;
+    background: #fffef0;
+    color: #202020;
+}
+
+.profile-orders-empty-guide strong {
+    color: #004000;
+    font-size: 13px;
+}
+
+.profile-order-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.profile-order-section {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+}
+
+.profile-order-section h4 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0;
+    padding: 5px 7px;
+    border: 1px solid #808080;
+    border-left-width: 6px;
+    background: #f5f5db;
+    font-size: 12px;
+    color: #000080;
+}
+
+.profile-order-section h4 span {
+    min-width: 20px;
+    padding: 1px 5px;
+    border: 1px inset #fff;
+    background: #fff;
+    text-align: center;
+}
+
+.profile-order-section.new h4 {
+    border-left-color: #008000;
+    color: #006000;
+}
+
+.profile-order-section.modify h4 {
+    border-left-color: #c09000;
+    color: #805800;
+}
+
+.profile-order-section.discontinue h4 {
+    border-left-color: #c00000;
+    color: #a00000;
+}
+
+.profile-order-section.regimen h4 {
+    border-left-color: #004c99;
+    color: #004c99;
+}
+
+.profile-order-section.monitoring h4 {
+    border-left-color: #008080;
+    color: #006060;
+}
+
+.profile-command-section-body {
+    border-left: 1px solid #808080;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+    background: #fffff2;
+}
+
+.member-order-change-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    margin: 0;
+    padding: 7px;
+    border: 0;
+    border-bottom: 1px dotted #a0a0a0;
+    background: #f8f8f8;
+}
+
+.member-order-change-card.new {
+    border-left: 5px solid #008000;
+    background: #e7ffe7;
+}
+
+.member-order-change-card.modify {
+    border-left: 5px solid #b08000;
+    background: #fff6dc;
+}
+
+.member-order-change-card.discontinue {
+    border-left: 5px solid #b00000;
+    background: #ffe5e5;
+}
+
+.member-order-change-card.regimen {
+    border-left: 5px solid #004c99;
+    background: #e6f1ff;
+}
+
+.member-order-change-card.monitoring {
+    border-left: 5px solid #008080;
+    background: #e5ffff;
+}
+
+.profile-work-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: start;
+    border-left-width: 7px;
+}
+
+.profile-work-row.regimen,
+.profile-work-row.monitoring {
+    border-left-color: #008000;
+    background: #e9ffe9;
+}
+
+.profile-work-row.discontinue .profile-work-symbol {
+    background: #ffd6d6;
+    color: #b00000;
+    border-color: #b00000;
+}
+
+.profile-work-row.modify .profile-work-symbol {
+    background: #fff1bd;
+    color: #806000;
+    border-color: #b08000;
+}
+
+.profile-work-row.new .profile-work-symbol,
+.profile-work-row.regimen .profile-work-symbol,
+.profile-work-row.monitoring .profile-work-symbol {
+    background: #dfffe0;
+    color: #006000;
+    border-color: #008000;
+}
+
+.profile-work-symbol {
+    width: 22px;
+    min-height: 22px;
+    font-size: 15px;
+    line-height: 20px;
+}
+
+.profile-work-label {
+    margin-bottom: 2px;
+    color: #404040;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.profile-work-copy .member-order-change-title {
+    display: block;
+}
+
+.member-order-change-label {
+    display: none;
+}
+
+.member-order-change-title {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 6px;
+    align-items: start;
+}
+
+.member-order-change-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    min-height: 20px;
+    border: 1px solid #808080;
+    background: #ffffcc;
+    color: #006000;
+    font-weight: bold;
+}
+
+.member-order-change-copy {
+    min-width: 0;
+    font-size: 11px;
+}
+
+.member-order-change-copy > span,
+.member-order-change-copy strong,
+.member-order-change-copy small {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.member-order-change-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.profile-orders-side {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 0;
+    border: 2px solid #808000;
+    background: #ffffe8;
+    text-align: left;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    position: static;
+    overflow: hidden;
+}
+
+.member-order-work-dock #member-order-worklist {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+
+.profile-order-worklist {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    border-top: 1px solid #c0c080;
+    border-bottom: 1px solid #c0c080;
+    background: #fffff2;
+}
+
+.profile-work-empty {
+    margin: 8px;
+    padding: 8px;
+    border: 1px inset #ffffff;
+    background: #fffef0;
+    color: #404040;
+    line-height: 1.35;
+}
+
+.epic-side-titlebar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 8px;
+    border-bottom: 2px solid #808000;
+    background: #e6e3a8;
+    color: #003800;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.epic-side-titlebar span {
+    min-width: 24px;
+    padding: 2px 6px;
+    border: 1px inset #fff;
+    background: #fff;
+    color: #000080;
+    text-align: center;
+    font-weight: bold;
+}
+
+.epic-side-close {
+    min-width: 24px;
+    width: 24px;
+    height: 22px;
+    padding: 0;
+    color: #a00000;
+    font-weight: bold;
+}
+
+.epic-side-launcher,
+.epic-side-search-row,
+.profile-orders-side-footer {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px;
+    border-bottom: 1px solid #c0c080;
+    background: #f7f4c0;
+}
+
+.epic-side-search-row button {
+    min-height: 30px;
+}
+
+.epic-side-hint {
+    margin: 0 6px;
+    padding: 5px 6px;
+    border: 1px solid #c0c080;
+    background: #fffef0;
+    color: #004000;
+    font-size: 11px;
+}
+
+.profile-orders-side-footer {
+    grid-template-columns: 1fr auto;
+    border-top: 2px solid #808000;
+    border-bottom: 0;
+    position: sticky;
+    bottom: 0;
+}
+
+.profile-approve-orders {
+    color: #006000;
+    font-weight: bold;
+}
+
+.profile-regimen-stage-modal,
+.profile-monitoring-stage-modal {
+    display: grid;
+    gap: 8px;
+}
+
+.profile-regimen-stage-modal label,
+.profile-monitoring-stage-modal label {
+    display: grid;
+    gap: 3px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.profile-modal-date-grid,
+.profile-modal-time-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 6px;
+    align-items: end;
+}
+
+.profile-monitoring-weekdays {
+    padding: 6px;
+    border: 1px solid #9fb0c0;
+    background: #f8fff5;
+}
+
+.profile-monitoring-weekdays .weekday-option,
+.profile-schedule-weekdays .weekday-option {
+    padding: 3px 6px;
+    border: 1px solid #808080;
+    background: #eef7ff;
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.profile-monitoring-weekdays .weekday-option:has(input:checked),
+.profile-schedule-weekdays .weekday-option:has(input:checked) {
+    border-color: #008000;
+    background: #dfffe0;
+    color: #004000;
+}
+
+.profile-monitoring-weekdays input[type="checkbox"],
+.profile-schedule-weekdays input[type="checkbox"] {
+    width: 13px !important;
+    min-width: 13px !important;
+    height: 13px !important;
+    min-height: 13px !important;
+    margin: 0 3px 0 0 !important;
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
+    position: static !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+.profile-schedule-composer {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+.profile-schedule-composer-banner {
+    display: grid;
+    gap: 2px;
+    padding: 7px 9px;
+    border: 2px inset #ffffff;
+    background: #ffffdf;
+}
+
+.profile-schedule-composer-banner strong {
+    color: #004000;
+    font-size: 13px;
+}
+
+.profile-schedule-composer-banner span {
+    color: #404040;
+    font-size: 11px;
+}
+
+.profile-schedule-composer .profile-schedule-form {
+    display: grid;
+    grid-template-columns: minmax(560px, 1fr) minmax(250px, 0.48fr);
+    gap: 10px;
+    align-items: stretch;
+}
+
+.profile-schedule-composer fieldset {
+    min-width: 0;
+    margin: 0;
+    background: #dcebfa;
+}
+
+.profile-schedule-timing-card,
+.profile-schedule-links-card,
+.profile-schedule-instructions-card {
+    grid-column: 1 / -1;
+}
+
+.profile-schedule-medication-layout {
+    display: grid;
+    grid-template-columns: 250px minmax(330px, 1fr);
+    gap: 10px;
+    align-items: stretch;
+}
+
+.profile-schedule-med-preview {
+    min-height: 112px;
+    grid-template-columns: 82px minmax(0, 1fr);
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #f7fbff;
+    box-sizing: border-box;
+}
+
+.profile-schedule-med-preview .schedule-med-photo {
+    width: 76px;
+    height: 76px;
+}
+
+.profile-schedule-med-preview .schedule-med-photo img {
+    max-width: 72px;
+    max-height: 72px;
+}
+
+.profile-schedule-med-controls {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+}
+
+.profile-schedule-composer label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    text-align: left;
+}
+
+.profile-schedule-composer input,
+.profile-schedule-composer select,
+.profile-schedule-composer textarea {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+}
+
+.profile-schedule-strength {
+    margin-top: 6px;
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #f7fbff;
+    min-height: 42px;
+}
+
+.profile-schedule-selected-name,
+.profile-schedule-selected-strength {
+    display: block;
+}
+
+.profile-schedule-selected-name {
+    color: #000080;
+    font-size: 14px;
+}
+
+.profile-schedule-selected-strength {
+    margin-top: 2px;
+    color: #303030;
+    font-size: 11px;
+    font-weight: normal;
+}
+
+.profile-schedule-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.1fr) repeat(2, minmax(130px, 0.75fr));
+    gap: 6px;
+}
+
+.profile-schedule-dose-card > span {
+    display: block;
+    margin: 5px 0 8px;
+    padding: 4px 6px;
+    border: 1px inset #ffffff;
+    background: #f8fbff;
+    color: #404040;
+}
+
+.profile-schedule-instructions-card {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.45fr) minmax(360px, 1fr);
+    gap: 8px;
+}
+
+.profile-schedule-instructions-card legend {
+    grid-column: 1 / -1;
+}
+
+.profile-schedule-instructions-card textarea {
+    min-height: 88px;
+    resize: vertical;
+}
+
+.profile-schedule-times {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.profile-schedule-med-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px;
+    align-items: end;
+    width: 100%;
+    max-width: 100%;
+}
+
+.profile-schedule-link-grid {
+    display: grid;
+    grid-template-columns: minmax(190px, 0.38fr) minmax(360px, 1fr);
+    gap: 8px;
+    align-items: end;
+}
+
+.profile-schedule-links-card .link-choice-panel {
+    min-height: 30px;
+    background: #ffffff;
+}
+
+.profile-schedule-interval-preview {
+    flex: 1 1 100%;
+    min-width: 300px;
+    max-height: 150px;
+    overflow: auto;
+    padding: 4px;
+    background: #fffff0;
+}
+
+.profile-schedule-times label {
+    width: 110px;
+}
+
+.profile-schedule-weekdays {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.profile-schedule-weekdays label {
+    flex-direction: row;
+    align-items: center;
+    width: auto;
+}
+
+.profile-schedule-prn {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(110px, 150px));
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.profile-schedule-prn label {
+    width: auto;
+}
+
+@media (max-width: 1150px) {
+    .profile-order-sections,
+    .profile-orders-shell,
+    .profile-schedule-composer .profile-schedule-form {
+        grid-template-columns: 1fr;
+    }
+}
+
 .adherence-summary {
     display: grid;
     grid-template-columns: 110px 1fr;
@@ -8299,7 +9119,7 @@ button {
 
 .adherence-chart {
     display: grid;
-    grid-template-columns: repeat(14, minmax(28px, 1fr));
+    grid-template-columns: repeat(var(--adherence-columns, 14), minmax(24px, 1fr));
     gap: 4px;
     align-items: end;
     min-height: 128px;
