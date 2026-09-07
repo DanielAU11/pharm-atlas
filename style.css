@@ -3539,6 +3539,29 @@ button {
     gap: 8px;
 }
 
+.recipe-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.recipe-search-row label {
+    display: grid;
+    gap: 2px;
+    color: #000080;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.recipe-search-row input {
+    width: 100%;
+    box-sizing: border-box;
+    font-weight: normal;
+    color: #000000;
+}
+
 .compound-recipe-list {
     height: 190px;
     overflow: auto;
@@ -3930,7 +3953,7 @@ button {
 }
 
 .action-modal-window-wide:has(.profile-schedule-composer) {
-    width: min(1040px, calc(100vw - 26px));
+    width: min(1180px, calc(100vw - 26px));
 }
 
 .return-prepack-modal {
@@ -4640,98 +4663,68 @@ button {
 }
 
 #panel-help {
-    padding: 8px;
-    background:
-        linear-gradient(180deg, #dcecff 0, #eff7ff 82px, #c0c0c0 83px),
-        #c0c0c0;
+    padding: 0;
+    background: #c0c0c0;
 }
 
 .help-hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-    align-items: stretch;
-    border: 2px outset #ffffff;
-    background: linear-gradient(90deg, #000080 0%, #0055b8 52%, #0a89c7 100%);
-    color: #ffffff;
-    padding: 14px;
-    margin-bottom: 14px;
-    box-shadow: 2px 2px 0 #808080;
+    display: block;
+    border: 0;
+    border-bottom: 2px solid #808080;
+    background: #ffffdf;
+    color: #000000;
+    padding: 18px 24px 14px;
+    margin: 0;
+    box-shadow: inset 0 -1px #ffffff;
 }
 
 .help-hero h2 {
     margin: 0 0 7px;
-    color: #ffffff;
+    color: #000080;
     font-size: 24px;
-    text-shadow: 1px 1px #000000;
+    text-shadow: none;
 }
 
 .help-hero p {
     max-width: 1100px;
     margin: 0;
-    color: #f4fbff;
+    color: #303030;
     font-size: 13px;
     line-height: 1.5;
 }
 
 .help-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-    gap: 12px;
-    align-items: start;
+    display: block;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 8px 24px 30px;
+    background: #fffef3;
+    border-left: 1px solid #909090;
+    border-right: 1px solid #909090;
 }
 
 .help-card {
     position: relative;
-    overflow: hidden;
-    border: 2px outset #ffffff;
-    background: linear-gradient(180deg, #ffffff, #eaf2ff);
-    padding: 12px 14px 14px 18px;
-    box-shadow: 2px 2px 0 #808080;
-    min-height: 148px;
+    overflow: visible;
+    border: 0;
+    border-top: 1px solid #c0c0c0;
+    background: transparent;
+    padding: 15px 4px 14px;
+    box-shadow: none;
+    min-height: 0;
 }
 
 .help-card::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 6px;
-    background: #0055b8;
-}
-
-.help-card:nth-of-type(4n+2)::before {
-    background: #008060;
-}
-
-.help-card:nth-of-type(4n+3)::before {
-    background: #c66a00;
-}
-
-.help-card:nth-of-type(4n+4)::before {
-    background: #8a2f92;
-}
-
-.help-card:nth-of-type(4n+2) {
-    background: linear-gradient(180deg, #ffffff, #eaf9ee);
-}
-
-.help-card:nth-of-type(4n+3) {
-    background: linear-gradient(180deg, #ffffff, #fff3d8);
-}
-
-.help-card:nth-of-type(4n+4) {
-    background: linear-gradient(180deg, #ffffff, #f3eafd);
+    display: none;
 }
 
 .help-card legend {
-    border: 1px outset #ffffff;
-    background: linear-gradient(90deg, #fff7bf, #c0c0c0);
+    border: 0;
+    background: transparent;
     color: #000080;
     font-weight: bold;
-    padding: 3px 9px;
-    font-size: 13px;
+    padding: 0;
+    font-size: 15px;
 }
 
 .help-card ul,
@@ -4758,7 +4751,7 @@ button {
 }
 
 .help-wide {
-    grid-column: 1 / -1;
+    grid-column: auto;
 }
 
 .help-checklist {
@@ -4769,10 +4762,11 @@ button {
 }
 
 .help-checklist label {
-    border: 1px solid #9aaec9;
-    background: linear-gradient(90deg, #ffffff, #eef9ff);
-    padding: 7px 8px;
-    box-shadow: inset 1px 1px #ffffff, inset -1px -1px #c0c0c0;
+    border: 0;
+    border-bottom: 1px dotted #b0b0b0;
+    background: transparent;
+    padding: 6px 2px;
+    box-shadow: none;
 }
 
 .help-troubleshooting {
@@ -4784,9 +4778,9 @@ button {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
     gap: 10px;
-    border: 1px solid #d0a650;
-    border-left: 6px solid #c66a00;
-    background: linear-gradient(90deg, #fff7d6, #ffffff);
+    border: 0;
+    border-left: 4px solid #c66a00;
+    background: #fff7d6;
     padding: 8px;
     font-size: 12px;
 }
@@ -4797,7 +4791,7 @@ button {
 
 @media (max-width: 1400px) {
     .help-grid {
-        grid-template-columns: repeat(3, minmax(250px, 1fr));
+        max-width: 100%;
     }
 }
 
@@ -4807,7 +4801,9 @@ button {
     }
 
     .help-grid {
-        grid-template-columns: 1fr;
+        padding: 8px 12px 24px;
+        border-left: 0;
+        border-right: 0;
     }
 }
 
@@ -5343,12 +5339,17 @@ button {
     color: #001a70;
 }
 
+.modify-pending-icon,
 .reorder-pending-icon,
 .monitoring-linked-symbol {
     display: inline-block;
     margin-right: 4px;
     color: #008000;
     font-weight: bold;
+}
+
+.modify-pending-icon {
+    color: #806000;
 }
 
 .reorder-med-button {
@@ -5373,6 +5374,13 @@ button {
     border: 1px solid #808080;
     background: #f7f7f7;
     color: #000000;
+}
+
+.pending-order-chips .pending-modify-chip,
+.pending-order-chips .pending-reorder-chip {
+    border-color: #b08000;
+    background: #fff1bd;
+    font-weight: bold;
 }
 
 .pending-monitoring-chip {
@@ -6086,7 +6094,7 @@ button {
 
 .regimen-builder-grid {
     display: grid;
-    grid-template-columns: minmax(430px, var(--regimen-main-width, 1fr)) 10px minmax(260px, 390px) minmax(330px, 0.8fr);
+    grid-template-columns: minmax(430px, var(--regimen-main-width, 1fr)) 10px minmax(250px, 360px) minmax(430px, 1fr);
     gap: 10px;
     align-items: start;
     overflow: hidden;
@@ -6962,6 +6970,76 @@ button {
 .timeline-dose.timeline-future {
     background: #a8c4e8;
     border-color: #365c8f;
+}
+
+.timeline-dose.timeline-retimed {
+    border-style: dashed;
+    box-shadow: inset 0 0 0 1px #ffffff;
+}
+
+.dose-bar-action-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.dose-bar-action-picker button {
+    min-height: 42px;
+    padding: 6px 8px;
+    text-align: left;
+    font-weight: bold;
+}
+
+.dose-bar-action-picker button:first-child {
+    color: #004800;
+}
+
+.dose-bar-action-picker button:last-child {
+    color: #7a4a00;
+}
+
+.retime-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.retime-choice-button {
+    min-height: 58px;
+    padding: 7px 9px;
+    text-align: left;
+    white-space: normal;
+    line-height: 1.2;
+    border: 2px outset #ffffff;
+    background: #e8e8e8;
+    color: #000080;
+}
+
+.retime-choice-button strong,
+.retime-choice-button span {
+    display: block;
+}
+
+.retime-choice-button span {
+    margin-top: 3px;
+    color: #303030;
+    font-size: 10px;
+    font-weight: normal;
+}
+
+.retime-choice-button.selected {
+    border-style: inset;
+    background: #dff8df;
+    color: #004800;
+    box-shadow: inset 0 0 0 1px #008000;
+}
+
+.retime-choice-button.future.selected {
+    background: #fff4c2;
+    color: #7a4a00;
+    box-shadow: inset 0 0 0 1px #a06000;
 }
 
 .container-open-status.unopened {
@@ -8008,9 +8086,9 @@ button {
     display: none;
     position: fixed;
     top: var(--member-order-dock-top, 142px);
-    right: 6px;
+    right: var(--member-order-dock-right, 28px);
     bottom: var(--member-order-dock-bottom, 12px);
-    width: clamp(430px, 30vw, 540px);
+    width: clamp(430px, 29vw, 560px);
     min-width: 430px;
     max-width: calc(100vw - 44px);
     z-index: 10035;
@@ -8024,7 +8102,7 @@ button {
 }
 
 .member-profile-body.order-work-open [data-member-section="orders"] {
-    margin-right: clamp(448px, calc(30vw + 20px), 560px);
+    margin-right: clamp(462px, calc(29vw + 40px), 596px);
 }
 
 .member-profile-body.order-work-open .member-order-work-dock {
@@ -8700,6 +8778,16 @@ button {
     flex-wrap: wrap;
     gap: 4px;
     justify-content: flex-end;
+}
+
+.profile-work-remove-button {
+    width: 24px;
+    min-width: 24px;
+    height: 22px;
+    padding: 0;
+    color: #b00000;
+    font-weight: bold;
+    line-height: 18px;
 }
 
 .profile-orders-side {

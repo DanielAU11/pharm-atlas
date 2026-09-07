@@ -880,7 +880,7 @@ function dateTimeParts(date) {
 }
 
 function intervalAnchorDateTime(schedule, useRolling = true) {
-    if (!schedule || schedule.freq !== 'QXH') return null;
+    if (!schedule || scheduleTimingFrequency(schedule) !== 'QXH') return null;
     const rolling = useRolling && schedule.rollingAnchorDate && schedule.rollingAnchorTime
         ? dateTimeFromParts(schedule.rollingAnchorDate, schedule.rollingAnchorTime)
         : null;
@@ -888,10 +888,11 @@ function intervalAnchorDateTime(schedule, useRolling = true) {
 }
 
 function latestIntervalAnchorFromHistory(schedule) {
-    if (!schedule || schedule.freq !== 'QXH') return null;
+    if (!schedule || scheduleTimingFrequency(schedule) !== 'QXH') return null;
     return db.history
         .filter(entry => {
             if (entry.scheduleId !== schedule.id || !isGivenStatus(entry.doseStatus || 'given')) return false;
+            if (entry.adjustedSchedulePattern === false) return false;
             if (['late', 'early'].includes(entry.doseStatus || 'given')) return true;
             const actual = historyEntryDateTime(entry);
             const scheduledDate = entry.scheduledDate || entry.date;
@@ -904,7 +905,7 @@ function latestIntervalAnchorFromHistory(schedule) {
 }
 
 function effectiveIntervalRollingAnchor(schedule) {
-    if (!schedule || schedule.freq !== 'QXH') return null;
+    if (!schedule || scheduleTimingFrequency(schedule) !== 'QXH') return null;
     const savedAnchor = schedule.rollingAnchorDate && schedule.rollingAnchorTime
         ? { date: schedule.rollingAnchorDate, time: schedule.rollingAnchorTime }
         : null;
@@ -1250,7 +1251,11 @@ function formatFrequency(schedule) {
 
 function scheduleExceptionText(schedule) {
     const count = Array.isArray(schedule?.excludedInstances) ? schedule.excludedInstances.length : 0;
-    return count ? ` | ${count} excluded dose${count === 1 ? '' : 's'}` : '';
+    const retimed = normalizedScheduleInstanceOverrides(schedule).length;
+    const parts = [];
+    if (retimed) parts.push(`${retimed} retimed dose${retimed === 1 ? '' : 's'}`);
+    if (count > retimed) parts.push(`${count - retimed} excluded dose${count - retimed === 1 ? '' : 's'}`);
+    return parts.length ? ` | ${parts.join(', ')}` : '';
 }
 
 function defaultTimeForIndex(index, freq = '') {
@@ -3667,8 +3672,50 @@ function isScheduleInstanceDocumented(scheduleId, date, time) {
     return db.history.some(entry => entry.scheduleInstanceKey === key);
 }
 
+function isDateInsideScheduleWindow(schedule, dateStr) {
+    if (!schedule || !dateStr) return false;
+    if (schedule.startDate && dateStr < schedule.startDate) return false;
+    return !schedule.endDate || schedule.endDate === 'Ongoing' || dateStr <= schedule.endDate;
+}
+
+function normalizedScheduleInstanceOverrides(schedule) {
+    if (!schedule) return [];
+    return Array.isArray(schedule.instanceOverrides)
+        ? schedule.instanceOverrides.filter(item => item && item.status !== 'removed' && item.date && item.time && item.originalKey)
+        : [];
+}
+
+function scheduleOverrideInstancesForDate(schedule, dateStr) {
+    return normalizedScheduleInstanceOverrides(schedule)
+        .filter(item => item.date === dateStr && isDateInsideScheduleWindow(schedule, item.date))
+        .map(item => ({
+            date: item.date,
+            time: item.time,
+            key: scheduleInstanceKey(schedule.id, item.date, item.time),
+            overrideId: item.id || item.originalKey,
+            originalDate: item.originalDate || '',
+            originalTime: item.originalTime || '',
+            originalKey: item.originalKey,
+            retimed: true
+        }));
+}
+
+function mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances = []) {
+    const excluded = new Set(schedule?.excludedInstances || []);
+    const byKey = new Map();
+    baseInstances
+        .filter(instance => !excluded.has(instance.key))
+        .forEach(instance => byKey.set(instance.key, instance));
+    scheduleOverrideInstancesForDate(schedule, dateStr)
+        .filter(instance => !excluded.has(instance.key))
+        .forEach(instance => byKey.set(instance.key, instance));
+    return Array.from(byKey.values()).sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+}
+
 function getScheduleInstancesForDate(schedule, dateStr) {
-    if (!schedule || !isScheduleDueOnDate(schedule, dateStr)) return [];
+    if (!schedule) return [];
+    const isDue = isScheduleDueOnDate(schedule, dateStr);
+    if (!isDue) return mergeScheduleInstancesWithOverrides(schedule, dateStr, []);
     if (scheduleTimingFrequency(schedule) === 'QXH') {
         const dayStart = parseLocal(dateStr);
         const dayEnd = parseLocal(dateStr);
@@ -3677,7 +3724,7 @@ function getScheduleInstancesForDate(schedule, dateStr) {
         dayEnd.setHours(23, 59, 59, 999);
         const scheduleStart = dateTimeFromParts(schedule.startDate, schedule.startTime || schedule.times?.[0]);
         const from = scheduleStart && scheduleStart > dayStart ? scheduleStart : dayStart;
-        return rollingIntervalInstancesBetween(schedule, from, dayEnd)
+        const baseInstances = rollingIntervalInstancesBetween(schedule, from, dayEnd)
             .map(dateTimeParts)
             .filter(instance => instance.date === dateStr && isScheduleDueOnDate(schedule, instance.date))
             .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time))
@@ -3685,18 +3732,20 @@ function getScheduleInstancesForDate(schedule, dateStr) {
                 date: instance.date,
                 time: instance.time,
                 key: scheduleInstanceKey(schedule.id, instance.date, instance.time)
-            }))
-            .filter(instance => !(schedule.excludedInstances || []).includes(instance.key));
+            }));
+        return mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances);
     }
     const times = getScheduleTimes(schedule);
     if (times.length === 0) {
-        return [{ date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }];
+        return mergeScheduleInstancesWithOverrides(schedule, dateStr, [
+            { date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }
+        ]);
     }
-    return times
+    const baseInstances = times
         .slice()
         .sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
-        .map(time => ({ date: dateStr, time, key: scheduleInstanceKey(schedule.id, dateStr, time) }))
-        .filter(instance => !(schedule.excludedInstances || []).includes(instance.key));
+        .map(time => ({ date: dateStr, time, key: scheduleInstanceKey(schedule.id, dateStr, time) }));
+    return mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances);
 }
 
 function getAvailableScheduleInstancesForDate(schedule, dateStr) {
@@ -3723,7 +3772,7 @@ function collectMemberScheduleDoseRows(memberId, startDate, endDate) {
     const end = parseLocal(endDate);
     if (!memberId || !start || !end || end < start) return [];
 
-    const memberSchedules = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule));
+    const memberSchedules = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule));
     const rows = [];
     const cursor = new Date(start);
     while (cursor <= end) {
@@ -3757,6 +3806,72 @@ function getInstanceSelectionRange(schedule) {
     end.setDate(end.getDate() + 30);
     return { start, end: localDateKey(end) };
 }
+
+function scheduleHistoricalDoseRange(schedule) {
+    if (!schedule) return null;
+    const today = localDateKey();
+    let start = schedule.startDate || today;
+    let end = schedule.endDate && schedule.endDate !== 'Ongoing'
+        ? schedule.endDate
+        : '';
+    if (!end && schedule.completedAt) {
+        const completed = new Date(schedule.completedAt);
+        end = Number.isNaN(completed.getTime()) ? '' : localDateKey(completed);
+    }
+    if (!end) end = today;
+    if (end > today) end = today;
+    if (start > end) start = end;
+    return { start, end };
+}
+
+function pastDoseDateHasOpenInstance(schedule, dateStr) {
+    return getScheduleInstancesForDate(schedule, dateStr)
+        .some(instance => !isScheduleInstanceDocumented(schedule.id, instance.date, instance.time));
+}
+
+function findMostRecentPastDoseDate(schedule, range) {
+    const start = parseLocal(range?.start);
+    const end = parseLocal(range?.end);
+    if (!start || !end || end < start) return '';
+    const cursor = new Date(end);
+    for (let guard = 0; cursor >= start && guard < 4000; guard++) {
+        const dateKey = localDateKey(cursor);
+        if (pastDoseDateHasOpenInstance(schedule, dateKey)) return dateKey;
+        cursor.setDate(cursor.getDate() - 1);
+    }
+    return '';
+}
+
+function pastDoseTimeOptionsHtml(schedule, dateStr, selectedTime = '') {
+    const instances = getScheduleInstancesForDate(schedule, dateStr);
+    if (!instances.length) return '<option value="">No scheduled doses on this date</option>';
+    return instances.map(instance => {
+        const documented = isScheduleInstanceDocumented(schedule.id, instance.date, instance.time);
+        const selected = selectedTime && instance.time === selectedTime ? 'selected' : '';
+        const retimedText = instance.retimed ? ` - retimed from ${instance.originalDate || ''} ${instance.originalTime || ''}` : '';
+        return `<option value="${escapeHtml(instance.time)}" ${selected} ${documented ? 'disabled' : ''}>${escapeHtml(instance.time)}${escapeHtml(retimedText)}${documented ? ' - already documented' : ''}</option>`;
+    }).join('');
+}
+
+window.updatePastDoseTimeOptions = function(scheduleId) {
+    const body = document.getElementById('action-modal-body');
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const dateStr = body?.querySelector('[name="pastDoseDate"]')?.value || '';
+    const select = body?.querySelector('[name="scheduledTime"]');
+    if (!schedule || !select) return;
+    select.innerHTML = pastDoseTimeOptionsHtml(schedule, dateStr, select.value);
+    window.syncPastDoseActualDefaults();
+};
+
+window.syncPastDoseActualDefaults = function() {
+    const body = document.getElementById('action-modal-body');
+    const dateInput = body?.querySelector('[name="pastDoseDate"]');
+    const timeSelect = body?.querySelector('[name="scheduledTime"]');
+    const actualDate = body?.querySelector('[name="actualDate"]');
+    const actualTime = body?.querySelector('[name="actualTime"]');
+    if (actualDate && dateInput?.value) actualDate.value = dateInput.value;
+    if (actualTime && timeSelect?.value) actualTime.value = timeSelect.value;
+};
 
 function getNextAvailableScheduleInstance(schedule, fromDate = new Date()) {
     const currentDateKey = localDateKey(fromDate);
@@ -4760,6 +4875,111 @@ async function requestScheduledDoseDocumentation(schedule, title) {
     return result;
 }
 
+async function requestPastDoseDocumentation(schedule, title, preferred = {}) {
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    const defaults = defaultActualDateTime();
+    const range = scheduleHistoricalDoseRange(schedule);
+    if (!range) {
+        await appAlert('This medication does not have enough schedule information to document a past dose.');
+        return null;
+    }
+    const isPrn = schedule.freq === 'PRN';
+    const preferredDate = preferred.date && preferred.date >= range.start && preferred.date <= range.end ? preferred.date : '';
+    const preferredTime = preferred.time || '';
+    const defaultDate = preferredDate || (isPrn
+        ? range.end
+        : findMostRecentPastDoseDate(schedule, range));
+    if (!isPrn && !defaultDate) {
+        await appAlert('All historical scheduled dose instances for this medication have already been documented.');
+        return null;
+    }
+    const defaultTime = isPrn
+        ? defaults.time
+        : (preferredTime || getScheduleInstancesForDate(schedule, defaultDate).find(instance => !isScheduleInstanceDocumented(schedule.id, instance.date, instance.time))?.time || defaults.time);
+    const result = await showActionModal(title, `
+        <div class="sunken-panel" style="padding:6px; background:white; font-size:11px; margin-bottom:8px;">
+            <strong>${escapeHtml(med?.name || 'Medication')} ${escapeHtml(med ? formatMedStrength(med) : '')}</strong><br>
+            Therapy window: ${escapeHtml(range.start)} - ${escapeHtml(range.end)}
+        </div>
+        <div class="form-help" style="margin-bottom:8px;">
+            Document a dose that occurred during the original therapy window. This does not restart or reactivate the medication.
+        </div>
+        <div class="field-row">
+            <label>${isPrn ? 'Past PRN date' : 'Scheduled date'}:
+                <input name="pastDoseDate" type="date" min="${escapeHtml(range.start)}" max="${escapeHtml(range.end)}" value="${escapeHtml(defaultDate || range.end)}" ${isPrn ? '' : `onchange="updatePastDoseTimeOptions('${escapeHtml(schedule.id)}')"`}>
+            </label>
+            ${isPrn
+                ? `<label>Time:<input name="actualTime" type="time" value="${escapeHtml(defaults.time)}"></label>`
+                : `<label>Scheduled time:<select name="scheduledTime" style="width:190px;" onchange="syncPastDoseActualDefaults()">${pastDoseTimeOptionsHtml(schedule, defaultDate, defaultTime)}</select></label>`}
+        </div>
+        <div class="field-row" style="margin-top:8px;">
+            <label>Status:</label>
+            <select name="doseStatus">
+                <option value="missed" selected>Missed / forgotten</option>
+                <option value="skipped">Skipped</option>
+                <option value="refused">Refused</option>
+                <option value="held">Held</option>
+                <option value="wasted">Wasted - deduct or mark prepared dose wasted</option>
+                <option value="given">Given as scheduled - deduct inventory</option>
+                <option value="late">Given late - deduct inventory</option>
+                <option value="early">Given early - deduct inventory</option>
+            </select>
+        </div>
+        ${isPrn ? '' : `
+            <div class="field-row" style="margin-top:8px;">
+                <label>Date documented/taken:</label><input name="actualDate" type="date" value="${escapeHtml(defaultDate)}">
+                <label>Time:</label><input name="actualTime" type="time" value="${escapeHtml(defaultTime)}">
+            </div>
+        `}
+        ${med ? kitSourceSelectHtml(med.id) : ''}
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Note:</label>
+            <textarea name="doseNote" rows="3" style="width:100%; resize:none;" placeholder="Optional reason or context"></textarea>
+        </div>
+    `, 'Document Past Dose');
+    if (!result) return null;
+    const pastDate = result.pastDoseDate || '';
+    if (!pastDate || pastDate < range.start || pastDate > range.end) {
+        await appAlert(`Choose a date inside the therapy window: ${range.start} through ${range.end}.`);
+        return null;
+    }
+    if (isPrn) {
+        if (!result.actualTime) {
+            await appAlert('Time is required for a past PRN dose.');
+            return null;
+        }
+        result.actualDate = pastDate;
+        result.scheduledDate = pastDate;
+        result.scheduledTime = result.actualTime;
+    } else {
+        result.scheduledDate = pastDate;
+        result.scheduledTime = result.scheduledTime || '';
+        if (!result.scheduledTime) {
+            await appAlert('Choose a scheduled dose time.');
+            return null;
+        }
+        if (!result.actualDate || !result.actualTime) {
+            await appAlert('Documented date and time are required.');
+            return null;
+        }
+        if (!getScheduleInstancesForDate(schedule, pastDate).some(instance => instance.time === result.scheduledTime)) {
+            await appAlert('That medication was not scheduled for the selected date and time.');
+            return null;
+        }
+        if (isScheduleInstanceDocumented(schedule.id, result.scheduledDate, result.scheduledTime)) {
+            await appAlert('That scheduled dose instance has already been documented.');
+            return null;
+        }
+    }
+    const timingCheck = scheduledDoseTimingValidation(result);
+    if (!timingCheck.ok) {
+        await appAlert(timingCheck.message);
+        return null;
+    }
+    normalizeScheduledDoseActualTime(result);
+    return result;
+}
+
 function normalizeScheduledDoseActualTime(actual) {
     const status = actual?.doseStatus || 'given';
     if (['given', 'skipped', 'missed', 'refused', 'held', 'wasted'].includes(status) && actual.scheduledDate && actual.scheduledTime) {
@@ -4795,6 +5015,43 @@ function scheduledDoseTimingValidation(actual) {
     }
     return { ok: true };
 }
+
+async function chooseAdministrationPatternAdjustment(schedule, actual) {
+    if (!schedule || !['late', 'early'].includes(actual?.doseStatus || 'given')) return true;
+    const freq = scheduleTimingFrequency(schedule);
+    if (!['QXH', 'QOD', 'QW', 'QXW', 'XPW'].includes(freq)) return false;
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    const result = await showActionModal('Late / Early Timing Impact', `
+        <div class="sunken-panel" style="padding:6px; background:white; font-size:11px; margin-bottom:8px;">
+            <strong>${escapeHtml(med ? medicationNameWithStrength(med) : 'Medication')}</strong><br>
+            Scheduled: ${escapeHtml(actual.scheduledDate || '')} ${escapeHtml(actual.scheduledTime || '')}<br>
+            Documented: ${escapeHtml(actual.actualDate || '')} ${escapeHtml(actual.actualTime || '')}
+        </div>
+        <input type="hidden" name="timingScope" value="single">
+        <div class="retime-choice-grid">
+            <button type="button" class="retime-choice-button timing-choice-button selected" data-scope="single" onclick="selectTimingImpactScope('single')">
+                <strong>Record this dose only</strong>
+                <span>Keep the future schedule unchanged.</span>
+            </button>
+            <button type="button" class="retime-choice-button timing-choice-button future" data-scope="future" onclick="selectTimingImpactScope('future')">
+                <strong>Adjust future times</strong>
+                <span>Shift future ${escapeHtml(freq === 'QXH' ? 'qXh interval times' : 'scheduled days')} from this documentation.</span>
+            </button>
+        </div>
+        <div class="form-help" style="margin-top:8px;">Use future adjustment only when the medication timing truly shifted going forward.</div>
+    `, 'Continue');
+    if (!result) return null;
+    return result.timingScope === 'future';
+}
+
+window.selectTimingImpactScope = function(value) {
+    const body = document.getElementById('action-modal-body');
+    const input = body?.querySelector('input[name="timingScope"]');
+    if (input) input.value = value;
+    body?.querySelectorAll('.timing-choice-button[data-scope]').forEach(button => {
+        button.classList.toggle('selected', button.dataset.scope === value);
+    });
+};
 
 function formatActualTimestamp(actual) {
     return `${actual.actualDate} ${actual.actualTime}`;
@@ -5184,7 +5441,7 @@ function renderMemberContextRail(memberId = currentEditingMemberId) {
             <div class="rail-empty">Save this member before the side panel can summarize medications, safety items, and notes.</div>`;
         return;
     }
-    const activeSchedules = db.schedules.filter(schedule => schedule.memberId === member.id && !isScheduleArchived(schedule));
+    const activeSchedules = db.schedules.filter(schedule => schedule.memberId === member.id && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule));
     const prnCount = activeSchedules.filter(schedule => schedule.freq === 'PRN').length;
     const heldSchedules = activeSchedules.filter(schedule => activeMedicationHoldInfo(schedule)?.active);
     const diagnoses = currentEditingMemberId === member.id ? getHiddenJson('m-diagnoses-data') : normalizeMemberDiagnoses(member);
@@ -8309,12 +8566,12 @@ window.removeMember = async function(id) {
 function renderMemberPrnMedicationOrders(memberId) {
     const container = document.getElementById('member-prn-meds-list');
     if (!container) return;
-    const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq === 'PRN' && !isScheduleArchived(schedule));
+    const schedules = db.schedules.filter(schedule => schedule.memberId === memberId && schedule.freq === 'PRN' && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule));
     if (schedules.length === 0) {
         container.innerHTML = '<div style="font-size:11px; padding:5px;">No PRN medications.</div>';
         return;
     }
-    const candidates = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule));
+    const candidates = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule));
     container.innerHTML = schedules.map(schedule => {
         const med = db.inventory.find(item => item.id === schedule.medId);
         const set = schedule.orderSetId ? db.orderSets.find(item => item.id === schedule.orderSetId) : null;
@@ -8331,6 +8588,7 @@ function renderMemberPrnMedicationOrders(memberId) {
                 <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
                 <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button onclick="event.stopPropagation(); administerDose('${escapeHtml(schedule.medId)}','${escapeHtml(schedule.id)}')">Administer</button>
+                <button onclick="event.stopPropagation(); documentPastDose('${escapeHtml(schedule.id)}')">Past Dose</button>
                 <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${escapeHtml(schedule.id)}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                 <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${escapeHtml(schedule.id)}')">Waste</button>
                 <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>
@@ -8368,6 +8626,7 @@ function completedScheduleSummaryHtml(schedule, candidates = null, showRegimenSo
                 ${reorderAction}
                 ${linkedRemoveAction}
                 <button type="button" onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
+                <button type="button" onclick="event.stopPropagation(); documentPastDose('${escapeHtml(schedule.id)}')">Past Dose</button>
                 <button type="button" onclick="event.stopPropagation(); removeCompletedSchedule('${escapeHtml(schedule.id)}')">Remove</button>
                 ${med ? `<button type="button" onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>` : ''}
             </div>
@@ -8802,12 +9061,12 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                 activeMedsContainer.appendChild(gridView);
             }
             const memberOrderSets = db.orderSets.filter(set =>
-                set.memberId === id && set.status !== 'completed' && db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule))
+                set.memberId === id && set.status !== 'completed' && db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule))
             );
             memberOrderSets.forEach(set => {
                 const div = document.createElement('details');
                 div.open = true;
-                const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id && !isScheduleArchived(candidate));
+                const setSchedules = db.schedules.filter(candidate => candidate.orderSetId === set.id && !isScheduleArchived(candidate) && !isSchedulePendingProfileDiscontinue(candidate));
                 const regimenHold = orderSetHoldInfo(set.id);
                 div.className = `sunken-panel member-regimen-card ${regimenHold.anyHeld ? 'member-regimen-has-hold' : ''}`;
                 const itemRows = setSchedules.map(schedule => {
@@ -8822,6 +9081,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                             <button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button>
                             <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${schedule.id}')">Audit</button>
                             <button onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Modify</button>
+                            <button onclick="event.stopPropagation(); documentPastDose('${schedule.id}')">Past Dose</button>
                             <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${schedule.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                             <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${schedule.id}')">Waste</button>
                             <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${schedule.id}')">&#8635; Reorder</button>
@@ -8851,8 +9111,8 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                 if (activeMedsContainer) activeMedsContainer.appendChild(div);
             });
 
-            const memberSchedules = db.schedules.filter(s => s.memberId === id && !s.orderSetId && s.freq !== 'PRN' && !isScheduleArchived(s));
-            const memberActiveCandidates = db.schedules.filter(s => s.memberId === id && s.freq !== 'PRN' && !isScheduleArchived(s));
+            const memberSchedules = db.schedules.filter(s => s.memberId === id && !s.orderSetId && s.freq !== 'PRN' && !isScheduleArchived(s) && !isSchedulePendingProfileDiscontinue(s));
+            const memberActiveCandidates = db.schedules.filter(s => s.memberId === id && s.freq !== 'PRN' && !isScheduleArchived(s) && !isSchedulePendingProfileDiscontinue(s));
             memberSchedules.forEach(s => {
                 const med = db.inventory.find(inv => inv.id === s.medId);
                 const activeHold = activeMedicationHoldInfo(s);
@@ -8869,6 +9129,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
                         <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
+                        <button onclick="event.stopPropagation(); documentPastDose('${s.id}')">Past Dose</button>
                         <button onclick="event.stopPropagation(); openOrderModifier('${s.id}')">Modify</button>
                         <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${s.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                         <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${s.id}')">Waste</button>
@@ -8940,6 +9201,25 @@ window.openOrderModifier = function(scheduleId) {
     const sched = db.schedules.find(s => s.id === scheduleId);
     if (!sched) return void appAlert("Schedule not found.");
     const med = db.inventory.find(m => m.id === sched.medId);
+    const memberModal = document.getElementById('member-modal');
+    if (memberModal?.style.display === 'flex' && currentEditingMemberId === sched.memberId) {
+        void (async () => {
+            const saved = await saveMemberFromProfile({ closeAfter: false });
+            if (!saved) return;
+            let draft = pendingScheduleOrders.find(order => order.modifySourceId === sched.id);
+            if (!draft) {
+                draft = scheduleDraftFromExisting(sched, 'modify');
+                pendingScheduleOrders.push(draft);
+            }
+            renderPendingScheduleOrders();
+            captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
+            window.switchMemberProfileTab('orders');
+            openMemberMedicationWorkPanel(currentEditingMemberId);
+            refreshOpenMemberMedicationViews(currentEditingMemberId);
+            await openProfileScheduleComposer(currentEditingMemberId, draft);
+        })();
+        return;
+    }
 
     document.getElementById('mod-sched-id').value = scheduleId;
     document.getElementById('mod-title').innerText = `Modify Order: ${med ? med.name : 'Unknown medication'}`;
@@ -8998,6 +9278,7 @@ window.saveOrderModification = async function() {
     const id = document.getElementById('mod-sched-id').value;
     const sched = db.schedules.find(s => s.id === id);
     if (sched) {
+        const beforeModification = { ...sched };
         const previousStartDate = sched.startDate;
         const previousEndDate = sched.endDate;
         const previousIntervalTiming = JSON.stringify({
@@ -9113,6 +9394,7 @@ window.saveOrderModification = async function() {
             renderMemberCalendar(currentEditingMemberId);
             renderMemberMedicationTimelines();
         }
+        await promptReprintLabelsForModifiedSchedules([{ schedule: sched, before: beforeModification }]);
     }
 };
 
@@ -11977,13 +12259,22 @@ function prepackPackageCode(memberId, date, shift = 'all') {
     return `PA-PREP-${memberPart}-${datePart}-${shiftPart}`;
 }
 
+function prepackDayContentFingerprint(day) {
+    return (day?.items || []).map(prepackItemFingerprint).sort().join('||');
+}
+
+function prepackDayScanSeed(queue, day) {
+    return `${queue?.id || ''}|${prepackDayContentFingerprint(day)}`;
+}
+
 function ensurePrepackDayCodes(queue) {
     if (!queue) return;
     (queue.days || []).forEach(day => {
         const codeDate = firstDateInPrepackDay(day) || day.date;
         const shift = queue.selection?.prepackShift || 'all';
         if (!day.prepackCode) day.prepackCode = prepackPackageCode(queue.memberId, codeDate, shift);
-        if (!day.prepackScanCode) day.prepackScanCode = prepackPackageScanCode(queue.memberId, codeDate, shift, queue.id || '');
+        if (!day.prepackScanCode) day.prepackScanCode = prepackPackageScanCode(queue.memberId, codeDate, shift, prepackDayScanSeed(queue, day));
+        day.prepackPriorScanCodes = Array.isArray(day.prepackPriorScanCodes) ? uniqueValues(day.prepackPriorScanCodes.map(normalizeMedicationCode).filter(Boolean)) : [];
     });
 }
 
@@ -11998,7 +12289,8 @@ function prepackDayCodeMatches(day, scannedCode) {
 function prepackDayCodeList(day) {
     return [
         day?.prepackScanCode,
-        day?.prepackCode
+        day?.prepackCode,
+        ...(day?.prepackPriorScanCodes || [])
     ].map(normalizeMedicationCode).filter(Boolean);
 }
 
@@ -13083,6 +13375,7 @@ function markPrepackItemReturned(row, reason = 'returned', note = '', quantityOv
     const requestedQty = parseAmount(quantityOverride, NaN);
     if (item.inventoryDeducted) {
         const returnedQty = reversePrepackItemStock(queue, item, reason, Number.isFinite(requestedQty) && requestedQty > 0 ? requestedQty : null);
+        if (isRangePrepackItem(item) && prepackItemReturnableQty(row) <= 0.01) item.inventoryReturned = true;
         if (note) item.returnNote = note;
         return returnedQty;
     } else {
@@ -13679,11 +13972,15 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         .map(([date, items]) => ({
             date,
             prepackCode: prepackPackageCode(memberId, date, selection?.prepackShift || 'all'),
-            prepackScanCode: prepackPackageScanCode(memberId, date, selection?.prepackShift || 'all', queueSeed),
+            prepackScanCode: '',
+            prepackPriorScanCodes: [],
             status: 'pending',
             needsReprint: false,
             items: items.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.medName.localeCompare(b.medName))
         }));
+    days.forEach(day => {
+        day.prepackScanCode = prepackPackageScanCode(memberId, day.date, selection?.prepackShift || 'all', `${queueSeed}|${prepackDayContentFingerprint(day)}`);
+    });
     const singleScheduleIds = new Set(uniqueRows.map(row => row.schedule?.id).filter(Boolean));
     if (selection?.singleMedication && selection.labelLayout === 'range' && uniqueRows.length > 0 && singleScheduleIds.size === 1) {
         const firstRow = uniqueRows[0];
@@ -13711,7 +14008,8 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         days = [{
             date: aggregateItem.time,
             prepackCode: prepackPackageCode(memberId, selection.startDate, selection?.prepackShift || 'all'),
-            prepackScanCode: prepackPackageScanCode(memberId, selection.startDate, selection?.prepackShift || 'all', queueSeed),
+            prepackScanCode: prepackPackageScanCode(memberId, selection.startDate, selection?.prepackShift || 'all', `${queueSeed}|${prepackItemFingerprint(aggregateItem)}`),
+            prepackPriorScanCodes: [],
             status: 'pending',
             needsReprint: false,
             items: [aggregateItem]
@@ -13740,11 +14038,11 @@ function prepackRowsForSelection(selection) {
     if (selection.kind === 'member-range') {
         const excluded = new Set(selection.excludedScheduleIds || []);
         schedules = db.schedules.filter(schedule =>
-            schedule.memberId === selection.memberId && !excluded.has(schedule.id) && !isScheduleArchived(schedule)
+            schedule.memberId === selection.memberId && !excluded.has(schedule.id) && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule)
         );
     } else {
         const scheduleIds = new Set(selection.scheduleIds || []);
-        schedules = db.schedules.filter(schedule => scheduleIds.has(schedule.id) && !isScheduleArchived(schedule));
+        schedules = db.schedules.filter(schedule => scheduleIds.has(schedule.id) && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule));
     }
     const excludedInstances = new Set(selection.excludedInstanceKeys || []);
     const excludedPrepackDates = new Set(selection.excludedPrepackDates || []);
@@ -13870,10 +14168,18 @@ function reconcilePrepackQueue(queue) {
         });
         const previousDay = previousDays.get(day.date);
         if (previousDay?.prepackCode) day.prepackCode = previousDay.prepackCode;
-        day.prepackScanCode = previousDay?.prepackScanCode || '';
         const oldFingerprints = (previousDay?.items || []).map(prepackItemFingerprint).sort().join('||');
         const newFingerprints = day.items.map(prepackItemFingerprint).sort().join('||');
         const dayChanged = oldFingerprints !== newFingerprints;
+        if (dayChanged) {
+            day.prepackPriorScanCodes = uniqueValues([
+                ...(previousDay?.prepackPriorScanCodes || []),
+                previousDay?.prepackScanCode || ''
+            ].map(normalizeMedicationCode).filter(Boolean).filter(code => code !== normalizeMedicationCode(day.prepackScanCode)));
+        } else {
+            day.prepackScanCode = previousDay?.prepackScanCode || day.prepackScanCode;
+            day.prepackPriorScanCodes = Array.isArray(previousDay?.prepackPriorScanCodes) ? previousDay.prepackPriorScanCodes : [];
+        }
         if (dayChanged) changed = true;
         day.needsReprint = queue.labelsPrinted
             ? (dayChanged || !!previousDay?.needsReprint)
@@ -14344,14 +14650,31 @@ window.selectReturnPrepackByCode = function() {
     const input = body.querySelector('[name="returnPrepackCode"]');
     const code = normalizeMedicationCode(input?.value || '');
     if (!code) return;
+    const matchedDataGroup = returnPrepackGroups(returnablePrepackItems()).find(group =>
+        prepackDayCodeList(group.day).includes(code)
+    ) || (() => {
+        const resolved = findPrepackPackageByScanCode(code);
+        if (!resolved) return null;
+        return returnPrepackGroups(returnablePrepackItems()).find(group =>
+            group.queue.id === resolved.queueId &&
+            (group.queue.days || [])[resolved.dayIndex] === group.day
+        ) || null;
+    })();
     let matched = null;
-    body.querySelectorAll('.return-prepack-group').forEach(group => {
-        const groupCodes = String(group.dataset.prepackCodes || group.dataset.prepackCode || '')
-            .split('|')
-            .map(normalizeMedicationCode)
-            .filter(Boolean);
-        if (groupCodes.includes(code)) matched = group;
-    });
+    if (matchedDataGroup) {
+        body.querySelectorAll('.return-prepack-group').forEach(group => {
+            if (group.dataset.returnKey === matchedDataGroup.key) matched = group;
+        });
+    }
+    if (!matched) {
+        body.querySelectorAll('.return-prepack-group').forEach(group => {
+            const groupCodes = String(group.dataset.prepackCodes || group.dataset.prepackCode || '')
+                .split('|')
+                .map(normalizeMedicationCode)
+                .filter(Boolean);
+            if (groupCodes.includes(code)) matched = group;
+        });
+    }
     if (!matched) {
         const status = body.querySelector('#return-prepack-scan-status');
         if (status) status.textContent = 'No returnable package matched that QR code.';
@@ -14398,9 +14721,16 @@ function selectedReturnPrepackLabelRows(body = document.getElementById('action-m
         const qty = isRangePrepackItem(row.item)
             ? parseAmount(rawQty, NaN)
             : max;
-        if (!Number.isFinite(qty) || qty <= 0 || qty > max + 0.000001) return null;
+        if (!returnPrepackQtyWithinMax(qty, max)) return null;
         return { row, qty };
     }).filter(Boolean);
+}
+
+function returnPrepackQtyWithinMax(qty, max) {
+    if (!Number.isFinite(qty) || qty <= 0) return false;
+    const roundedMax = parseAmount(formatAmount(max), max);
+    const allowedMax = Math.max(max, Number.isFinite(roundedMax) ? roundedMax : max);
+    return qty <= allowedMax + Math.max(0.01, allowedMax * 0.001);
 }
 
 window.updateReturnPrepackLabelPreview = function(processed = false) {
@@ -14471,7 +14801,7 @@ function returnPrepackChoicesHtml(rows, groups) {
         }).join('');
         ensurePrepackDayCodes(group.queue);
         const packageCodes = prepackDayCodeList(group.day);
-        return `<details class="return-prepack-group" data-member-id="${escapeHtml(group.queue.memberId || '')}" data-date="${escapeHtml(groupDate)}" data-prepack-code="${escapeHtml(group.day.prepackCode || '')}" data-prepack-codes="${escapeHtml(packageCodes.join('|'))}" data-package-status="${escapeHtml(groupStatus)}" data-stock-mode="${escapeHtml(stockMode)}" data-return-category="${escapeHtml(returnCategory)}">
+        return `<details class="return-prepack-group" data-return-key="${escapeHtml(group.key)}" data-member-id="${escapeHtml(group.queue.memberId || '')}" data-date="${escapeHtml(groupDate)}" data-prepack-code="${escapeHtml(group.day.prepackCode || '')}" data-prepack-codes="${escapeHtml(packageCodes.join('|'))}" data-package-status="${escapeHtml(groupStatus)}" data-stock-mode="${escapeHtml(stockMode)}" data-return-category="${escapeHtml(returnCategory)}">
             <summary class="return-prepack-package">
                 <span class="return-prepack-check"><input id="${packageId}" class="return-prepack-package-check" type="checkbox" onclick="event.stopPropagation()" onchange="toggleReturnPrepackPackage(this); updateReturnPrepackActionUi();"></span>
                 <span class="return-prepack-main">
@@ -14857,7 +15187,10 @@ window.processReturnPrepackSelection = async function() {
     for (const value of selected) {
         const index = parseInt(value, 10);
         const row = rows[index];
-        if (!row) continue;
+        if (!row) {
+            setReturnPrepackStatus('One selected return row is no longer available. Refresh the return window and select the package again.');
+            return;
+        }
         if (result.handling !== 'waste' && returnPrepackRowWasteOnly(row)) {
             setReturnPrepackStatus(`${row.item.medName} is marked waste-only. Mark the container unopened from the medication schedule before returning it, or change Action to Waste / do not return.`);
             return;
@@ -14866,7 +15199,7 @@ window.processReturnPrepackSelection = async function() {
         if (isRangePrepackItem(row.item)) {
             const qty = parseAmount(qtyOverride, NaN);
             const max = prepackItemReturnableQty(row);
-            if (!Number.isFinite(qty) || qty <= 0 || qty > max + 0.000001) {
+            if (!returnPrepackQtyWithinMax(qty, max)) {
                 setReturnPrepackStatus(`Enter a return quantity greater than 0 and up to ${formatAmount(max)} for ${row.item.medName}.`);
                 return;
             }
@@ -17011,10 +17344,266 @@ function timelineDoseState(schedule, instance) {
 
     const now = new Date();
     const due = new Date(`${instance.date}T${instance.time === 'PRN' ? '00:00' : instance.time}`);
-    if (due < now) return { className: 'timeline-overdue', label: instance.time, title: 'Not documented at scheduled time. Click to document status.' };
-    if (instance.date === localDateKey(now)) return { className: 'timeline-upcoming', label: instance.time, title: 'Upcoming dose. Click to document status.' };
-    return { className: 'timeline-future', label: instance.time, title: 'Future scheduled dose. Click to document status.' };
+    const retimedTitle = instance.retimed ? ` Retimed from ${instance.originalDate || ''} ${instance.originalTime || ''}.` : '';
+    const retimedClass = instance.retimed ? ' timeline-retimed' : '';
+    const label = instance.retimed ? `${instance.time}*` : instance.time;
+    if (due < now) return { className: `timeline-overdue${retimedClass}`, label, title: `Not documented at scheduled time.${retimedTitle} Click to document status.` };
+    if (instance.date === localDateKey(now)) return { className: `timeline-upcoming${retimedClass}`, label, title: `Upcoming dose.${retimedTitle} Click to document status.` };
+    return { className: `timeline-future${retimedClass}`, label, title: `Future scheduled dose.${retimedTitle} Click to document status.` };
 }
+
+function removeScheduleInstanceOverride(schedule, originalKey) {
+    if (!schedule || !originalKey) return;
+    schedule.instanceOverrides = normalizedScheduleInstanceOverrides(schedule)
+        .filter(item => item.originalKey !== originalKey);
+    schedule.excludedInstances = (schedule.excludedInstances || []).filter(key => key !== originalKey);
+}
+
+function upsertScheduleInstanceOverride(schedule, originalDate, originalTime, newDate, newTime, note = '') {
+    if (!schedule || !originalDate || !originalTime || !newDate || !newTime) return null;
+    const originalKey = scheduleInstanceKey(schedule.id, originalDate, originalTime);
+    const targetKey = scheduleInstanceKey(schedule.id, newDate, newTime);
+    if (originalKey === targetKey) {
+        removeScheduleInstanceOverride(schedule, originalKey);
+        return null;
+    }
+    schedule.instanceOverrides = normalizedScheduleInstanceOverrides(schedule)
+        .filter(item => item.originalKey !== originalKey);
+    schedule.excludedInstances = Array.from(new Set([...(schedule.excludedInstances || []), originalKey]));
+    const override = {
+        id: `retime-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        originalDate,
+        originalTime,
+        originalKey,
+        date: newDate,
+        time: newTime,
+        reason: note || '',
+        createdAt: new Date().toISOString()
+    };
+    schedule.instanceOverrides.push(override);
+    return override;
+}
+
+function retimeTargetConflicts(schedule, originalDate, originalTime, newDate, newTime, allowScheduleConflict = false) {
+    const originalKey = scheduleInstanceKey(schedule.id, originalDate, originalTime);
+    const targetKey = scheduleInstanceKey(schedule.id, newDate, newTime);
+    if (targetKey === originalKey) return false;
+    if (db.history.some(entry => entry.scheduleInstanceKey === targetKey)) return true;
+    if (normalizedScheduleInstanceOverrides(schedule)
+        .filter(item => item.originalKey !== originalKey)
+        .some(item => scheduleInstanceKey(schedule.id, item.date, item.time) === targetKey)) {
+        return true;
+    }
+    if (allowScheduleConflict) return false;
+    const tempSchedule = {
+        ...schedule,
+        excludedInstances: Array.from(new Set([...(schedule.excludedInstances || []), originalKey])),
+        instanceOverrides: normalizedScheduleInstanceOverrides(schedule).filter(item => item.originalKey !== originalKey)
+    };
+    return getScheduleInstancesForDate(tempSchedule, newDate)
+        .some(instance => instance.key === targetKey);
+}
+
+function retimeDosePreviewHtml(schedule, originalDate, originalTime, newDate, newTime, applyScope) {
+    if (!schedule || !newDate || !newTime) return '<div class="interval-preview-empty">Choose a new date and time.</div>';
+    const originalText = `${originalDate} ${originalTime}`;
+    const newText = `${newDate} ${newTime}`;
+    if (applyScope !== 'future' || scheduleTimingFrequency(schedule) !== 'QXH') {
+        return `<div class="form-help">Single-dose move: ${escapeHtml(originalText)} becomes ${escapeHtml(newText)}. The rest of the schedule is unchanged.</div>`;
+    }
+    const temp = {
+        ...schedule,
+        rollingAnchorDate: newDate,
+        rollingAnchorTime: newTime,
+        excludedInstances: Array.from(new Set([...(schedule.excludedInstances || []), scheduleInstanceKey(schedule.id, originalDate, originalTime)])),
+        instanceOverrides: [
+            ...normalizedScheduleInstanceOverrides(schedule).filter(item => item.originalKey !== scheduleInstanceKey(schedule.id, originalDate, originalTime)),
+            { originalDate, originalTime, originalKey: scheduleInstanceKey(schedule.id, originalDate, originalTime), date: newDate, time: newTime }
+        ]
+    };
+    const through = dateKeyPlusDays(newDate, 3) || newDate;
+    const rows = getScheduleInstancesInRange(temp, newDate, through)
+        .slice(0, 16)
+        .map(instance => `<tr><td>${escapeHtml(instance.date)}</td><td>${escapeHtml(instance.time)}${instance.retimed ? ' *' : ''}</td></tr>`)
+        .join('');
+    return `<table class="interval-preview-table">
+        <thead><tr><th>Date</th><th>Future qXh dose times</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="2">No future doses in preview window.</td></tr>'}</tbody>
+    </table>`;
+}
+
+window.renderRetimeDosePreview = function(scheduleId, originalDate, originalTime) {
+    const body = document.getElementById('action-modal-body');
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const preview = body?.querySelector('[data-retime-preview]');
+    if (!schedule || !preview) return;
+    const newDate = body.querySelector('[name="newDate"]')?.value || '';
+    const newTime = body.querySelector('[name="newTime"]')?.value || '';
+    const applyScope = body.querySelector('[name="applyScope"]:checked')?.value || body.querySelector('[name="applyScope"]')?.value || 'single';
+    preview.innerHTML = retimeDosePreviewHtml(schedule, originalDate, originalTime, newDate, newTime, applyScope);
+};
+
+window.selectRetimeScope = function(value, scheduleId, originalDate, originalTime) {
+    const body = document.getElementById('action-modal-body');
+    const input = body?.querySelector('input[name="applyScope"]');
+    if (input) input.value = value;
+    body?.querySelectorAll('.retime-choice-button[data-scope]').forEach(button => {
+        button.classList.toggle('selected', button.dataset.scope === value);
+    });
+    window.renderRetimeDosePreview(scheduleId, originalDate, originalTime);
+};
+
+window.retimeScheduleInstance = async function(scheduleId, originalDate, originalTime, currentDate = originalDate, currentTime = originalTime) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+    if (!schedule || !med) return;
+    if (isScheduleArchived(schedule)) {
+        await appAlert('Completed or discontinued medications can be documented historically, but their scheduled dose times are no longer changed.');
+        return;
+    }
+    const key = scheduleInstanceKey(schedule.id, currentDate, currentTime);
+    const existing = findHistoryForScheduleInstance(schedule, { date: currentDate, time: currentTime, key });
+    if (existing) {
+        await window.editAdministration(existing.id);
+        return;
+    }
+    const beforeRetime = {
+        ...schedule,
+        excludedInstances: Array.isArray(schedule.excludedInstances) ? [...schedule.excludedInstances] : [],
+        instanceOverrides: normalizedScheduleInstanceOverrides(schedule).map(item => ({ ...item }))
+    };
+    const isQxh = scheduleTimingFrequency(schedule) === 'QXH';
+    const result = await showActionModal(`Retime Dose: ${med.name}`, `
+        <div class="sunken-panel" style="padding:6px; background:white; font-size:11px; margin-bottom:8px;">
+            Scheduled dose: <strong>${escapeHtml(originalDate)} ${escapeHtml(originalTime)}</strong>${currentDate !== originalDate || currentTime !== originalTime ? `<br>Current retimed dose: <strong>${escapeHtml(currentDate)} ${escapeHtml(currentTime)}</strong>` : ''}
+        </div>
+        <div class="field-row">
+            <label>New date:<input name="newDate" type="date" value="${escapeHtml(currentDate)}" min="${escapeHtml(schedule.startDate || originalDate)}" ${schedule.endDate && schedule.endDate !== 'Ongoing' ? `max="${escapeHtml(schedule.endDate)}"` : ''} onchange="renderRetimeDosePreview('${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')"></label>
+            <label>New time:<input name="newTime" type="time" value="${escapeHtml(currentTime)}" oninput="renderRetimeDosePreview('${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')"></label>
+        </div>
+        <input type="hidden" name="applyScope" value="single">
+        <div class="retime-choice-grid" style="margin-top:8px;">
+            <button type="button" class="retime-choice-button selected" data-scope="single" onclick="selectRetimeScope('single','${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')">
+                <strong>Move only this dose</strong>
+                <span>This one administration moves. The rest of the schedule stays exactly as-is.</span>
+            </button>
+            ${isQxh ? `<button type="button" class="retime-choice-button future" data-scope="future" onclick="selectRetimeScope('future','${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')">
+                <strong>Move qXh dose and adjust future times</strong>
+                <span>This dose moves and the interval pattern continues from the new time.</span>
+            </button>` : ''}
+        </div>
+        <div class="field-row-stacked" style="margin-top:8px;">
+            <label>Reason / note:<textarea name="note" rows="2" style="width:100%; resize:none;" placeholder="Optional reason shown in audit"></textarea></label>
+        </div>
+        <div data-retime-preview class="interval-preview sunken-panel">${retimeDosePreviewHtml(schedule, originalDate, originalTime, currentDate, currentTime, 'single')}</div>
+    `, 'Save Retime');
+    if (!result) return;
+    const newDate = result.newDate || '';
+    const newTime = result.newTime || '';
+    if (!newDate || !newTime) {
+        await appAlert('Choose the new date and time.');
+        return;
+    }
+    if (!isDateInsideScheduleWindow(schedule, newDate)) {
+        await appAlert('The new dose time must stay inside the medication therapy window.');
+        return;
+    }
+    const applyScope = result.applyScope || 'single';
+    const allowScheduleConflict = applyScope === 'future' && isQxh;
+    if (retimeTargetConflicts(schedule, originalDate, originalTime, newDate, newTime, allowScheduleConflict)) {
+        await appAlert('Another scheduled or documented dose already exists at the new date/time. Choose a different time or edit the existing documentation.');
+        return;
+    }
+    if (applyScope === 'future' && isQxh) {
+        if (db.history.some(entry => {
+            if (entry.scheduleId !== schedule.id || !entry.scheduleInstanceKey) return false;
+            const entryParts = {
+                date: entry.scheduledDate || historyEntryDateTime(entry).date,
+                time: entry.scheduledTime || historyEntryDateTime(entry).time
+            };
+            const entryWhen = dateTimeFromParts(entryParts.date, entryParts.time);
+            const original = dateTimeFromParts(originalDate, originalTime);
+            return entryWhen && original && entryWhen > original;
+        })) {
+            if (!await appConfirm('Some later qXh doses are already documented. Adjusting the future interval can make those existing records look off-pattern. Continue?', 'Adjust qXh Future Times')) return;
+        }
+        const original = dateTimeFromParts(originalDate, originalTime);
+        const next = dateTimeFromParts(newDate, newTime);
+        if (!original || !next || next < original) {
+            await appAlert('For qXh forward adjustment, choose a new time at or after the original scheduled dose. Use single-dose move for earlier one-off retimes.');
+            return;
+        }
+        schedule.rollingAnchorDate = newDate;
+        schedule.rollingAnchorTime = newTime;
+    }
+    const override = upsertScheduleInstanceOverride(schedule, originalDate, originalTime, newDate, newTime, result.note || '');
+    addAudit('Dose retimed', med.name, `${memberDisplayName(db.family.find(member => member.id === schedule.memberId))} | ${originalDate} ${originalTime} -> ${newDate} ${newTime}${applyScope === 'future' && isQxh ? ' | qXh future interval adjusted' : ' | single dose only'}${result.note ? ` | ${result.note}` : ''}`, {
+        scheduleId: schedule.id,
+        medId: schedule.medId,
+        memberId: schedule.memberId,
+        instanceOverrideId: override?.id || ''
+    });
+    await sync();
+    renderCalendar();
+    refreshOpenMemberMedicationViews(schedule.memberId);
+    if (newDate >= localDateKey() || (applyScope === 'future' && isQxh)) {
+        await promptReprintLabelsForModifiedSchedules([{ before: beforeRetime, schedule }]);
+    }
+};
+
+window.openDoseInstanceActions = async function(scheduleId, scheduledDate, scheduledTime, originalDate = '', originalTime = '') {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+    if (!schedule || !med) return;
+    const key = scheduleInstanceKey(schedule.id, scheduledDate, scheduledTime);
+    const existing = findHistoryForScheduleInstance(schedule, { date: scheduledDate, time: scheduledTime, key });
+    if (existing) {
+        await window.editAdministration(existing.id);
+        return;
+    }
+    if (isScheduleArchived(schedule)) {
+        await window.documentPastScheduleInstance(scheduleId, scheduledDate, scheduledTime);
+        return;
+    }
+    const result = await showActionModal(`Dose: ${med.name}`, `
+        <div class="sunken-panel" style="padding:6px; background:white; font-size:11px; margin-bottom:8px;">
+            Scheduled: <strong>${escapeHtml(scheduledDate)} ${escapeHtml(scheduledTime)}</strong>
+        </div>
+        <div class="dose-bar-action-picker">
+            <button type="button" onclick="this.closest('#action-modal-body').dataset.action='document'; document.getElementById('action-modal-ok')?.click()">Document dose status</button>
+            <button type="button" onclick="this.closest('#action-modal-body').dataset.action='retime'; document.getElementById('action-modal-ok')?.click()">Retime / reschedule this dose</button>
+        </div>
+        <div class="form-help">Retime moves only this dose unless you explicitly apply a qXh timing change forward.</div>
+    `, 'Document', body => body.dataset.action || 'document');
+    if (result === 'retime') await window.retimeScheduleInstance(scheduleId, originalDate || scheduledDate, originalTime || scheduledTime, scheduledDate, scheduledTime);
+    else if (result === 'document') await window.documentScheduleInstance(scheduleId, scheduledDate, scheduledTime);
+};
+
+window.documentPastScheduleInstance = async function(scheduleId, scheduledDate, scheduledTime) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+    if (!schedule || !med) return;
+    const key = scheduleInstanceKey(schedule.id, scheduledDate, scheduledTime);
+    const existing = findHistoryForScheduleInstance(schedule, { date: scheduledDate, time: scheduledTime, key });
+    if (existing) {
+        await window.editAdministration(existing.id);
+        return;
+    }
+    const actual = await requestPastDoseDocumentation(schedule, `Document Past Dose: ${med.name}`, { date: scheduledDate, time: scheduledTime });
+    if (!actual) return;
+    const documented = await administerScheduleRecord(
+        schedule,
+        actual,
+        isScheduleArchived(schedule)
+            ? `Past dose (${schedule.status === 'discontinued' ? 'discontinued order' : 'completed order'})`
+            : (schedule.orderSetName ? `Past dose - Regimen (${schedule.orderSetName})` : 'Past dose'),
+        { adjustPattern: false }
+    );
+    if (!documented) return;
+    await sync();
+    renderCalendar();
+    refreshOpenMemberMedicationViews(schedule.memberId);
+};
 
 window.documentScheduleInstance = async function(scheduleId, scheduledDate, scheduledTime) {
     const schedule = db.schedules.find(item => item.id === scheduleId);
@@ -17026,6 +17615,10 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
         await window.editAdministration(existing.id);
         return;
     }
+    if (isScheduleArchived(schedule)) {
+        await window.documentPastScheduleInstance(scheduleId, scheduledDate, scheduledTime);
+        return;
+    }
     const isValidInstance = getScheduleInstancesForDate(schedule, scheduledDate)
         .some(instance => instance.time === scheduledTime);
     if (!isValidInstance) {
@@ -17033,7 +17626,6 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
         return;
     }
 
-    const defaults = defaultActualDateTime();
     const result = await showActionModal(`Document Dose: ${med.name}`, `
         <div class="sunken-panel" style="padding:6px; background:white; font-size:11px;">
             Scheduled: <strong>${escapeHtml(scheduledDate)} ${escapeHtml(scheduledTime)}</strong>
@@ -17052,8 +17644,8 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
             </select>
         </div>
         <div class="field-row" style="margin-top:8px;">
-            <label>Date documented/taken:</label><input name="actualDate" type="date" value="${defaults.date}">
-            <label>Time:</label><input name="actualTime" type="time" value="${defaults.time}">
+            <label>Date documented/taken:</label><input name="actualDate" type="date" value="${escapeHtml(scheduledDate)}">
+            <label>Time:</label><input name="actualTime" type="time" value="${escapeHtml(scheduledTime)}">
         </div>
         ${kitSourceSelectHtml(med.id)}
         <div class="field-row-stacked" style="margin-top:8px;">
@@ -17074,10 +17666,13 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
         return;
     }
     normalizeScheduledDoseActualTime(result);
+    const adjustPattern = await chooseAdministrationPatternAdjustment(schedule, result);
+    if (adjustPattern === null) return;
     const documented = await administerScheduleRecord(
         schedule,
         result,
-        schedule.orderSetName ? `Regimen (${schedule.orderSetName})` : 'Schedule'
+        schedule.orderSetName ? `Regimen (${schedule.orderSetName})` : 'Schedule',
+        { adjustPattern }
     );
     if (documented) await sync();
 };
@@ -17123,7 +17718,7 @@ function memberMedicationTimelineHtml(schedule) {
                     const state = timelineDoseState(schedule, instance);
                     const click = state.entryId
                         ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"`
-                        : ` onclick="event.stopPropagation(); documentScheduleInstance('${schedule.id}','${instance.date}','${instance.time}')"`;
+                        : ` onclick="event.stopPropagation(); openDoseInstanceActions('${schedule.id}','${instance.date}','${instance.time}','${instance.originalDate || ''}','${instance.originalTime || ''}')"`;
                     return `<button type="button" class="timeline-dose ${state.className}" title="${escapeHtml(state.title)}"${click}>${escapeHtml(state.label || instance.time)}</button>`;
                 }).join('')
                 : '<span class="timeline-dose" title="No scheduled dose">-</span>';
@@ -17140,7 +17735,7 @@ function memberScheduleViewMode() {
 
 function memberScheduleGridRows(memberId) {
     return db.schedules
-        .filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule))
+        .filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule))
         .sort((a, b) => {
             const aTime = getScheduleTimes(a)[0] || (a.freq === 'PRN' ? '99:99' : '');
             const bTime = getScheduleTimes(b)[0] || (b.freq === 'PRN' ? '99:99' : '');
@@ -17195,7 +17790,7 @@ function memberScheduleGridHtml(memberId) {
                     const state = timelineDoseState(schedule, instance);
                     const click = state.entryId
                         ? ` onclick="event.stopPropagation(); editAdministration('${state.entryId}')"`
-                        : ` onclick="event.stopPropagation(); documentScheduleInstance('${schedule.id}','${instance.date}','${instance.time}')"`;
+                        : ` onclick="event.stopPropagation(); openDoseInstanceActions('${schedule.id}','${instance.date}','${instance.time}','${instance.originalDate || ''}','${instance.originalTime || ''}')"`;
                     return `<button type="button" class="timeline-dose ${state.className}" title="${escapeHtml(state.title)}"${click}>${escapeHtml(state.label || instance.time)}</button>`;
                 }).join('')
                 : '';
@@ -17212,6 +17807,7 @@ function memberScheduleGridHtml(memberId) {
                 <div class="member-grid-actions">
                     <button type="button" onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Label</button>
                     <button type="button" onclick="event.stopPropagation(); administerDose('${schedule.medId}','${schedule.id}')">Administer</button>
+                    <button type="button" onclick="event.stopPropagation(); documentPastDose('${schedule.id}')">Past Dose</button>
                     <button type="button" onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Modify</button>
                 </div>
             </td>
@@ -18237,7 +18833,7 @@ function medicationSummarySchedules(member, options = {}) {
         ? new Set(normalized.scheduleIds)
         : null;
     return db.schedules
-        .filter(schedule => schedule.memberId === member.id && !isScheduleArchived(schedule))
+        .filter(schedule => schedule.memberId === member.id && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule))
         .filter(schedule => !selectedIds || selectedIds.has(schedule.id))
         .slice()
         .sort((a, b) => {
@@ -19113,11 +19709,16 @@ function scheduleSummaryLine(schedule) {
     const linkText = linked.length > 0
         ? `Linked ${linkedBadgeHtml(schedule, [...db.schedules, ...pendingScheduleOrders])}`
         : '';
+    const changeIcon = schedule.modifySourceId
+        ? '<span class="modify-pending-icon" title="Medication modification">&#8635;</span>'
+        : (schedule.reorderSourceId ? '<span class="reorder-pending-icon" title="Reordered medication">&#8635;</span>' : '');
     return {
         med,
         member,
-        html: `<span class="pending-order-title">${schedule.reorderSourceId ? '<span class="reorder-pending-icon" title="Reordered medication">&#8635;</span>' : ''}${escapeHtml(med?.name || 'Unknown medication')} <em>${escapeHtml(med ? formatMedStrength(med) : '')}</em></span>
+        html: `<span class="pending-order-title">${changeIcon}${escapeHtml(med?.name || 'Unknown medication')} <em>${escapeHtml(med ? formatMedStrength(med) : '')}</em></span>
             <span class="pending-order-chips">
+                ${schedule.modifySourceId ? '<span class="pending-modify-chip">Modify existing order</span>' : ''}
+                ${schedule.reorderSourceId ? '<span class="pending-reorder-chip">New independent reorder</span>' : ''}
                 <span>${escapeHtml(qty)}</span>
                 ${dose ? `<span>Dose ${escapeHtml(dose)}</span>` : ''}
                 <span>${escapeHtml(formatFrequency(schedule))}</span>
@@ -19252,13 +19853,15 @@ window.clearPendingScheduleOrders = async function() {
     pendingScheduleOrders = pendingScheduleOrders.filter(order => memberId && order.memberId !== memberId);
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(currentEditingMemberId);
+    refreshOpenMemberMedicationViews(currentEditingMemberId);
 };
 
 window.removePendingScheduleOrder = function(index) {
     if (index < 0 || index >= pendingScheduleOrders.length) return;
-    pendingScheduleOrders.splice(index, 1);
+    const [removed] = pendingScheduleOrders.splice(index, 1);
     renderPendingScheduleOrders();
-    renderMemberOrderWorklist(currentEditingMemberId);
+    renderMemberOrderWorklist(removed?.memberId || currentEditingMemberId);
+    refreshOpenMemberMedicationViews(removed?.memberId || currentEditingMemberId);
 };
 
 function loadScheduleIntoScheduleEntry(order, { reorder = false } = {}) {
@@ -19308,17 +19911,7 @@ window.editPendingScheduleOrder = function(index) {
 window.reorderMedicationSchedule = async function(scheduleId) {
     const schedule = db.schedules.find(item => item.id === scheduleId);
     if (!schedule) return;
-    const archived = isScheduleArchived(schedule);
-    const today = localDateKey();
-    const order = {
-        ...schedule,
-        id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        status: '',
-        completedAt: '',
-        startDate: archived ? today : (schedule.startDate || today),
-        endDate: archived ? '' : (schedule.endDate === 'Ongoing' ? '' : (schedule.endDate || '')),
-        reorderSourceId: schedule.id
-    };
+    const order = scheduleDraftFromExisting(schedule, 'reorder');
     const memberModal = document.getElementById('member-modal');
     if (memberModal?.style.display === 'flex' && currentEditingMemberId === schedule.memberId) {
         const saved = await saveMemberFromProfile({ closeAfter: false });
@@ -19359,14 +19952,19 @@ function updateMemberMedicationWorkDockGeometry() {
     const dock = document.getElementById('member-order-work-dock');
     if (!body || !dock || !body.classList.contains('order-work-open')) return;
     const calendarSection = body.querySelector('[data-member-section="orders"]:not(.member-scan-console)');
-    const modal = document.getElementById('member-modal');
-    const modalRect = modal?.getBoundingClientRect();
+    const profileWindow = document.querySelector('#member-modal .member-profile-window');
+    const profileRect = profileWindow?.getBoundingClientRect();
     const calendarRect = calendarSection?.getBoundingClientRect();
-    const fallbackTop = (modalRect?.top || 0) + 132;
+    const bodyRect = body.getBoundingClientRect();
+    const fallbackTop = bodyRect.top + 106;
     const top = Math.max(fallbackTop, calendarRect?.top || fallbackTop);
-    const bottom = Math.max(8, window.innerHeight - ((modalRect?.bottom || window.innerHeight) - 8));
+    const bottomLimit = Math.min(bodyRect.bottom, profileRect?.bottom || bodyRect.bottom);
+    const bottom = Math.max(8, window.innerHeight - bottomLimit + 8);
+    const scrollbarGutter = Math.max(16, body.offsetWidth - body.clientWidth + 8);
+    const right = Math.max(12, window.innerWidth - bodyRect.right + scrollbarGutter + 2);
     dock.style.setProperty('--member-order-dock-top', `${Math.round(top)}px`);
     dock.style.setProperty('--member-order-dock-bottom', `${Math.round(bottom)}px`);
+    dock.style.setProperty('--member-order-dock-right', `${Math.round(right)}px`);
 }
 
 window.openMemberMedicationWorkPanel = function(memberId = currentEditingMemberId) {
@@ -19405,6 +20003,156 @@ window.scheduleMedicationForCurrentMember = async function() {
     document.getElementById('med-search-input')?.focus();
 };
 
+function scheduleDraftFromExisting(schedule, mode = 'modify') {
+    const today = localDateKey();
+    const archived = isScheduleArchived(schedule);
+    const draft = {
+        ...schedule,
+        id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        status: '',
+        completedAt: '',
+        startDate: archived ? today : (schedule.startDate || today),
+        endDate: archived ? '' : (schedule.endDate === 'Ongoing' ? '' : (schedule.endDate || ''))
+    };
+    if (mode === 'modify') {
+        draft.modifySourceId = schedule.id;
+        draft.reorderSourceId = '';
+    } else {
+        draft.reorderSourceId = schedule.id;
+        draft.modifySourceId = '';
+        draft.sourceOrderSetId = schedule.orderSetId || '';
+        draft.sourceOrderSetName = schedule.orderSetName || '';
+        draft.orderSetId = '';
+        draft.orderSetName = '';
+        draft.rowId = '';
+        draft.linkTargetRowIds = [];
+        draft.linkTargetRowId = '';
+    }
+    return draft;
+}
+
+function applyScheduleDraftToExisting(draft, target) {
+    if (!draft || !target) return null;
+    const before = { ...target };
+    Object.assign(target, {
+        medId: draft.medId,
+        doseQty: draft.doseQty,
+        prescriberId: draft.prescriberId || '',
+        freq: draft.freq,
+        prnScheduleFreq: draft.prnScheduleFreq || '',
+        startDate: draft.startDate,
+        endDate: draft.freq === 'ONCE' ? draft.startDate : (draft.endDate || 'Ongoing'),
+        indication: draft.indication || '',
+        instructions: draft.instructions || '',
+        qodStart: draft.qodStart || '',
+        times: draft.times || [],
+        intervalHours: draft.intervalHours || null,
+        intervalWeeks: draft.intervalWeeks || null,
+        monthlyAnchor: draft.monthlyAnchor || '',
+        timesPerWeek: draft.timesPerWeek || null,
+        weekdays: draft.weekdays || [],
+        prnMaxDoses: draft.prnMaxDoses || null,
+        prnWindowHours: draft.prnWindowHours || 24,
+        startTime: draft.startTime || (draft.times || [])[0] || '',
+        isOneTime: draft.isOneTime || draft.freq === 'ONCE',
+        linkGroup: draft.linkGroup || '',
+        linkMode: draft.linkMode || '',
+        linkTargetIds: draft.linkTargetIds || [],
+        linkTargetId: draft.linkTargetId || '',
+        linkRules: draft.linkRules || [],
+        monitoringReminders: draft.monitoringReminders || [],
+        monitoringReminderNote: draft.monitoringReminderNote || '',
+        monitoringReminderSchedule: draft.monitoringReminderSchedule || null,
+        monitoringHoldRule: draft.monitoringHoldRule || null,
+        status: '',
+        completedAt: ''
+    });
+    if (scheduleTimingFrequency(target) !== 'QXH' || before.intervalHours !== target.intervalHours || before.startTime !== target.startTime || before.startDate !== target.startDate) {
+        target.rollingAnchorDate = '';
+        target.rollingAnchorTime = '';
+    }
+    if (scheduleTimingFrequency(target) === 'QXH') recalculateIntervalAnchorFromHistory(target);
+    return before;
+}
+
+function applyScheduleDraftToOrderSetItem(draft, targetSchedule, beforeSchedule = null) {
+    if (!draft?.modifySourceId || !targetSchedule?.orderSetId) return;
+    const set = db.orderSets.find(orderSet => orderSet.id === targetSchedule.orderSetId);
+    if (!set) return;
+    const source = beforeSchedule || targetSchedule;
+    const item = (set.items || []).find(candidate =>
+        (source.rowId && candidate.rowId === source.rowId) ||
+        (!source.rowId && candidate.medId === source.medId && candidate.freq === source.freq)
+    );
+    if (!item) return;
+    const scheduleToRowId = new Map(db.schedules
+        .filter(schedule => schedule.orderSetId === set.id && schedule.rowId)
+        .map(schedule => [schedule.id, schedule.rowId]));
+    const linkedRowIds = uniqueValues((draft.linkTargetIds || [])
+        .map(scheduleId => scheduleToRowId.get(scheduleId))
+        .filter(Boolean));
+    Object.assign(item, {
+        medId: draft.medId,
+        doseQty: draft.doseQty,
+        prescriberId: draft.prescriberId || '',
+        freq: draft.freq,
+        prnScheduleFreq: draft.prnScheduleFreq || '',
+        times: draft.times || [],
+        intervalHours: draft.intervalHours || null,
+        intervalWeeks: draft.intervalWeeks || null,
+        anchorDate: draft.freq === 'Monthly' || draft.freq === 'QW' ? (draft.monthlyAnchor || draft.startDate || '') : '',
+        timesPerWeek: draft.timesPerWeek || null,
+        weekdays: draft.weekdays || [],
+        prnMaxDoses: draft.prnMaxDoses || null,
+        prnWindowHours: draft.prnWindowHours || 24,
+        qodStart: draft.qodStart || '',
+        startTime: draft.startTime || (draft.times || [])[0] || '',
+        indication: draft.indication || '',
+        instructions: draft.instructions || '',
+        linkGroup: draft.linkGroup || '',
+        linkMode: draft.linkMode || '',
+        linkTargetRowIds: linkedRowIds.length ? linkedRowIds : (draft.linkTargetRowIds || item.linkTargetRowIds || []),
+        linkTargetRowId: linkedRowIds[0] || draft.linkTargetRowId || item.linkTargetRowId || '',
+        linkRules: linkedRowIds.length ? linkedRowIds.map(targetRowId => ({ targetRowId, mode: draft.linkMode || '' })) : (draft.linkRules || item.linkRules || [])
+    });
+    set.updatedAt = new Date().toISOString();
+}
+
+function affectedFutureLabelRange(before, after) {
+    const today = localDateKey();
+    const starts = [before?.startDate, after?.startDate, today].filter(Boolean).sort();
+    const startDate = starts.find(date => date >= today) || today;
+    const ends = [before?.endDate, after?.endDate]
+        .filter(date => date && date !== 'Ongoing')
+        .sort();
+    const fallbackEnd = addDaysKey(startDate, 13);
+    const finiteEnd = ends.find(date => date >= startDate);
+    return { startDate, endDate: finiteEnd && finiteEnd < fallbackEnd ? finiteEnd : fallbackEnd };
+}
+
+async function promptReprintLabelsForModifiedSchedules(modified = []) {
+    const byMember = new Map();
+    modified.forEach(entry => {
+        const memberId = entry.schedule?.memberId || entry.after?.memberId;
+        if (!memberId) return;
+        if (!byMember.has(memberId)) byMember.set(memberId, []);
+        byMember.get(memberId).push(entry);
+    });
+    for (const [memberId, entries] of byMember.entries()) {
+        const member = db.family.find(item => item.id === memberId);
+        const ranges = entries.map(entry => affectedFutureLabelRange(entry.before, entry.schedule || entry.after));
+        const startDate = ranges.map(range => range.startDate).sort()[0] || localDateKey();
+        const endDate = ranges.map(range => range.endDate).sort().pop() || addDaysKey(startDate, 13);
+        const medList = entries.map(entry => {
+            const med = db.inventory.find(item => item.id === (entry.schedule || entry.after)?.medId);
+            return med ? medicationNameWithStrength(med) : 'Medication';
+        }).join(', ');
+        if (await appConfirm(`Medication schedule changes can make existing future labels inaccurate for ${member ? memberDisplayName(member) : 'this member'}.\n\nChanged: ${medList}\n\nReprint affected future labels now?`, 'Reprint Updated Labels')) {
+            await window.printDateRangeLabels(memberId, startDate, endDate);
+        }
+    }
+}
+
 async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {}) {
     if (selectedIds.length === 0) {
         await appAlert('Check at least one pending order to sign.');
@@ -19417,14 +20165,56 @@ async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {
         const safetyAllowed = await confirmScheduleSafetyWarnings(order);
         if (!safetyAllowed) return;
     }
-    const idMap = new Map(selected.map(order => [order.id, Date.now().toString() + Math.random().toString(16).slice(2)]));
-    selected.forEach(order => {
+    const modifiedSchedules = [];
+    const createOrders = selected.filter(order => !order.modifySourceId);
+    const modifyOrders = selected.filter(order => order.modifySourceId);
+    const idMap = new Map(createOrders.map(order => [order.id, Date.now().toString() + Math.random().toString(16).slice(2)]));
+    for (const order of modifyOrders) {
+        const target = db.schedules.find(schedule => schedule.id === order.modifySourceId);
+        if (!target) continue;
+        const mappedTargets = uniqueValues(order.linkTargetIds?.length ? order.linkTargetIds : (order.linkTargetId ? [order.linkTargetId] : []))
+            .map(targetId => idMap.get(targetId) || targetId);
+        const orderForApply = {
+            ...order,
+            linkTargetIds: mappedTargets,
+            linkTargetId: mappedTargets[0] || '',
+            linkRules: linkRulesFromTargets(mappedTargets, order.linkMode || ''),
+            linkGroup: order.linkMode && mappedTargets[0] ? linkGroupFromTarget(mappedTargets[0]) : ''
+        };
+        const before = applyScheduleDraftToExisting(orderForApply, target);
+        applyScheduleDraftToOrderSetItem(orderForApply, target, before);
+        const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === target.memberId);
+        const linkedSchedulesUpdated = [];
+        linkedSchedulesFor(target, linkedModificationCandidates).forEach(linkedSchedule => {
+            if (linkedSchedule.id !== target.id && schedulesLinkedByMode(target, linkedSchedule, 'together')) {
+                const linkedBefore = { ...linkedSchedule };
+                applyLinkedScheduleTiming(target, linkedSchedule);
+                linkedSchedulesUpdated.push({ schedule: linkedSchedule, before: linkedBefore });
+            }
+        });
+        createCareRemindersForSchedule(target);
+        linkedSchedulesUpdated.forEach(entry => createCareRemindersForSchedule(entry.schedule));
+        const med = db.inventory.find(item => item.id === target.medId);
+        const member = db.family.find(item => item.id === target.memberId);
+        addAudit(target.orderSetId ? 'Regimen medication modified' : 'Medication modified', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(target)} ${getScheduleTimes(target).join(', ') || 'PRN'}`, {
+            scheduleId: target.id,
+            medId: target.medId,
+            memberId: target.memberId,
+            orderSetId: target.orderSetId || ''
+        });
+        modifiedSchedules.push({ schedule: target, before });
+        modifiedSchedules.push(...linkedSchedulesUpdated);
+    }
+    createOrders.forEach(order => {
         const newId = idMap.get(order.id);
         const mappedTargets = uniqueValues(order.linkTargetIds?.length ? order.linkTargetIds : (order.linkTargetId ? [order.linkTargetId] : []))
             .map(targetId => idMap.get(targetId) || targetId);
         const finalOrder = {
             ...order,
             id: newId,
+            orderSetId: '',
+            orderSetName: '',
+            rowId: '',
             linkTargetIds: mappedTargets,
             linkTargetId: mappedTargets[0] || '',
             linkRules: linkRulesFromTargets(mappedTargets, order.linkMode || ''),
@@ -19434,17 +20224,20 @@ async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {
         createCareRemindersForSchedule(finalOrder);
         const med = db.inventory.find(item => item.id === order.medId);
         const member = db.family.find(item => item.id === order.memberId);
-        addAudit('Medication scheduled', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(order)} ${getScheduleTimes(order).join(', ') || 'PRN'}`, {
+        addAudit(order.reorderSourceId ? 'Medication reordered' : 'Medication scheduled', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(order)} ${getScheduleTimes(order).join(', ') || 'PRN'}`, {
             scheduleId: newId,
             medId: order.medId,
-            memberId: order.memberId
+            memberId: order.memberId,
+            sourceScheduleId: order.reorderSourceId || ''
         });
     });
     pendingScheduleOrders = pendingScheduleOrders.filter(order => !selectedIds.includes(order.id));
     await sync();
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(currentEditingMemberId);
-    if (!silent) await appAlert(`${selected.length} medication${selected.length === 1 ? '' : 's'} added to the member profile.`, 'Medications Scheduled');
+    refreshOpenMemberMedicationViews(currentEditingMemberId);
+    if (modifiedSchedules.length) await promptReprintLabelsForModifiedSchedules(modifiedSchedules);
+    if (!silent) await appAlert(`${selected.length} medication change${selected.length === 1 ? '' : 's'} approved.`, 'Medications Scheduled');
 }
 
 window.finalizePendingScheduleOrders = async function() {
@@ -19465,6 +20258,87 @@ window.addSchedule = async function() {
 
 function pendingProfileActionsForMember(memberId) {
     return pendingProfileScheduleActions.filter(action => action.memberId === memberId);
+}
+
+function pendingDiscontinuedScheduleIdSet(memberId = null) {
+    const ids = new Set();
+    pendingProfileScheduleActions.forEach(action => {
+        if (action.type !== 'discontinue') return;
+        if (memberId && action.memberId !== memberId) return;
+        if (action.scheduleId) ids.add(action.scheduleId);
+        (action.linkedScheduleIds || []).forEach(scheduleId => ids.add(scheduleId));
+    });
+    return ids;
+}
+
+function isSchedulePendingProfileDiscontinue(schedule) {
+    return !!schedule && pendingDiscontinuedScheduleIdSet(schedule.memberId).has(schedule.id);
+}
+
+function syncOpenMemberActiveMedicationCards(memberId = currentEditingMemberId) {
+    const activeList = document.getElementById('member-active-meds-list');
+    if (!activeList || !memberId) return;
+    const regimenCards = new Set();
+    activeList.querySelectorAll('.member-med-timeline[data-schedule-id]').forEach(timeline => {
+        const schedule = db.schedules.find(item => item.id === timeline.dataset.scheduleId);
+        const hidden = !schedule || schedule.memberId !== memberId || isScheduleArchived(schedule) || isSchedulePendingProfileDiscontinue(schedule);
+        const regimenRow = timeline.closest('.member-med-inline-row');
+        const standaloneCard = timeline.closest('.sunken-panel:not(.member-regimen-card)');
+        const target = regimenRow || standaloneCard;
+        if (target) target.style.display = hidden ? 'none' : '';
+        const regimenCard = timeline.closest('.member-regimen-card');
+        if (regimenCard) regimenCards.add(regimenCard);
+    });
+    regimenCards.forEach(card => {
+        const rows = [...card.querySelectorAll('.member-med-inline-row')];
+        card.style.display = rows.length && rows.every(row => row.style.display === 'none') ? 'none' : '';
+    });
+    const visibleMedicationCards = [...activeList.children].filter(child =>
+        child.id !== 'member-schedule-grid-view' &&
+        !child.classList.contains('member-active-toolbar') &&
+        child.style.display !== 'none'
+    );
+    activeList.querySelectorAll('.empty-state[data-live-empty]').forEach(node => node.remove());
+    if (!visibleMedicationCards.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.dataset.liveEmpty = 'true';
+        empty.textContent = 'No active scheduled medications.';
+        activeList.appendChild(empty);
+    }
+}
+
+function refreshOpenMemberMedicationViews(memberId = currentEditingMemberId) {
+    const modal = document.getElementById('member-modal');
+    if (!memberId || modal?.style.display !== 'flex' || currentEditingMemberId !== memberId) return;
+    syncOpenMemberActiveMedicationCards(memberId);
+    renderMemberContextRail(memberId);
+    renderMemberMedicationReview(memberId);
+    renderMemberMedicationTimelines();
+    renderMemberCalendar(memberId);
+    renderMemberPrnMedicationOrders(memberId);
+    renderCompletedMedicationOrders(memberId);
+    renderMemberCareReminders(memberId);
+    renderMemberMonitoringProfiles(memberId);
+    renderMemberCurrentMedicationList();
+    renderMemberCommandScanPanel();
+    renderMemberOrderWorklist(memberId);
+    syncOpenMemberActiveMedicationCards(memberId);
+    updateMemberMedicationWorkDockGeometry();
+}
+
+async function rebuildOpenMemberProfile(memberId = currentEditingMemberId, preferredTab = 'orders') {
+    const modal = document.getElementById('member-modal');
+    if (!memberId || modal?.style.display !== 'flex' || currentEditingMemberId !== memberId) return false;
+    const body = document.querySelector('#member-modal .member-profile-body');
+    const scrollTop = body?.scrollTop || 0;
+    captureMemberProfileState(memberId, { activeTab: preferredTab, scrollTop });
+    const saved = await saveMemberFromProfile({ closeAfter: false });
+    if (!saved) return false;
+    await window.openMemberModal(memberId, preferredTab);
+    const refreshedBody = document.querySelector('#member-modal .member-profile-body');
+    if (refreshedBody) requestAnimationFrame(() => { refreshedBody.scrollTop = scrollTop; });
+    return true;
 }
 
 function profileOrderActionSummary(action) {
@@ -19535,8 +20409,8 @@ function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
         return;
     }
     const member = db.family.find(item => item.id === memberId);
-    const newOrders = pendingScheduleOrders.filter(order => order.memberId === memberId && !order.reorderSourceId);
-    const modifyOrders = pendingScheduleOrders.filter(order => order.memberId === memberId && order.reorderSourceId);
+    const newOrders = pendingScheduleOrders.filter(order => order.memberId === memberId && !order.reorderSourceId && !order.modifySourceId);
+    const modifyOrders = pendingScheduleOrders.filter(order => order.memberId === memberId && (order.reorderSourceId || order.modifySourceId));
     const discontinues = pendingProfileActionsForMember(memberId).filter(action => action.type === 'discontinue');
     const regimenActions = pendingProfileActionsForMember(memberId).filter(action => action.type === 'assignRegimen');
     const monitoringActions = pendingProfileActionsForMember(memberId).filter(action => action.type === 'monitoring');
@@ -19547,7 +20421,9 @@ function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
         const summary = scheduleSummaryLine(order);
         const tone = typeLabel === 'New' ? 'new' : 'modify';
         const badge = typeLabel === 'New' ? '&#10010;' : '&#8635;';
-        const label = typeLabel === 'New' ? 'New medication schedule' : 'Modify / reorder';
+        const label = typeLabel === 'New'
+            ? 'New medication schedule'
+            : (order.modifySourceId ? 'Modify existing order' : 'Independent reorder');
         return `<div class="member-order-change-card profile-work-row ${tone}" role="listitem">
             <span class="member-order-change-icon profile-work-symbol" aria-hidden="true">${badge}</span>
             <div class="member-order-change-copy profile-work-copy">
@@ -19556,7 +20432,7 @@ function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
             </div>
             <div class="member-order-change-actions profile-work-actions">
                 <button type="button" onclick="editPendingProfileScheduleOrder(${index}, '${escapeHtml(memberId)}')">Modify</button>
-                <button type="button" onclick="removePendingScheduleOrder(${index}); renderMemberOrderWorklist('${escapeHtml(memberId)}')">Remove</button>
+                <button type="button" class="profile-work-remove-button" title="Remove from worklist" aria-label="Remove from worklist" onclick="removePendingScheduleOrder(${index}); renderMemberOrderWorklist('${escapeHtml(memberId)}')">&times;</button>
             </div>
         </div>`;
     };
@@ -19567,11 +20443,15 @@ function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
             <div class="member-order-change-title">${profileOrderActionSummary(action)}</div>
         </div>
         <div class="member-order-change-actions profile-work-actions">
-            <button type="button" onclick="removePendingProfileScheduleAction('${escapeHtml(action.id)}')">Remove</button>
+            <button type="button" class="profile-work-remove-button" title="Remove from worklist" aria-label="Remove from worklist" onclick="removePendingProfileScheduleAction('${escapeHtml(action.id)}')">&times;</button>
         </div>
     </div>`;
-    const activeSchedules = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule)).length;
-    const activeRegimens = db.orderSets.filter(set => set.memberId === memberId && set.status !== 'completed').length;
+    const activeSchedules = db.schedules.filter(schedule => schedule.memberId === memberId && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule)).length;
+    const activeRegimens = db.orderSets.filter(set =>
+        set.memberId === memberId &&
+        set.status !== 'completed' &&
+        db.schedules.some(schedule => schedule.orderSetId === set.id && !isScheduleArchived(schedule) && !isSchedulePendingProfileDiscontinue(schedule))
+    ).length;
     const activeMonitoring = ensureCareReminderStore().filter(reminder => reminder.memberId === memberId && reminder.enabled !== false).length;
     const workItems = [
         ...newOrders.map(order => orderCard(order, 'New')),
@@ -19795,8 +20675,10 @@ window.openProfileMonitoringComposer = async function(memberId = currentEditingM
 };
 
 window.removePendingProfileScheduleAction = function(actionId) {
+    const action = pendingProfileScheduleActions.find(item => item.id === actionId);
     pendingProfileScheduleActions = pendingProfileScheduleActions.filter(action => action.id !== actionId);
-    renderMemberOrderWorklist(currentEditingMemberId);
+    renderMemberOrderWorklist(action?.memberId || currentEditingMemberId);
+    refreshOpenMemberMedicationViews(action?.memberId || currentEditingMemberId);
 };
 
 window.clearMemberScheduleWork = async function(memberId = currentEditingMemberId) {
@@ -19807,6 +20689,7 @@ window.clearMemberScheduleWork = async function(memberId = currentEditingMemberI
     pendingProfileScheduleActions = pendingProfileScheduleActions.filter(action => action.memberId !== memberId);
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(memberId);
+    refreshOpenMemberMedicationViews(memberId);
 };
 
 window.approveMemberScheduleChanges = async function(memberId = currentEditingMemberId) {
@@ -19818,6 +20701,7 @@ window.approveMemberScheduleChanges = async function(memberId = currentEditingMe
         await appAlert('No medication changes are pending.');
         return;
     }
+    const labelImpacts = [];
     if (selectedIds.length) {
         await commitPendingScheduleOrderIds(selectedIds, { silent: true });
     }
@@ -19826,6 +20710,7 @@ window.approveMemberScheduleChanges = async function(memberId = currentEditingMe
         ids.forEach(scheduleId => {
             const item = db.schedules.find(schedule => schedule.id === scheduleId);
             if (!item || isScheduleArchived(item)) return;
+            const before = { ...item };
             item.status = 'discontinued';
             item.completedAt = new Date().toISOString();
             if (!item.endDate || item.endDate === 'Ongoing') item.endDate = localDateKey();
@@ -19836,6 +20721,7 @@ window.approveMemberScheduleChanges = async function(memberId = currentEditingMe
                 memberId: item.memberId
             });
             replaceCareRemindersForSource('schedule', item.id, []);
+            labelImpacts.push({ schedule: item, before });
         });
     });
     for (const action of regimenAssignments) {
@@ -19871,21 +20757,16 @@ window.approveMemberScheduleChanges = async function(memberId = currentEditingMe
     await sync();
     renderPendingScheduleOrders();
     if (memberId && document.getElementById('member-modal')?.style.display === 'flex' && currentEditingMemberId === memberId) {
-        captureMemberProfileState(memberId, { activeTab: 'orders' });
-        window.switchMemberProfileTab('orders');
-        renderMemberOrderWorklist(memberId);
-        renderMemberCalendar(memberId);
-        renderMemberMedicationTimelines();
-        renderMemberCommandScanPanel();
+        await rebuildOpenMemberProfile(memberId, 'orders');
     } else if (memberId) {
         openMemberModal(memberId, 'orders');
     }
+    if (labelImpacts.length) await promptReprintLabelsForModifiedSchedules(labelImpacts);
 };
 
 window.editPendingProfileScheduleOrder = async function(index, memberId = currentEditingMemberId) {
     const order = pendingScheduleOrders[index];
     if (!order) return;
-    pendingScheduleOrders.splice(index, 1);
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(memberId);
     await openProfileScheduleComposer(memberId, order);
@@ -19961,7 +20842,13 @@ window.renderProfileScheduleLinkOptions = function(selected = '') {
     if (!panel) return;
     const memberId = body.querySelector('[name="memberId"]')?.value || currentEditingMemberId;
     const selectedValues = Array.isArray(selected) ? selected : (selected ? [selected] : selectedOptionValues(panel));
-    renderLinkChoicePanel(panel, scheduleLinkChoices(memberId), selectedValues, 'openProfileScheduleLinkPicker()');
+    const excludeIds = new Set([
+        body.querySelector('[name="pendingOrderId"]')?.value || '',
+        body.querySelector('[name="modifySourceId"]')?.value || ''
+    ].filter(Boolean));
+    const choices = scheduleLinkChoices(memberId, body.querySelector('[name="pendingOrderId"]')?.value || '')
+        .filter(choice => !excludeIds.has(choice.id));
+    renderLinkChoicePanel(panel, choices, selectedValues.filter(value => !excludeIds.has(value)), 'openProfileScheduleLinkPicker()');
 };
 
 window.openProfileScheduleLinkPicker = async function() {
@@ -19969,9 +20856,15 @@ window.openProfileScheduleLinkPicker = async function() {
     const panel = body?.querySelector('[data-profile-schedule-link-target]');
     if (!panel) return;
     const memberId = body.querySelector('[name="memberId"]')?.value || currentEditingMemberId;
-    const selected = await chooseLinkedMedicationsChild('Choose Linked Medications', scheduleLinkChoices(memberId), selectedOptionValues(panel));
+    const excludeIds = new Set([
+        body.querySelector('[name="pendingOrderId"]')?.value || '',
+        body.querySelector('[name="modifySourceId"]')?.value || ''
+    ].filter(Boolean));
+    const choices = scheduleLinkChoices(memberId, body.querySelector('[name="pendingOrderId"]')?.value || '')
+        .filter(choice => !excludeIds.has(choice.id));
+    const selected = await chooseLinkedMedicationsChild('Choose Linked Medications', choices, selectedOptionValues(panel).filter(value => !excludeIds.has(value)));
     if (selected === null) return;
-    renderLinkChoicePanel(panel, scheduleLinkChoices(memberId), selected, 'openProfileScheduleLinkPicker()');
+    renderLinkChoicePanel(panel, choices, selected, 'openProfileScheduleLinkPicker()');
 };
 
 window.updateProfileScheduleComposer = function() {
@@ -20079,6 +20972,8 @@ function collectProfileScheduleComposer(body, memberId) {
     const startDate = body.querySelector('[name="startDate"]')?.value || '';
     const rawEndDate = body.querySelector('[name="endDate"]')?.value || 'Ongoing';
     const doseQty = body.querySelector('[name="doseQty"]')?.value || '';
+    const pendingOrderId = body.querySelector('[name="pendingOrderId"]')?.value || '';
+    const modifySourceId = body.querySelector('[name="modifySourceId"]')?.value || '';
     if (!med || !startDate || !doseQty) {
         appAlert('Choose a medication, dose quantity, and start date.');
         return false;
@@ -20114,7 +21009,7 @@ function collectProfileScheduleComposer(body, memberId) {
         return false;
     }
     const schedule = {
-        id: `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        id: pendingOrderId || `pending-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         memberId,
         medId,
         doseQty,
@@ -20144,6 +21039,7 @@ function collectProfileScheduleComposer(body, memberId) {
         monitoringReminderSchedule: null,
         monitoringHoldRule: null,
         reorderSourceId: body.querySelector('[name="reorderSourceId"]')?.value || '',
+        modifySourceId,
         startTime: times[0] || '',
         isOneTime: freq === 'ONCE'
     };
@@ -20161,9 +21057,15 @@ function collectProfileScheduleComposer(body, memberId) {
             return false;
         }
     }
-    pendingScheduleOrders.push(schedule);
+    const existingPendingIndex = pendingScheduleOrders.findIndex(order =>
+        (pendingOrderId && order.id === pendingOrderId) ||
+        (modifySourceId && order.modifySourceId === modifySourceId)
+    );
+    if (existingPendingIndex >= 0) pendingScheduleOrders[existingPendingIndex] = { ...pendingScheduleOrders[existingPendingIndex], ...schedule };
+    else pendingScheduleOrders.push(schedule);
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(memberId);
+    refreshOpenMemberMedicationViews(memberId);
     return true;
 }
 
@@ -20174,6 +21076,8 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
     const composerTitle = existingOrder ? `Modify Medication - ${memberDisplayName(member)}` : `New Medication - ${memberDisplayName(member)}`;
     const modalPromise = showActionModal(composerTitle, `
         <div data-action-modal-size="wide" class="profile-schedule-composer">
+            <input type="hidden" name="pendingOrderId" value="${escapeHtml(existingOrder?.id || '')}">
+            <input type="hidden" name="modifySourceId" value="${escapeHtml(existingOrder?.modifySourceId || '')}">
             <input type="hidden" name="reorderSourceId" value="${escapeHtml(existingOrder?.reorderSourceId || '')}">
             <input type="hidden" name="memberId" value="${escapeHtml(memberId)}">
             <div class="profile-schedule-composer-banner">
@@ -20725,7 +21629,7 @@ window.toggleOrderSetHold = async function(orderSetId) {
     renderCalendar();
 };
 
-async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule') {
+async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule', options = {}) {
     const med = db.inventory.find(m => m.id === sched.medId);
     if (!med || !sched) return false;
     let status = actual.doseStatus || 'given';
@@ -20781,6 +21685,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
         doseNote: actual.doseNote || '',
         prnLimitOverride: !!actual.prnLimitOverride,
         holdOverride: !!actual.holdOverride,
+        adjustedSchedulePattern: options.adjustPattern !== false,
         sourceLabel,
         stockSource: stockPlan.stockSource || (stockPlan.qtyToSubtract > 0 ? 'main' : ''),
         inventorySource: stockPlan.inventorySource || actual.inventorySource || '',
@@ -20805,7 +21710,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule')
     });
 
     if (sched.isOneTime) markScheduleCompleted(sched);
-    updateSchedulePatternAfterAdministration(sched, actual, historyEntry);
+    if (options.adjustPattern !== false) updateSchedulePatternAfterAdministration(sched, actual, historyEntry);
     return true;
 }
 
@@ -20832,7 +21737,7 @@ function shiftScheduleDateWindow(schedule, dayDelta) {
 function updateSchedulePatternAfterAdministration(schedule, actual, historyEntry = null) {
     if (!schedule || !['late', 'early'].includes(actual?.doseStatus || 'given')) return;
     if (!actual.actualDate || !actual.actualTime) return;
-    if (schedule.freq === 'QXH') {
+    if (scheduleTimingFrequency(schedule) === 'QXH') {
         schedule.rollingAnchorDate = actual.actualDate;
         schedule.rollingAnchorTime = actual.actualTime;
         return;
@@ -20869,7 +21774,7 @@ function administrationPatternShiftDays(actual) {
 
 function adjustSchedulePatternForEditedAdministration(schedule, actual, entry, previousShiftDays = 0) {
     if (!schedule) return;
-    if (schedule.freq === 'QXH') {
+    if (scheduleTimingFrequency(schedule) === 'QXH') {
         recalculateIntervalAnchorFromHistory(schedule);
         return;
     }
@@ -20900,7 +21805,7 @@ function adjustSchedulePatternForEditedAdministration(schedule, actual, entry, p
 }
 
 function recalculateIntervalAnchorFromHistory(schedule) {
-    if (!schedule || schedule.freq !== 'QXH') return;
+    if (!schedule || scheduleTimingFrequency(schedule) !== 'QXH') return;
     const anchor = latestIntervalAnchorFromHistory(schedule);
     if (anchor) {
         schedule.rollingAnchorDate = anchor.date;
@@ -21041,6 +21946,7 @@ window.editAdministration = async function(entryId) {
         return;
     }
 
+    let adjustPattern = true;
     if (schedule?.freq !== 'PRN' && entry.scheduledDate && entry.scheduledTime) {
         result.scheduledDate = entry.scheduledDate;
         result.scheduledTime = entry.scheduledTime;
@@ -21050,6 +21956,9 @@ window.editAdministration = async function(entryId) {
             return;
         }
         normalizeScheduledDoseActualTime(result);
+        const adjustmentChoice = await chooseAdministrationPatternAdjustment(schedule, result);
+        if (adjustmentChoice === null) return;
+        adjustPattern = adjustmentChoice;
     }
 
     const adminTimeChanged = current.date !== result.actualDate || current.time !== result.actualTime;
@@ -21100,6 +22009,7 @@ window.editAdministration = async function(entryId) {
     entry.doseStatus = nextStatus;
     entry.doseNote = result.doseNote || '';
     entry.stockDelta = stockDelta;
+    entry.adjustedSchedulePattern = adjustPattern !== false;
     if (nextStatus === 'wasted') {
         markPrepackCoveredDoseWasted(schedule, result, entry, result.doseNote || 'wasted from administration edit');
     }
@@ -21113,8 +22023,29 @@ window.editAdministration = async function(entryId) {
         : 'No dose administered';
     const overrideText = entry.prnLimitOverride ? '; PRN maximum override confirmed' : '';
     entry.details = `${doseStatusLabel(entry.doseStatus)}; ${scheduledText}${stockDetail} via ${administrationSourceLabel(entry)}${overrideText}${noteText}`;
-    adjustSchedulePatternForEditedAdministration(schedule, result, entry, previousShiftDays);
+    const patternActual = adjustPattern === false ? { ...result, doseStatus: 'given' } : result;
+    adjustSchedulePatternForEditedAdministration(schedule, patternActual, entry, previousShiftDays);
     await sync();
+};
+
+window.documentPastDose = async function(scheduleId) {
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const med = schedule && db.inventory.find(item => item.id === schedule.medId);
+    if (!schedule || !med) return;
+    const actual = await requestPastDoseDocumentation(schedule, `Document Past Dose: ${med.name}`);
+    if (!actual) return;
+    const documented = await administerScheduleRecord(
+        schedule,
+        actual,
+        isScheduleArchived(schedule)
+            ? `Past dose (${schedule.status === 'discontinued' ? 'discontinued order' : 'completed order'})`
+            : (schedule.orderSetName ? `Past dose - Regimen (${schedule.orderSetName})` : 'Past dose'),
+        { adjustPattern: false }
+    );
+    if (!documented) return;
+    await sync();
+    renderCalendar();
+    refreshOpenMemberMedicationViews(schedule.memberId);
 };
 
 window.administerDose = async function(medId, scheduleId) {
@@ -21123,6 +22054,10 @@ window.administerDose = async function(medId, scheduleId) {
     if (!med || !sched) return;
     if (isScheduleArchived(sched)) {
         await appAlert('This medication is completed or discontinued. Modify or extend it before documenting new administrations.');
+        return;
+    }
+    if (isSchedulePendingProfileDiscontinue(sched)) {
+        await appAlert('This medication is staged to discontinue. Approve Changes or remove the staged discontinuation before documenting a dose.');
         return;
     }
 
@@ -21165,12 +22100,14 @@ window.administerDose = async function(medId, scheduleId) {
         }
     }
 
-    const administered = await administerScheduleRecord(sched, actual, sched.orderSetName ? `Regimen (${sched.orderSetName})` : 'Schedule');
+    const adjustPattern = await chooseAdministrationPatternAdjustment(sched, actual);
+    if (adjustPattern === null) return;
+    const administered = await administerScheduleRecord(sched, actual, sched.orderSetName ? `Regimen (${sched.orderSetName})` : 'Schedule', { adjustPattern });
     if (administered) {
         const linkedSchedules = requiredTogetherSchedules(sched, [sched, ...activeScheduleCandidates]);
         if (linkedSchedules.length > 0 && await appConfirm(`Also document ${linkedSchedules.length} linked medication${linkedSchedules.length === 1 ? '' : 's'} with the same administration date/time?`, 'Linked Medications')) {
             for (const linkedSchedule of linkedSchedules) {
-                await administerScheduleRecord(linkedSchedule, actualForLinkedSchedule(linkedSchedule, actual), linkedSchedule.orderSetName ? `Regimen (${linkedSchedule.orderSetName})` : 'Linked Schedule');
+                await administerScheduleRecord(linkedSchedule, actualForLinkedSchedule(linkedSchedule, actual), linkedSchedule.orderSetName ? `Regimen (${linkedSchedule.orderSetName})` : 'Linked Schedule', { adjustPattern });
             }
         }
     }
@@ -21360,7 +22297,9 @@ window.administerOrderSet = async function(orderSetId) {
             `)
             : await requestScheduledDoseDocumentation(schedule, `Document Dose: ${med.name}`);
         if (!actual) continue;
-        if (await administerScheduleRecord(schedule, actual, `Regimen (${set.name})`)) {
+        const adjustPattern = await chooseAdministrationPatternAdjustment(schedule, actual);
+        if (adjustPattern === null) continue;
+        if (await administerScheduleRecord(schedule, actual, `Regimen (${set.name})`, { adjustPattern })) {
             administeredCount++;
         }
     }
@@ -21424,6 +22363,7 @@ window.deleteSchedule = async function(id) {
         captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
         window.switchMemberProfileTab('orders');
         openMemberMedicationWorkPanel(schedule.memberId);
+        refreshOpenMemberMedicationViews(schedule.memberId);
         await appAlert('Discontinuation added to Orders to Discontinue. Approve Changes when ready.', 'Discontinue Staged');
         return;
     }
@@ -21444,6 +22384,7 @@ window.deleteSchedule = async function(id) {
     await sync();
 
     renderCalendar();
+    refreshOpenMemberMedicationViews(schedule.memberId);
 };
 
 function recipeId() {
@@ -22146,8 +23087,28 @@ function renderRecipes() {
     if (!activeCompoundRecipeId || !db.recipes.some(recipe => recipe.id === activeCompoundRecipeId)) {
         activeCompoundRecipeId = db.recipes[0]?.id || '';
     }
-    list.innerHTML = db.recipes.length
-        ? db.recipes.map(recipe => {
+    const search = (document.getElementById('recipe-search')?.value || '').trim().toLowerCase();
+    const visibleRecipes = db.recipes.filter(recipe => {
+        if (!search) return true;
+        const ingredientText = (recipe.ingredients || []).map(ingredient => {
+            const med = db.inventory.find(item => item.id === ingredient.medId);
+            return `${ingredient.name || ''} ${med?.name || ''} ${ingredient.qty || ''} ${ingredient.unit || ''}`;
+        }).join(' ');
+        return [
+            recipe.name,
+            recipe.finalName,
+            compoundRecipeStrengthText(recipe),
+            recipe.instructions,
+            recipe.notes,
+            recipe.yieldUnit,
+            ingredientText
+        ].join(' ').toLowerCase().includes(search);
+    });
+    if (search && visibleRecipes.length && !visibleRecipes.some(recipe => recipe.id === activeCompoundRecipeId)) {
+        activeCompoundRecipeId = visibleRecipes[0].id;
+    }
+    list.innerHTML = visibleRecipes.length
+        ? visibleRecipes.map(recipe => {
             const ingredientCount = (recipe.ingredients || []).length;
             const strengthText = compoundRecipeStrengthText(recipe);
             return `<button type="button" class="compound-recipe-row ${recipe.id === activeCompoundRecipeId ? 'selected' : ''}" onclick="selectCompoundRecipe('${escapeHtml(recipe.id)}')">
@@ -22155,7 +23116,7 @@ function renderRecipes() {
                 <span><strong>${escapeHtml(recipe.name || 'Unnamed recipe')}</strong><br><small>${escapeHtml(recipe.finalName || '')} ${escapeHtml(strengthText)} | ${ingredientCount} ingredient${ingredientCount === 1 ? '' : 's'}</small></span>
             </button>`;
         }).join('')
-        : '<div class="empty-state">No recipes saved yet.</div>';
+        : `<div class="empty-state">${search ? 'No recipes match that search.' : 'No recipes saved yet.'}</div>`;
     const recipe = db.recipes.find(item => item.id === activeCompoundRecipeId);
     panel.innerHTML = recipe ? compoundPrepPanelHtml(recipe) : '<div class="empty-state">Select or save a recipe to prepare a compounded product.</div>';
     const builderHistory = document.getElementById('compound-builder-history');
@@ -22165,6 +23126,12 @@ function renderRecipes() {
             : '<div class="empty-state">Select a saved recipe to see completed batches.</div>';
     }
     enhanceButtonIcons(document.getElementById('panel-recipes') || document);
+};
+
+window.clearRecipeSearch = function() {
+    const input = document.getElementById('recipe-search');
+    if (input) input.value = '';
+    renderRecipes();
 };
 
 
@@ -22267,8 +23234,9 @@ function calendarMedicationColor(schedule, dateStr, time) {
 
 function scheduledDosesForCalendarDate(dateStr, memberId = null) {
     const todaysMeds = [];
+    const pendingDiscontinued = pendingDiscontinuedScheduleIdSet(memberId);
     db.schedules.forEach(schedule => {
-        if (!isScheduleArchived(schedule) && (!memberId || schedule.memberId === memberId) && isScheduleDueOnDate(schedule, dateStr)) {
+        if (!isScheduleArchived(schedule) && !pendingDiscontinued.has(schedule.id) && (!memberId || schedule.memberId === memberId) && isScheduleDueOnDate(schedule, dateStr)) {
             getScheduleTimes(schedule).forEach(time => todaysMeds.push({ ...schedule, specificTime: time }));
         }
     });

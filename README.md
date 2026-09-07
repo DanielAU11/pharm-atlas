@@ -16,9 +16,10 @@ PharmAtlas helps users organize the practical details that make medication routi
 - Schedule medications by member, dose, frequency, start date, end date, and administration time.
 - Build reusable regimens for grouped medications such as daily supplements, hypertension routines, rescue plans, or travel packs.
 - Link medications that must be taken together or where only one formulation should be selected.
-- Track scheduled, late, early, skipped, missed, PRN, manual, and supplemental administrations.
+- Track scheduled, administered, late, early, skipped, missed, refused, PRN, manual, supplemental, returned, and wasted administrations.
 - Print medication labels, inventory labels, daily labels, regimen labels, and prepack labels.
 - Verify prepacks by scanning QR/barcodes or marking items prepacked manually.
+- Document past doses from active or completed schedules, retime single doses, or shift future every-X-hours schedules only when the user explicitly chooses that option.
 - Track inventory quantities, low-stock alerts, expiration dates, storage, control level, prescriber, assignment, notes, photos, and multiple barcode aliases per item.
 - Create and edit a master formulary, generate formulary PDFs, create named inventory orders, edit active orders, print order PDFs, and receive orders by manual entry or scanning.
 - Monitor blood pressure, heart rate, glucose, weight, temperature, INR, drug levels, and other custom therapeutic labs.
@@ -31,7 +32,9 @@ PharmAtlas helps users organize the practical details that make medication routi
 
 Supported frequencies include one-time, QD, BID, TID, QID, nightly, PRN, every other day, once weekly, every X weeks, X times per week, once monthly, and every X hours.
 
-Every X hours orders include future time previews and can adjust future scheduled times after late or early administrations.
+Every X hours orders include future time previews and can adjust future scheduled times after late or early administrations only when the user explicitly chooses to shift the future pattern. Single-dose retiming keeps the rest of the schedule unchanged and prompts users to reprint affected future labels when needed.
+
+Member profiles include an Epic-inspired medication work side panel for staging new medications, regimen assignments, monitoring reminders, modifications, reorders, and discontinuations. Changes are applied together with Approve Changes and refresh live in the open profile.
 
 ### Safety Features
 

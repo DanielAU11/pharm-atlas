@@ -790,6 +790,12 @@
                         <div class="compound-side">
                             <fieldset>
                                 <legend>Saved Recipes</legend>
+                                <div class="recipe-search-row">
+                                    <label>Search
+                                        <input id="recipe-search" type="text" placeholder="Find recipe, ingredient, strength, or note..." oninput="renderRecipes()">
+                                    </label>
+                                    <button type="button" onclick="clearRecipeSearch()">Clear</button>
+                                </div>
                                 <div id="compound-recipe-list" class="sunken-panel compound-recipe-list"></div>
                             </fieldset>
                             <fieldset>
