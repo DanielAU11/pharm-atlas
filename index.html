@@ -104,7 +104,7 @@
                     <fieldset style="margin-top: 10px;">
                         <legend>Maintenance &amp; Safety</legend>
                         <div class="field-row">
-                            <button type="button" onclick="runDataHealthCheck()">Data Health Check</button>
+                            <button type="button" onclick="runDataHealthCheck()">Workflow Health Check</button>
                             <button type="button" onclick="repairDataHealthIssues()">Repair Safe Issues</button>
                             <button type="button" onclick="viewAuditTrail()">Audit Trail</button>
                             <button type="button" onclick="archiveOldData()">Archive Old Data</button>
@@ -1005,7 +1005,7 @@
                                 <li>Today View shows overdue, due-soon, later, completed, and PRN items for quick daily work.</li>
                                 <li>Setup Guide walks through a first-use checklist and can jump directly to the needed tab.</li>
                                 <li>Hover help adds small question-mark tips near common controls and can be disabled from the Dashboard.</li>
-                                <li>Data Health Check looks for broken schedule links, orphaned records, duplicate barcodes, missing times, and impossible stock counts.</li>
+                                <li>Workflow Health Check looks for broken schedule links, orphaned records, duplicate barcodes, missing times, impossible stock counts, stale prepack labels, return/waste inconsistencies, monitoring link problems, and pending unapproved medication work.</li>
                                 <li>Audit Trail records safety-relevant changes such as scheduling, discontinuing, administration, restocking, profile edits, and overrides. Medication rows also have an Audit button for order-specific history.</li>
                                 <li>Printer Calibration previews a test label so label borders, font size, and scanner text can be checked before a large print run.</li>
                             </ul>
@@ -1030,7 +1030,7 @@
                                 <label><input type="checkbox"> Test labels with your printer before relying on a large print job.</label>
                                 <label><input type="checkbox"> Test inventory subtraction for each formulation type you use.</label>
                                 <label><input type="checkbox"> Confirm Med Kit stock movements match your real-world kit counts.</label>
-                                <label><input type="checkbox"> Run Data Health Check after major changes or restores.</label>
+                                <label><input type="checkbox"> Run Workflow Health Check after major changes, prepacking, returns/waste, or restores.</label>
                                 <label><input type="checkbox"> Create a backup after important updates.</label>
                             </div>
                         </fieldset>

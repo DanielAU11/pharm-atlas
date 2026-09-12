@@ -19,6 +19,7 @@ PharmAtlas helps users organize the practical details that make medication routi
 - Track scheduled, administered, late, early, skipped, missed, refused, PRN, manual, supplemental, returned, and wasted administrations.
 - Print medication labels, inventory labels, daily labels, regimen labels, and prepack labels.
 - Verify prepacks by scanning QR/barcodes or marking items prepacked manually.
+- Restore accidental prepack removals from automatic safety backups; restored items return as not yet prepacked so inventory can be verified again.
 - Document past doses from active or completed schedules, retime single doses, or shift future every-X-hours schedules only when the user explicitly chooses that option.
 - Track inventory quantities, low-stock alerts, expiration dates, storage, control level, prescriber, assignment, notes, photos, and multiple barcode aliases per item.
 - Create and edit a master formulary, generate formulary PDFs, create named inventory orders, edit active orders, print order PDFs, and receive orders by manual entry or scanning.
@@ -43,6 +44,7 @@ Member profiles include an Epic-inspired medication work side panel for staging 
 - Barcode conflict prevention so one code cannot quietly belong to multiple inventory items.
 - Linked-medication rules for "must take together" and "choose only one" situations.
 - Missed-dose dashboard and color-coded administration timelines.
+- Workflow Health Check for schedule links, inventory counts, duplicate barcodes, prepack label reprints, return/waste state, monitoring links, and unapproved staged medication work.
 
 ### Inventory and Formulary
 

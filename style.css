@@ -6999,6 +6999,151 @@ button {
     color: #7a4a00;
 }
 
+.inline-warning {
+    padding: 5px 6px;
+    border: 1px solid #b08000;
+    background: #fff4c2;
+    color: #604000;
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.workflow-health-modal {
+    display: grid;
+    gap: 8px;
+    min-width: min(980px, calc(100vw - 64px));
+}
+
+.workflow-health-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 8px;
+    border: 2px inset #fff;
+    background: #ffffdf;
+}
+
+.workflow-health-header strong,
+.workflow-health-card strong {
+    color: #000080;
+}
+
+.workflow-health-header span {
+    display: block;
+    margin-top: 2px;
+    color: #303030;
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.workflow-health-header-actions,
+.workflow-health-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-end;
+    align-content: flex-start;
+}
+
+.workflow-health-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 6px;
+    border: 1px solid #808080;
+    background: #f8f8f8;
+    font-size: 11px;
+}
+
+.workflow-health-list {
+    display: grid;
+    gap: 6px;
+    max-height: 560px;
+    overflow: auto;
+    padding: 4px;
+    border: 2px inset #fff;
+    background: #fff;
+}
+
+.workflow-health-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
+    gap: 8px;
+    padding: 7px;
+    border-left: 6px solid #808080;
+    border-bottom: 1px dotted #c0c0c0;
+    background: #f7f7f7;
+}
+
+.workflow-health-card.severity-high {
+    border-left-color: #b00000;
+    background: #fff0f0;
+}
+
+.workflow-health-card.severity-medium {
+    border-left-color: #b08000;
+    background: #fff8dc;
+}
+
+.workflow-health-card.severity-low {
+    border-left-color: #0060a8;
+    background: #eef7ff;
+}
+
+.workflow-health-badge {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 1px 5px;
+    border: 1px solid #808080;
+    background: #fff;
+    color: #000;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.workflow-health-copy p {
+    margin: 4px 0;
+    line-height: 1.3;
+}
+
+.workflow-health-copy small {
+    color: #404040;
+}
+
+.workflow-health-actions {
+    min-width: 190px;
+}
+
+.workflow-health-actions button,
+.workflow-health-header-actions button {
+    min-width: 86px;
+}
+
+.workflow-health-empty {
+    display: grid;
+    gap: 4px;
+    padding: 14px;
+    border: 2px inset #fff;
+    background: #e8ffe8;
+}
+
+@media (max-width: 900px) {
+    .workflow-health-modal {
+        min-width: 0;
+    }
+
+    .workflow-health-header,
+    .workflow-health-card {
+        grid-template-columns: 1fr;
+    }
+
+    .workflow-health-header-actions,
+    .workflow-health-actions {
+        justify-content: flex-start;
+    }
+}
+
 .retime-choice-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -7547,6 +7692,80 @@ button {
     font-weight: bold;
 }
 
+.prepack-backup-banner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 8px;
+    align-items: center;
+    padding: 6px 8px;
+    margin: 4px 0 6px;
+    border: 2px inset #ffffff;
+    background: #fff8dc;
+    color: #303000;
+    font-size: 11px;
+}
+
+.prepack-backup-banner strong {
+    color: #7a4a00;
+}
+
+.prepack-backup-banner span {
+    grid-column: 1;
+}
+
+.prepack-backup-banner button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-width: 120px;
+}
+
+.prepack-backup-list {
+    display: grid;
+    gap: 6px;
+    max-height: 360px;
+    overflow: auto;
+    padding: 6px;
+    margin-top: 8px;
+    background: #ffffff;
+}
+
+.prepack-backup-choice {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 7px;
+    align-items: start;
+    padding: 7px;
+    border-bottom: 1px dotted #c0c0c0;
+    cursor: pointer;
+}
+
+.prepack-backup-choice:hover {
+    background: #e8f2ff;
+}
+
+.prepack-backup-choice input[type="radio"] {
+    width: 13px;
+    height: 13px;
+    margin-top: 2px;
+    appearance: auto !important;
+    -webkit-appearance: radio !important;
+}
+
+.prepack-backup-choice span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.prepack-backup-choice strong {
+    color: #000080;
+}
+
+.prepack-backup-choice small {
+    color: #404040;
+    line-height: 1.25;
+}
+
 .empty-state {
     padding: 8px;
     font-size: 11px;
@@ -7569,6 +7788,132 @@ button {
     display: flex;
     align-items: center;
     min-height: 20px;
+}
+
+.label-selection-item {
+    gap: 7px;
+    padding: 4px 5px;
+    border-bottom: 1px dotted #c0c0c0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.label-selection-item:hover {
+    background: #e8f2ff;
+}
+
+.label-selection-item.selected {
+    background: #dfffe0;
+    color: #006000;
+}
+
+.label-selection-item input[type="checkbox"] {
+    flex: 0 0 13px;
+    width: 13px !important;
+    height: 13px !important;
+    margin: 0 2px 0 0;
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+.label-selection-item span {
+    min-width: 0;
+}
+
+.prepack-reprint-modal {
+    display: grid;
+    gap: 8px;
+    min-width: min(760px, calc(100vw - 80px));
+}
+
+.prepack-reprint-control {
+    display: grid;
+    grid-template-columns: 90px minmax(280px, 1fr);
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.prepack-reprint-control label {
+    font-weight: bold;
+    color: #000080;
+}
+
+.prepack-reprint-control select {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.prepack-reprint-list {
+    max-height: 460px !important;
+    padding: 8px;
+}
+
+.prepack-reprint-list .label-selection-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 9px;
+    align-items: start;
+    min-height: 44px;
+    padding: 7px 8px;
+    box-sizing: border-box;
+}
+
+.prepack-reprint-list .label-selection-item input[type="checkbox"] {
+    position: absolute;
+    left: 8px;
+    top: 9px;
+    width: 14px !important;
+    height: 14px !important;
+    margin: 0;
+    opacity: 0;
+}
+
+.prepack-reprint-list .label-selection-check {
+    grid-column: 1;
+    width: 14px;
+    height: 14px;
+    margin-top: 1px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+    box-sizing: border-box;
+    font-size: 12px;
+    line-height: 10px;
+    text-align: center;
+    color: #004000;
+    font-weight: bold;
+}
+
+.prepack-reprint-list .label-selection-item.selected .label-selection-check::after {
+    content: "\2713";
+}
+
+.prepack-reprint-list .label-selection-copy {
+    grid-column: 2;
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.prepack-reprint-list .label-selection-copy strong {
+    display: block;
+    line-height: 1.2;
+    color: #000080;
+}
+
+.prepack-reprint-list .label-selection-copy small {
+    display: block;
+    line-height: 1.2;
+    color: #303030;
+}
+
+.prepack-reprint-list .label-selection-item.selected .label-selection-copy strong,
+.prepack-reprint-list .label-selection-item.selected .label-selection-copy small {
+    color: #006000;
 }
 
 .label-selection-children {
