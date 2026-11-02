@@ -183,6 +183,7 @@
                                 <option value="QXH">Every X Hours</option>
                                 <option value="PRN">As needed</option>
                                 <option value="Monthly">Once Monthly</option>
+                                <option value="CUSTOM">User specified</option>
                             </select>
                             <div id="qod-start-container" style="display:none;">
                                 <label>Every-other-day start:</label><input id="qod-start-date" type="date">
@@ -210,6 +211,7 @@
                             <span class="weekday-option"><input id="sched-weekday-5" type="checkbox" value="5"><label for="sched-weekday-5">Fri</label></span>
                             <span class="weekday-option"><input id="sched-weekday-6" type="checkbox" value="6"><label for="sched-weekday-6">Sat</label></span>
                         </div>
+                        <div id="sched-custom-schedule" class="profile-custom-schedule schedule-custom-editor" style="display:none;"></div>
                         <div id="sched-prn-limit-container" class="field-row" style="display:none; margin-top:8px;">
                             <label>PRN Max:</label>
                             <input id="sched-prn-max-doses" type="number" min="1" step="1" style="width:45px;">
@@ -1542,12 +1544,6 @@
                             <div class="profile-list-heading" style="margin-top:8px;">Timeline View</div>
                             <div id="m-progress-note-timeline" class="profile-diary-timeline"></div>
                         </div>
-                        <div class="profile-diary-preview-pane">
-                            <div class="profile-list-heading">Note Preview</div>
-                            <div id="m-progress-note-preview" class="profile-diary-preview-content">
-                                <div class="empty-state">Click a note to preview it here.</div>
-                            </div>
-                        </div>
                     </div>
                 </fieldset>
 
@@ -1737,6 +1733,7 @@
                     <option value="QXH">Every X Hours</option>
                     <option value="PRN">As needed</option>
                     <option value="Monthly">Once Monthly</option>
+                    <option value="CUSTOM">User specified</option>
                 </select>
             </div>
             <div id="mod-qod-start-container" class="field-row-stacked" style="display:none;"><label>Every Other Day Start</label><input id="mod-qod-start-date" type="date"></div>
@@ -1754,6 +1751,7 @@
                 <span class="weekday-option"><input id="mod-weekday-5" type="checkbox" value="5"><label for="mod-weekday-5">Fri</label></span>
                 <span class="weekday-option"><input id="mod-weekday-6" type="checkbox" value="6"><label for="mod-weekday-6">Sat</label></span>
             </div>
+            <div id="mod-custom-schedule" class="profile-custom-schedule schedule-custom-editor" style="display:none;"></div>
             <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span><label>Frequency:</label><select id="mod-prn-schedule-freq" onchange="renderFrequencyControls('mod')"><option value="">None</option><option value="ONCE">One time</option><option value="QD">Daily</option><option value="BID">BID</option><option value="TID">TID</option><option value="QID">QID</option><option value="Nightly">Nightly</option><option value="QOD">Every other day</option><option value="QW">Weekly</option><option value="QXW">Every X weeks</option><option value="XPW">X times per week</option><option value="QXH">Every X hours</option><option value="Monthly">Monthly</option></select></div>
             <div class="field-row link-rule-row"><label>Link to</label><div id="mod-link-target" class="link-choice-panel"></div><label>Meaning</label><select id="mod-link-mode"><option value="">None</option><option value="together">Must take together</option><option value="choose-one">Choose only one</option></select></div>
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>

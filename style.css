@@ -2188,7 +2188,7 @@ button {
 
 .profile-diary-layout {
     display: grid;
-    grid-template-columns: minmax(360px, 0.9fr) minmax(330px, 0.8fr) minmax(360px, 0.9fr);
+    grid-template-columns: minmax(430px, 1fr) minmax(360px, 0.9fr);
     gap: 10px;
     align-items: start;
 }
@@ -2198,7 +2198,7 @@ button {
 }
 
 .diary-workbench .profile-diary-layout {
-    grid-template-columns: minmax(370px, 0.8fr) minmax(390px, 0.9fr) minmax(500px, 1fr);
+    grid-template-columns: minmax(500px, 1fr) minmax(430px, 0.9fr);
     align-items: stretch;
 }
 
@@ -8371,6 +8371,8 @@ button {
 }
 
 #member-modal.member-profile-workspace-shell {
+    --note-dock-width: clamp(430px, 31vw, 590px);
+    --order-dock-width: clamp(390px, 26vw, 500px);
     top: 86px !important;
     height: calc(100vh - 86px) !important;
     padding: 0 8px 8px;
@@ -8388,16 +8390,36 @@ button {
 
 #member-modal.member-profile-workspace-shell.note-dock-open .member-profile-window {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(430px, 34vw);
+    grid-template-columns: minmax(0, 1fr) var(--note-dock-width);
     grid-template-rows: auto minmax(0, 1fr);
     gap: 0 6px;
 }
 
-#member-modal.member-profile-workspace-shell.note-dock-open .member-profile-window > .title-bar {
+#member-modal.member-profile-workspace-shell.order-dock-open .member-profile-window {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--order-dock-width);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0 6px;
+}
+
+#member-modal.member-profile-workspace-shell.note-dock-open.order-dock-open .member-profile-window {
+    --note-dock-width: clamp(400px, 28vw, 520px);
+    --order-dock-width: clamp(360px, 23vw, 450px);
+    grid-template-columns: minmax(0, 1fr) var(--order-dock-width) var(--note-dock-width);
+}
+
+#member-modal.member-profile-workspace-shell.note-dock-open .member-profile-window > .title-bar,
+#member-modal.member-profile-workspace-shell.order-dock-open .member-profile-window > .title-bar {
     grid-column: 1 / -1;
 }
 
 #member-modal.member-profile-workspace-shell.note-dock-open .member-profile-body {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
+}
+
+#member-modal.member-profile-workspace-shell.order-dock-open .member-profile-body {
     grid-column: 1;
     grid-row: 2;
     min-width: 0;
@@ -8409,6 +8431,10 @@ button {
     align-self: stretch;
     min-height: 0;
     display: block;
+}
+
+#member-modal.member-profile-workspace-shell.note-dock-open.order-dock-open #progress-note-side-panel {
+    grid-column: 3;
 }
 
 #member-modal.member-profile-workspace-shell.note-dock-open #progress-note-side-panel .title-bar {
@@ -8429,30 +8455,41 @@ button {
 
 .member-order-work-dock {
     display: none;
-    position: fixed;
-    top: var(--member-order-dock-top, 142px);
-    right: var(--member-order-dock-right, 28px);
-    bottom: var(--member-order-dock-bottom, 12px);
-    width: clamp(430px, 29vw, 560px);
-    min-width: 430px;
-    max-width: calc(100vw - 44px);
-    z-index: 10035;
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: 100%;
+    max-height: 100%;
+    grid-column: 2;
+    grid-row: 2;
+    align-self: stretch;
+    z-index: 1;
     box-sizing: border-box;
 }
 
-.member-profile-body.order-work-open .member-order-work-dock {
+#member-modal.order-dock-open .member-order-work-dock {
     display: flex;
     flex-direction: column;
     min-height: 0;
 }
 
-.member-profile-body.order-work-open [data-member-section="orders"] {
-    margin-right: clamp(462px, calc(29vw + 40px), 596px);
+#member-modal.note-dock-open .progress-note-side-panel,
+#member-modal.note-dock-open .progress-note-side-body,
+#member-modal.note-dock-open .docked-progress-note-editor {
+    min-width: 0;
 }
 
-.member-profile-body.order-work-open .member-order-work-dock {
-    margin-right: 0;
+#member-modal.note-dock-open .profile-diary-title-grid,
+#member-modal.note-dock-open .profile-diary-link-grid,
+#member-modal.note-dock-open .profile-diary-template-row {
+    grid-template-columns: minmax(0, 1fr);
 }
+
+#member-modal.note-dock-open .profile-diary-template-row button {
+    justify-self: start;
+}
+
 
 #member-active-meds-list {
     height: auto;
@@ -8550,12 +8587,14 @@ button {
 }
 
 .member-schedule-grid th:first-child,
-.member-schedule-grid-med-cell {
+.member-grid-med-cell {
     width: 275px;
     max-width: 275px;
     background: #f7fbff;
     overflow-wrap: anywhere;
     overflow: hidden;
+    box-sizing: border-box;
+    contain: inline-size;
 }
 
 .member-schedule-grid th:first-child {
@@ -8591,12 +8630,26 @@ button {
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: break-word;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .member-grid-med-cell div {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     max-width: 100%;
     overflow-wrap: anywhere;
     word-break: break-word;
+    overflow: hidden;
+}
+
+.member-grid-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
 }
 
 .member-grid-instructions {
@@ -9504,6 +9557,68 @@ button {
     flex-direction: row;
     align-items: center;
     width: auto;
+}
+
+.profile-custom-schedule {
+    margin-top: 7px;
+    padding: 7px;
+    border: 2px inset #ffffff;
+    background: #fffff0;
+}
+
+.profile-custom-same-times {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    width: auto;
+    margin-bottom: 6px;
+}
+
+.profile-custom-same-times input,
+.profile-custom-day-toggle input {
+    width: 13px !important;
+    min-width: 13px;
+    height: 13px;
+    margin: 0 4px 0 0;
+}
+
+.profile-custom-day-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(92px, 1fr));
+    gap: 4px;
+    min-width: 0;
+}
+
+.profile-custom-day {
+    display: grid;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid #9a9a9a;
+    background: #e3e3e3;
+}
+
+.profile-custom-day.selected {
+    border-color: #008000;
+    background: #e2f7e2;
+}
+
+.profile-custom-day-toggle {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #a0a0a0;
+}
+
+.profile-custom-day input[type="time"]:disabled {
+    color: #707070;
+    background: #d3d3d3;
+}
+
+@media (max-width: 1050px) {
+    .profile-custom-day-grid {
+        grid-template-columns: repeat(4, minmax(92px, 1fr));
+    }
 }
 
 .profile-schedule-prn {

@@ -18,6 +18,7 @@ const emptyDb = {
     medKits: [],
     customEvents: [],
     prepackRemovalBackups: [],
+    prepackBarcodeArchive: [],
     auditTrail: [],
     settings: {}
 };
@@ -267,7 +268,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     const loadedData = await window.api.load();
     db = { ...emptyDb, ...loadedData, settings: { ...emptyDb.settings, ...(loadedData?.settings || {}) } };
     const medicationCodesAdded = ensureMedicationCodes();
+    const linkRelationshipsUpdated = normalizeScheduleLinkRelationships();
     const completionStatesAdded = updateScheduleCompletionStates();
+    const prepackRetentionUpdated = maintainPrepackRetention();
     renderAll();
     refreshDataLocation();
     maybeOpenFirstRunSetupGuide();
@@ -280,7 +283,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (container) container.innerHTML = `<img src="${image.preview}" style="max-width:100%; max-height:100%;">`;
     });
     checkSchedules();
-    if (medicationCodesAdded || completionStatesAdded) await window.api.save(db);
+    if (medicationCodesAdded || linkRelationshipsUpdated || completionStatesAdded || prepackRetentionUpdated) await window.api.save(db);
 });
 
 // Helper: Convert file to Base64 for saving
@@ -1108,6 +1111,13 @@ function isScheduleDueOnDate(schedule, dateStr) {
         return diff >= 0 && diff % 7 === 0;
     }
 
+    if (freq === 'CUSTOM') {
+        const current = parseLocal(dateStr);
+        const weekday = current?.getDay();
+        const customTimes = schedule.customTimesByWeekday || {};
+        return Number.isInteger(weekday) && Array.isArray(customTimes[weekday]) && customTimes[weekday].some(Boolean);
+    }
+
     if (freq === 'QXW' || freq === 'XPW') {
         const current = parseLocal(dateStr);
         const weekdays = Array.isArray(schedule.weekdays) ? schedule.weekdays.map(Number) : [];
@@ -1152,21 +1162,62 @@ function scheduleHasFinished(schedule, now = new Date()) {
     if (schedule.status === 'completed') return true;
     if (schedule.freq === 'ONCE' || schedule.isOneTime) return false;
     const end = scheduleEndDateTime(schedule);
-    return !!end && end < now;
+    return !!end && end < now && !scheduleHasOutstandingRequiredDose(schedule, now);
 }
 
-function markScheduleCompleted(schedule, completedAt = new Date().toISOString()) {
+function scheduleHasOutstandingRequiredDose(schedule, now = new Date()) {
+    if (!schedule || schedule.freq === 'PRN' || !schedule.startDate || !schedule.endDate || schedule.endDate === 'Ongoing') return false;
+    const unresolvedOverride = normalizedScheduleInstanceOverrides(schedule).some(override => {
+        const instance = {
+            date: override.date,
+            time: override.time,
+            key: override.originalKey,
+            originalDate: override.originalDate,
+            originalTime: override.originalTime
+        };
+        return !findHistoryForScheduleInstance(schedule, instance);
+    });
+    if (unresolvedOverride) return true;
+    const start = parseLocal(schedule.startDate);
+    const end = parseLocal(schedule.endDate);
+    if (!start || !end) return false;
+    const today = localDateKey(now);
+    const through = schedule.endDate < today ? schedule.endDate : today;
+    const throughDate = parseLocal(through);
+    if (!throughDate || throughDate < start) return false;
+    const cursor = new Date(start);
+    while (cursor <= throughDate) {
+        const date = localDateKey(cursor);
+        const instances = getScheduleInstancesForDate(schedule, date);
+        for (const instance of instances) {
+            const when = dateTimeFromParts(instance.date, instance.time);
+            if ((!when || when <= now) && !findHistoryForScheduleInstance(schedule, instance)) return true;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return false;
+}
+
+function markScheduleCompleted(schedule, completedAt = new Date().toISOString(), completionReason = 'resolved') {
     if (!schedule || isScheduleArchived(schedule)) return false;
     schedule.status = 'completed';
     schedule.completedAt = completedAt;
+    schedule.completionReason = completionReason;
     return true;
 }
 
 function updateScheduleCompletionStates(now = new Date()) {
     let changed = false;
     db.schedules.forEach(schedule => {
+        const autoCompletion = !schedule.completionReason || schedule.completionReason === 'therapy-resolved';
+        if (schedule.status === 'completed' && autoCompletion && scheduleHasOutstandingRequiredDose(schedule, now)) {
+            schedule.status = '';
+            schedule.completedAt = '';
+            schedule.completionReason = '';
+            changed = true;
+        }
         if (scheduleHasFinished(schedule, now)) {
-            changed = markScheduleCompleted(schedule, now.toISOString()) || changed;
+            changed = markScheduleCompleted(schedule, now.toISOString(), 'therapy-resolved') || changed;
         }
     });
     db.orderSets.forEach(set => {
@@ -1188,6 +1239,10 @@ function updateScheduleCompletionStates(now = new Date()) {
 }
 
 function getScheduleTimes(schedule) {
+    if (schedule && scheduleTimingFrequency(schedule) === 'CUSTOM') {
+        return uniqueValues(Object.values(schedule.customTimesByWeekday || {}).flat().filter(Boolean))
+            .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+    }
     const times = Array.isArray(schedule.times) ? schedule.times.filter(Boolean) : [];
     if (schedule && scheduleTimingFrequency(schedule) === 'QXH' && times[0] && schedule.intervalHours) {
         return generateIntervalTimes(times[0], schedule.intervalHours);
@@ -1196,7 +1251,7 @@ function getScheduleTimes(schedule) {
 }
 
 function getExpectedTimeCount(freq) {
-    return { ONCE: 1, QD: 1, Nightly: 1, QOD: 1, QW: 1, QXW: 1, XPW: 1, Monthly: 1, BID: 2, TID: 3, QID: 4 }[freq] || 0;
+    return { ONCE: 1, QD: 1, Nightly: 1, QOD: 1, QW: 1, QXW: 1, XPW: 1, Monthly: 1, BID: 2, TID: 3, QID: 4, CUSTOM: 0 }[freq] || 0;
 }
 
 function scheduleTimingFrequency(schedule) {
@@ -1228,6 +1283,15 @@ function formatFrequency(schedule) {
         const count = parseInt(schedule.timesPerWeek, 10) || schedule.weekdays?.length || 1;
         const text = `${count} time${count === 1 ? '' : 's'} per week${selectedDays ? ` on ${selectedDays}` : ''}${selectedDates}`;
         return schedule.freq === 'PRN' ? `As needed; frequency ${text}` : text;
+    }
+    if (displayFreq === 'CUSTOM') {
+        const customTimes = schedule.customTimesByWeekday || {};
+        const parts = Object.keys(customTimes)
+            .map(Number)
+            .sort((a, b) => a - b)
+            .filter(day => Array.isArray(customTimes[day]) && customTimes[day].some(Boolean))
+            .map(day => `${dayNames[day]} ${customTimes[day].filter(Boolean).join(', ')}`);
+        return `User specified${parts.length ? `: ${parts.join('; ')}` : ''}`;
     }
     if (displayFreq === 'QXH') {
         const interval = parseInt(schedule.intervalHours, 10);
@@ -1280,6 +1344,7 @@ function getFieldIds(prefix) {
             weeklyCountContainer: 'mod-weekly-count-container',
             timesPerWeek: 'mod-times-per-week',
             weekdayContainer: 'mod-weekday-container',
+            customScheduleContainer: 'mod-custom-schedule',
             prnContainer: 'mod-prn-limit-container',
             prnMaxDoses: 'mod-prn-max-doses',
             prnWindowHours: 'mod-prn-window-hours',
@@ -1299,6 +1364,7 @@ function getFieldIds(prefix) {
             weeklyCountContainer: 'sched-weekly-count-container',
             timesPerWeek: 'sched-times-per-week',
             weekdayContainer: 'sched-weekday-container',
+            customScheduleContainer: 'sched-custom-schedule',
             prnContainer: 'sched-prn-limit-container',
             prnMaxDoses: 'sched-prn-max-doses',
             prnWindowHours: 'sched-prn-window-hours',
@@ -1582,7 +1648,77 @@ function maybeOpenFirstRunSetupGuide() {
     setTimeout(() => openFirstRunSetupGuide(), 600);
 }
 
-window.renderFrequencyControls = function(prefix, existingTimes = null) {
+function renderCustomScheduleEditor(prefix, schedule = null) {
+    const ids = getFieldIds(prefix);
+    const container = document.getElementById(ids.customScheduleContainer);
+    if (!container) return;
+    if (!schedule && container.childElementCount) return;
+    const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const values = schedule?.customTimesByWeekday && typeof schedule.customTimesByWeekday === 'object'
+        ? schedule.customTimesByWeekday
+        : {};
+    const hasExisting = Object.values(values).some(times => Array.isArray(times) && times.some(Boolean));
+    const startId = prefix === 'mod' ? 'mod-start' : 'sched-start';
+    const defaultDay = parseLocal(document.getElementById(startId)?.value || localDateKey())?.getDay() ?? new Date().getDay();
+    container.innerHTML = `
+        <label class="profile-custom-same-times"><input data-custom-same-times type="checkbox" ${schedule?.customScheduleSameTimes === false ? '' : 'checked'} onchange="syncCustomScheduleTimes('${prefix}')"> Same times on selected days</label>
+        <div class="profile-custom-day-grid">
+            ${labels.map((label, day) => {
+                const existingTimes = Array.isArray(values[day]) ? values[day] : [];
+                const selected = existingTimes.length > 0 || (!hasExisting && day === defaultDay);
+                const dayTimes = existingTimes.length ? existingTimes : (selected ? ['08:00'] : []);
+                return `<div class="profile-custom-day ${selected ? 'selected' : ''}" data-custom-day-column="${day}">
+                    <label class="profile-custom-day-toggle"><input data-custom-day type="checkbox" value="${day}" ${selected ? 'checked' : ''} onchange="syncCustomScheduleTimes('${prefix}')"> ${label}</label>
+                    ${Array.from({ length: 4 }, (_, index) => `<input data-custom-time="${day}" type="time" value="${escapeHtml(dayTimes[index] || '')}" ${selected ? '' : 'disabled'} oninput="syncCustomScheduleTimes('${prefix}',${day})">`).join('')}
+                </div>`;
+            }).join('')}
+        </div>
+        <div class="form-help">Select each administration day, then enter up to four 24-hour times per selected day.</div>`;
+}
+
+window.syncCustomScheduleTimes = function(prefix, sourceDay = null) {
+    const ids = getFieldIds(prefix);
+    const container = document.getElementById(ids.customScheduleContainer);
+    if (!container) return;
+    const selectedDays = Array.from(container.querySelectorAll('[data-custom-day]:checked')).map(input => input.value);
+    container.querySelectorAll('[data-custom-day-column]').forEach(column => {
+        const selected = selectedDays.includes(column.dataset.customDayColumn || '');
+        column.classList.toggle('selected', selected);
+        column.querySelectorAll('[data-custom-time]').forEach(input => { input.disabled = !selected; });
+    });
+    if (!container.querySelector('[data-custom-same-times]')?.checked || selectedDays.length < 2) return;
+    const filledDay = selectedDays.find(day => Array.from(container.querySelectorAll(`[data-custom-time="${day}"]`)).some(input => input.value));
+    const source = selectedDays.includes(String(sourceDay)) ? String(sourceDay) : (filledDay || selectedDays[0]);
+    const sourceValues = Array.from(container.querySelectorAll(`[data-custom-time="${source}"]`)).map(input => input.value);
+    selectedDays.filter(day => day !== source).forEach(day => {
+        Array.from(container.querySelectorAll(`[data-custom-time="${day}"]`)).forEach((input, index) => {
+            input.value = sourceValues[index] || '';
+        });
+    });
+};
+
+function readCustomScheduleEditor(prefix) {
+    const ids = getFieldIds(prefix);
+    const container = document.getElementById(ids.customScheduleContainer);
+    const weekdays = Array.from(container?.querySelectorAll('[data-custom-day]:checked') || [])
+        .map(input => parseInt(input.value, 10))
+        .sort((a, b) => a - b);
+    const customTimesByWeekday = {};
+    weekdays.forEach(day => {
+        customTimesByWeekday[day] = uniqueValues(Array.from(container.querySelectorAll(`[data-custom-time="${day}"]`))
+            .map(input => input.value)
+            .filter(Boolean))
+            .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+    });
+    return {
+        weekdays,
+        customTimesByWeekday,
+        customScheduleSameTimes: !!container?.querySelector('[data-custom-same-times]')?.checked,
+        times: uniqueValues(Object.values(customTimesByWeekday).flat()).sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
+    };
+}
+
+window.renderFrequencyControls = function(prefix, existingTimes = null, existingCustomSchedule = null) {
     const ids = getFieldIds(prefix);
     const rawFreq = document.getElementById(ids.freq).value;
     const prnScheduleFreq = rawFreq === 'PRN' ? (document.getElementById(ids.prnScheduleFreq)?.value || '') : '';
@@ -1603,6 +1739,7 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
     const monthlyContainer = document.getElementById(ids.monthlyContainer);
     const weeklyCountContainer = document.getElementById(ids.weeklyCountContainer);
     const weekdayContainer = document.getElementById(ids.weekdayContainer);
+    const customScheduleContainer = document.getElementById(ids.customScheduleContainer);
     const prnContainer = document.getElementById(ids.prnContainer);
     if (qodContainer) qodContainer.style.display = freq === 'QOD' ? 'block' : 'none';
     if (freq === 'QOD') {
@@ -1613,8 +1750,9 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
     if (intervalContainer) intervalContainer.style.display = freq === 'QXH' ? 'flex' : 'none';
     if (weekIntervalContainer) weekIntervalContainer.style.display = freq === 'QXW' ? 'flex' : 'none';
     if (monthlyContainer) monthlyContainer.style.display = freq === 'Monthly' ? 'flex' : 'none';
-    if (weeklyCountContainer) weeklyCountContainer.style.display = freq === 'XPW' ? 'flex' : 'none';
+    if (weeklyCountContainer) weeklyCountContainer.style.display = 'none';
     if (weekdayContainer) weekdayContainer.style.display = ['QXW', 'XPW'].includes(freq) ? 'flex' : 'none';
+    if (customScheduleContainer) customScheduleContainer.style.display = freq === 'CUSTOM' ? 'block' : 'none';
     if (prnContainer) prnContainer.style.display = rawFreq === 'PRN' ? 'flex' : 'none';
     if (weekdayContainer && ['QXW', 'XPW'].includes(freq) && !weekdayContainer.querySelector('input:checked')) {
         const startDate = document.getElementById(prefix === 'mod' ? 'mod-start' : 'sched-start')?.value || localDateKey();
@@ -1624,6 +1762,10 @@ window.renderFrequencyControls = function(prefix, existingTimes = null) {
     }
 
     container.innerHTML = '';
+    if (freq === 'CUSTOM') {
+        renderCustomScheduleEditor(prefix, existingCustomSchedule);
+        return;
+    }
     if (rawFreq === 'PRN' && !freq) {
         container.innerHTML = '<span style="font-size:11px;">No scheduled PRN frequency selected.</span>';
         return;
@@ -1662,15 +1804,16 @@ function collectFrequencyDetails(prefix) {
     const intervalHours = timingFreq === 'QXH' ? parseInt(intervalInput.value, 10) : null;
     const intervalWeeks = timingFreq === 'QXW' ? parseInt(document.getElementById(ids.intervalWeeks)?.value, 10) : null;
     const monthlyAnchor = timingFreq === 'Monthly' ? document.getElementById(ids.monthlyAnchor)?.value : '';
-    const timesPerWeek = timingFreq === 'XPW' ? parseInt(document.getElementById(ids.timesPerWeek)?.value, 10) : null;
     const weekdays = ['QXW', 'XPW'].includes(timingFreq)
         ? Array.from(document.querySelectorAll(`#${ids.weekdayContainer} input[type="checkbox"]:checked`)).map(input => parseInt(input.value, 10)).sort()
         : [];
+    const timesPerWeek = timingFreq === 'XPW' ? weekdays.length : null;
     const prnMaxDoses = freq === 'PRN' ? parseInt(document.getElementById(ids.prnMaxDoses)?.value, 10) : null;
     const prnWindowHours = freq === 'PRN' ? parseInt(document.getElementById(ids.prnWindowHours)?.value, 10) : null;
     const rawTimes = Array.from(document.querySelectorAll(`#${ids.timeFields} .${prefix}-time-input`))
         .map(input => input.value)
         .filter(Boolean);
+    const customSchedule = timingFreq === 'CUSTOM' ? readCustomScheduleEditor(prefix) : null;
 
     if (freq === 'PRN') {
         if (document.getElementById(ids.prnMaxDoses)?.value && (!Number.isInteger(prnMaxDoses) || prnMaxDoses < 1)) {
@@ -1716,14 +1859,32 @@ function collectFrequencyDetails(prefix) {
         }
     }
     if (timingFreq === 'XPW') {
-        if (!Number.isInteger(timesPerWeek) || timesPerWeek < 1 || timesPerWeek > 7) {
-            void appAlert("Times per week must be between 1 and 7.");
+        if (weekdays.length === 0) {
+            void appAlert('Select at least one weekday for the X Times Per Week schedule.');
             return null;
         }
-        if (weekdays.length !== timesPerWeek) {
-            void appAlert(`Select exactly ${timesPerWeek} weekday${timesPerWeek === 1 ? '' : 's'}.`);
+    }
+    if (timingFreq === 'CUSTOM') {
+        if (!customSchedule?.weekdays.length || customSchedule.weekdays.some(day => !customSchedule.customTimesByWeekday[day]?.length)) {
+            void appAlert('Select at least one weekday and enter at least one administration time for every selected day.');
             return null;
         }
+        return {
+            freq,
+            timingFreq,
+            times: customSchedule.times,
+            customTimesByWeekday: customSchedule.customTimesByWeekday,
+            customScheduleSameTimes: customSchedule.customScheduleSameTimes,
+            intervalHours: null,
+            intervalWeeks: null,
+            timesPerWeek: customSchedule.weekdays.length,
+            weekdays: customSchedule.weekdays,
+            monthlyAnchor: '',
+            prnScheduleFreq: '',
+            prnMaxDoses: null,
+            prnWindowHours: 24,
+            startTime: customSchedule.times[0] || ''
+        };
     }
     if (timingFreq === 'Monthly' && !monthlyAnchor) {
         void appAlert("Enter the first monthly dose date.");
@@ -1750,6 +1911,8 @@ function collectFrequencyDetails(prefix) {
         intervalWeeks,
         timesPerWeek,
         weekdays,
+        customTimesByWeekday: {},
+        customScheduleSameTimes: false,
         monthlyAnchor,
         prnScheduleFreq: freq === 'PRN' ? prnScheduleFreq : '',
         prnMaxDoses: prnMaxDoses || null,
@@ -2094,7 +2257,7 @@ function readMonitoringTypeSchedule(prefix, typeId, { validate = false } = {}) {
     const weekdays = ['QXW', 'XPW'].includes(freq)
         ? Array.from(document.querySelectorAll(`.${uiPrefix}-care-weekday:checked`)).map(input => parseInt(input.value, 10)).sort()
         : [];
-    const timesPerWeek = freq === 'XPW' ? parseInt(document.getElementById(`${uiPrefix}-care-times-per-week`)?.value, 10) : null;
+    const timesPerWeek = freq === 'XPW' ? weekdays.length : null;
     if (validate) {
         const label = careReminderTypeLabel(typeId, monitoringParameterMemberIdForPrefix(prefix));
         const rangeEnd = sourceRange.end || endDate;
@@ -2103,9 +2266,7 @@ function readMonitoringTypeSchedule(prefix, typeId, { validate = false } = {}) {
         if (endDate !== 'Ongoing' && endDate < startDate) return { error: `${label}: monitoring end date cannot be before the start date.` };
         if (freq === 'QXH' && (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24)) return { error: `${label}: every X hours must be between 1 and 24.` };
         if (freq === 'QXW' && (!Number.isInteger(intervalWeeks) || intervalWeeks < 1 || intervalWeeks > 52)) return { error: `${label}: every X weeks must be between 1 and 52.` };
-        if (freq === 'XPW' && (!Number.isInteger(timesPerWeek) || timesPerWeek < 1 || timesPerWeek > 7)) return { error: `${label}: times per week must be between 1 and 7.` };
         if (['QXW', 'XPW'].includes(freq) && weekdays.length === 0) return { error: `${label}: select at least one monitoring weekday.` };
-        if (freq === 'XPW' && weekdays.length !== timesPerWeek) return { error: `${label}: select exactly ${timesPerWeek} monitoring weekday${timesPerWeek === 1 ? '' : 's'}.` };
         if (freq === 'Monthly' && !monthlyAnchor) return { error: `${label}: enter the first monthly monitoring date.` };
         const expected = freq === 'QXH' ? 1 : getExpectedTimeCount(freq);
         if (rawTimes.length !== expected) return { error: `${label}: enter ${expected} monitoring time${expected === 1 ? '' : 's'}.` };
@@ -2643,9 +2804,6 @@ window.renderCareReminderFrequencyControls = function(prefix = 'm', existing = n
         <div class="care-reminder-extra-row ${freq === 'QXW' ? '' : 'hidden'}">
             <label>Every:<input id="${prefix}-care-interval-weeks" type="number" min="1" max="52" step="1" value="${escapeHtml(existing?.intervalWeeks || 2)}"> weeks</label>
         </div>
-        <div class="care-reminder-extra-row ${freq === 'XPW' ? '' : 'hidden'}">
-            <label>Times per week:<input id="${prefix}-care-times-per-week" type="number" min="1" max="7" step="1" value="${escapeHtml(existing?.timesPerWeek || Math.max(weekdaySelected.length, 1))}"></label>
-        </div>
         <div class="weekday-picker care-reminder-weekdays ${['QXW', 'XPW'].includes(freq) ? '' : 'hidden'}"><span>Days:</span>${weekHtml}</div>
         <div class="care-reminder-times">
             ${Array.from({ length: count }, (_, index) => `<label>${freq === 'QXH' ? 'Start time' : `Time ${index + 1}`}<input class="${prefix}-care-time" type="time" value="${escapeHtml(times[index] || defaults[index] || '08:00')}"></label>`).join('')}
@@ -2673,13 +2831,11 @@ function collectCareReminderFromProfile(memberId) {
     const weekdays = ['QXW', 'XPW'].includes(freq)
         ? Array.from(document.querySelectorAll(`.${prefix}-care-weekday:checked`)).map(input => parseInt(input.value, 10)).sort()
         : [];
-    const timesPerWeek = freq === 'XPW' ? parseInt(document.getElementById(`${prefix}-care-times-per-week`)?.value, 10) : null;
+    const timesPerWeek = freq === 'XPW' ? weekdays.length : null;
     if (endDate !== 'Ongoing' && endDate < startDate) return { error: 'Reminder end date cannot be before the start date.' };
     if (freq === 'QXH' && (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24)) return { error: 'Every X hours must be between 1 and 24.' };
     if (freq === 'QXW' && (!Number.isInteger(intervalWeeks) || intervalWeeks < 1 || intervalWeeks > 52)) return { error: 'Every X weeks must be between 1 and 52.' };
-    if (freq === 'XPW' && (!Number.isInteger(timesPerWeek) || timesPerWeek < 1 || timesPerWeek > 7)) return { error: 'Times per week must be between 1 and 7.' };
     if (['QXW', 'XPW'].includes(freq) && weekdays.length === 0) return { error: 'Select at least one weekday for this reminder.' };
-    if (freq === 'XPW' && weekdays.length !== timesPerWeek) return { error: `Select exactly ${timesPerWeek} weekday${timesPerWeek === 1 ? '' : 's'}.` };
     if (freq === 'Monthly' && !monthlyAnchor) return { error: 'Enter the first monthly reminder date.' };
     if (rawTimes.length !== (freq === 'QXH' ? 1 : getExpectedTimeCount(freq))) return { error: 'Enter all reminder times.' };
     const times = freq === 'QXH' ? generateIntervalTimes(rawTimes[0], intervalHours) : Array.from(new Set(rawTimes)).sort();
@@ -3688,7 +3844,7 @@ function normalizedScheduleInstanceOverrides(schedule) {
 
 function scheduleOverrideInstancesForDate(schedule, dateStr) {
     return normalizedScheduleInstanceOverrides(schedule)
-        .filter(item => item.date === dateStr && isDateInsideScheduleWindow(schedule, item.date))
+        .filter(item => item.date === dateStr)
         .map(item => ({
             date: item.date,
             time: item.time,
@@ -3699,6 +3855,15 @@ function scheduleOverrideInstancesForDate(schedule, dateStr) {
             originalKey: item.originalKey,
             retimed: true
         }));
+}
+
+function getScheduleTimesForDate(schedule, dateStr) {
+    if (scheduleTimingFrequency(schedule) !== 'CUSTOM') return getScheduleTimes(schedule);
+    const date = parseLocal(dateStr);
+    if (!date) return [];
+    return uniqueValues((schedule.customTimesByWeekday || {})[date.getDay()] || [])
+        .filter(Boolean)
+        .sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
 }
 
 function mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances = []) {
@@ -3736,7 +3901,7 @@ function getScheduleInstancesForDate(schedule, dateStr) {
             }));
         return mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances);
     }
-    const times = getScheduleTimes(schedule);
+    const times = getScheduleTimesForDate(schedule, dateStr);
     if (times.length === 0) {
         return mergeScheduleInstancesWithOverrides(schedule, dateStr, [
             { date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }
@@ -7244,8 +7409,7 @@ document.addEventListener('input', event => {
 });
 
 window.previewMemberProgressNote = function(noteId) {
-    activeProgressNotePreviewId = noteId;
-    renderMemberProgressNotes();
+    window.editMemberProgressNote(noteId);
 };
 
 window.editMemberProgressNote = function(noteId) {
@@ -8119,6 +8283,10 @@ function scheduleTimingSignature(schedule) {
         monthlyAnchor: timingFreq === 'Monthly' ? (schedule.monthlyAnchor || schedule.startDate || '') : '',
         timesPerWeek: schedule.timesPerWeek || null,
         weekdays: Array.isArray(schedule.weekdays) ? schedule.weekdays.map(Number).sort() : [],
+        customTimesByWeekday: Object.keys(schedule.customTimesByWeekday || {})
+            .map(Number)
+            .sort((a, b) => a - b)
+            .map(day => [day, uniqueValues(schedule.customTimesByWeekday?.[day] || []).sort()]),
         qodStart: timingFreq === 'QOD' ? (schedule.qodStart || schedule.startDate || '') : ''
     });
 }
@@ -8314,6 +8482,8 @@ function applyLinkedScheduleTiming(source, target) {
         'monthlyAnchor',
         'timesPerWeek',
         'weekdays',
+        'customTimesByWeekday',
+        'customScheduleSameTimes',
         'qodStart',
         'startTime',
         'rollingAnchorDate',
@@ -8322,7 +8492,9 @@ function applyLinkedScheduleTiming(source, target) {
     ];
     timingFields.forEach(field => {
         const value = source[field];
-        target[field] = Array.isArray(value) ? [...value] : value;
+        target[field] = Array.isArray(value)
+            ? [...value]
+            : (value && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value);
     });
     target.status = '';
     target.completedAt = '';
@@ -8344,6 +8516,49 @@ function removeScheduleLinkReferences(scheduleIds) {
             schedule.linkGroup = '';
         }
     });
+}
+
+function normalizeScheduleLinkRelationships() {
+    const schedules = Array.isArray(db.schedules) ? db.schedules : [];
+    const byId = new Map(schedules.map(schedule => [schedule.id, schedule]));
+    const snapshot = () => JSON.stringify(schedules.map(schedule => ({
+        id: schedule.id,
+        linkMode: schedule.linkMode || '',
+        linkGroup: schedule.linkGroup || '',
+        linkTargetIds: schedule.linkTargetIds || [],
+        linkRules: schedule.linkRules || []
+    })));
+    const before = snapshot();
+    const pairs = new Map();
+    schedules.forEach(source => {
+        scheduleLinkRules(source).forEach(rule => {
+            const target = rule.targetId ? byId.get(rule.targetId) : null;
+            if (!target || target.id === source.id || target.memberId !== source.memberId || !rule.mode) return;
+            const ids = [source.id, target.id].sort();
+            const key = ids.join('|');
+            if (!pairs.has(key)) pairs.set(key, { ids, mode: rule.mode });
+        });
+    });
+    schedules.forEach(schedule => {
+        const rowRules = scheduleLinkRules(schedule).filter(rule => rule.targetRowId && !rule.targetId);
+        const idRules = [];
+        pairs.forEach(pair => {
+            if (!pair.ids.includes(schedule.id)) return;
+            idRules.push({ targetId: pair.ids.find(id => id !== schedule.id), mode: pair.mode });
+        });
+        schedule.linkRules = [...rowRules, ...idRules];
+        schedule.linkTargetIds = idRules.map(rule => rule.targetId);
+        schedule.linkTargetId = schedule.linkTargetIds[0] || '';
+        const modes = uniqueValues(idRules.map(rule => rule.mode));
+        if (idRules.length) {
+            schedule.linkMode = modes.length === 1 ? modes[0] : '';
+            schedule.linkGroup = linkGroupFromTarget([schedule.id, ...schedule.linkTargetIds].sort()[0]);
+        } else if (!rowRules.length) {
+            schedule.linkMode = '';
+            schedule.linkGroup = '';
+        }
+    });
+    return before !== snapshot();
 }
 
 let activeAdminOrderSetSchedules = [];
@@ -8527,7 +8742,9 @@ window.switchTab = function(tabName) {
 };
 
 async function sync() {
+    normalizeScheduleLinkRelationships();
     updateScheduleCompletionStates();
+    maintainPrepackRetention();
     const saveResult = await window.api.save(db);
     if (saveResult?.conflictBackup && saveResult.conflictBackup !== lastDataConflictBackup) {
         lastDataConflictBackup = saveResult.conflictBackup;
@@ -8631,7 +8848,6 @@ function completedScheduleSummaryHtml(schedule, candidates = null, showRegimenSo
                 ${reorderAction}
                 ${linkedRemoveAction}
                 <button type="button" onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
-                <button type="button" onclick="event.stopPropagation(); documentPastDose('${escapeHtml(schedule.id)}')">Past Dose</button>
                 <button type="button" onclick="event.stopPropagation(); removeCompletedSchedule('${escapeHtml(schedule.id)}')">Remove</button>
                 ${med ? `<button type="button" onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>` : ''}
             </div>
@@ -9270,7 +9486,12 @@ window.openOrderModifier = function(scheduleId) {
         .map(linked => scheduleLinkModeBetween(sched, linked))
         .find(Boolean);
     document.getElementById('mod-link-mode').value = sched.linkMode || currentLinkedMode || '';
-    renderFrequencyControls('mod', scheduleTimingFrequency(sched) === 'QXH' ? [sched.startTime || getScheduleTimes(sched)[0]] : getScheduleTimes(sched));
+    if (scheduleTimingFrequency(sched) !== 'CUSTOM') document.getElementById('mod-custom-schedule').innerHTML = '';
+    renderFrequencyControls(
+        'mod',
+        scheduleTimingFrequency(sched) === 'QXH' ? [sched.startTime || getScheduleTimes(sched)[0]] : getScheduleTimes(sched),
+        scheduleTimingFrequency(sched) === 'CUSTOM' ? sched : null
+    );
     setWeekdaySelections('mod-weekday-container', sched.weekdays || []);
     document.getElementById('mod-indication').value = sched.indication || "";
     document.getElementById('mod-instr').value = sched.instructions || "";
@@ -9312,6 +9533,8 @@ window.saveOrderModification = async function() {
         sched.freq = frequencyDetails.freq;
         sched.endDate = frequencyDetails.timingFreq === 'ONCE' ? sched.startDate : (document.getElementById('mod-end').value || "Ongoing");
         sched.times = frequencyDetails.times;
+        sched.customTimesByWeekday = frequencyDetails.customTimesByWeekday || {};
+        sched.customScheduleSameTimes = frequencyDetails.customScheduleSameTimes === true;
         sched.intervalHours = frequencyDetails.intervalHours;
         sched.intervalWeeks = frequencyDetails.intervalWeeks || null;
         sched.monthlyAnchor = frequencyDetails.monthlyAnchor || '';
@@ -9422,12 +9645,14 @@ window.minimizeMemberModal = async function() {
         if (!saved) return;
     }
     modal.style.display = 'none';
+    setMemberMedicationWorkPanelOpen(false);
     hideProgressNoteSidePanel(true);
     if (activeMemberTaskId) setWorkspaceTaskActive(activeMemberTaskId, false);
 };
 
 window.closeMemberModal = () => {
     closeProgressNoteSidePanel(true);
+    setMemberMedicationWorkPanelOpen(false);
     if (currentEditingMemberId) memberProfileSessionStates.delete(memberProfileStateKey(currentEditingMemberId));
     document.getElementById('member-modal').style.display = 'none';
     if (activeMemberTaskId) removeWorkspaceTask(activeMemberTaskId);
@@ -10590,6 +10815,30 @@ function frequencyOptionsHtml(selected = 'QD') {
     return options.map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`).join('');
 }
 
+function profileFrequencyOptionsHtml(selected = 'QD') {
+    return `${frequencyOptionsHtml(selected)}<option value="CUSTOM" ${selected === 'CUSTOM' ? 'selected' : ''}>User specified</option>`;
+}
+
+function profileCustomScheduleHtml(schedule = null) {
+    const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const values = schedule?.customTimesByWeekday && typeof schedule.customTimesByWeekday === 'object'
+        ? schedule.customTimesByWeekday
+        : {};
+    return `<div data-profile-custom-schedule class="profile-custom-schedule" style="display:none;">
+        <label class="profile-custom-same-times"><input name="customSameTimes" type="checkbox" ${schedule?.customScheduleSameTimes === false ? '' : 'checked'} onchange="syncProfileCustomScheduleTimes()"> Same times on selected days</label>
+        <div class="profile-custom-day-grid">
+            ${labels.map((label, day) => {
+                const times = Array.isArray(values[day]) ? values[day] : [];
+                return `<div class="profile-custom-day" data-custom-day-column="${day}">
+                    <label class="profile-custom-day-toggle"><input name="customDay" type="checkbox" value="${day}" ${times.length ? 'checked' : ''} onchange="syncProfileCustomScheduleTimes()"> ${label}</label>
+                    ${Array.from({ length: 4 }, (_, index) => `<input data-custom-time="${day}" type="time" value="${escapeHtml(times[index] || '')}" ${times.length ? '' : 'disabled'} oninput="syncProfileCustomScheduleTimes(${day})">`).join('')}
+                </div>`;
+            }).join('')}
+        </div>
+        <div class="form-help">Select each administration day, then enter up to four times per selected day.</div>
+    </div>`;
+}
+
 function prnFrequencyOptionsHtml(selected = '') {
     const options = [
         ['', 'None'],
@@ -10823,8 +11072,8 @@ function orderSetRowPreviewItem(row, index) {
     const doseQty = row.querySelector('.os-dose')?.value || '';
     const intervalHours = parseInt(row.querySelector('.os-interval-hours')?.value, 10);
     const intervalWeeks = parseInt(row.querySelector('.os-interval-weeks')?.value, 10);
-    const timesPerWeek = parseInt(row.querySelector('.os-times-per-week')?.value, 10);
     const weekdays = Array.from(row.querySelectorAll('.os-weekday-input:checked')).map(input => input.value);
+    const timesPerWeek = timingFreq === 'XPW' ? weekdays.length : null;
     const rawTimes = Array.from(row.querySelectorAll('.os-time-input')).map(input => input.value).filter(Boolean);
     const header = orderSetBuilderTitle();
     const cycleStartDay = normalizeRegimenCycleStartDay(row.querySelector('.os-cycle-start')?.value || 1);
@@ -11329,7 +11578,7 @@ function renderOrderSetRowControls(row, existingTimes = null) {
     }
     row.querySelector('.os-interval').style.display = freq === 'QXH' ? 'flex' : 'none';
     row.querySelector('.os-week-interval').style.display = freq === 'QXW' ? 'flex' : 'none';
-    row.querySelector('.os-weekly-count').style.display = freq === 'XPW' ? 'flex' : 'none';
+    row.querySelector('.os-weekly-count').style.display = 'none';
     row.querySelector('.os-weekdays').style.display = ['QXW', 'XPW'].includes(freq) ? 'flex' : 'none';
     row.querySelector('.os-prn-limit').style.display = rawFreq === 'PRN' ? 'flex' : 'none';
     if (['QXW', 'XPW'].includes(freq) && !row.querySelector('.os-weekday-input:checked')) {
@@ -11427,10 +11676,10 @@ function collectOrderSetItem(row) {
     const rawTimes = Array.from(row.querySelectorAll('.os-time-input')).map(input => input.value).filter(Boolean);
     const intervalHours = timingFreq === 'QXH' ? parseInt(row.querySelector('.os-interval-hours').value, 10) : null;
     const intervalWeeks = timingFreq === 'QXW' ? parseInt(row.querySelector('.os-interval-weeks').value, 10) : null;
-    const timesPerWeek = timingFreq === 'XPW' ? parseInt(row.querySelector('.os-times-per-week').value, 10) : null;
     const weekdays = ['QXW', 'XPW'].includes(timingFreq)
         ? Array.from(row.querySelectorAll('.os-weekday-input:checked')).map(input => parseInt(input.value, 10)).sort()
         : [];
+    const timesPerWeek = timingFreq === 'XPW' ? weekdays.length : null;
     const prnMaxDoses = freq === 'PRN' ? parseInt(row.querySelector('.os-prn-max-doses')?.value, 10) : null;
     const prnWindowHours = freq === 'PRN' ? parseInt(row.querySelector('.os-prn-window-hours')?.value, 10) : null;
     const regimenStart = document.getElementById('order-set-start')?.value || localDateKey();
@@ -11553,12 +11802,7 @@ function collectOrderSetItem(row) {
         if (weekdays.length === 0) return { error: "Every X Weeks rows need at least one selected weekday." };
     }
     if (timingFreq === 'XPW') {
-        if (!Number.isInteger(timesPerWeek) || timesPerWeek < 1 || timesPerWeek > 7) {
-            return { error: "Times per week must be between 1 and 7." };
-        }
-        if (weekdays.length !== timesPerWeek) {
-            return { error: `Select exactly ${timesPerWeek} weekday${timesPerWeek === 1 ? '' : 's'} for the X Times Per Week row.` };
-        }
+        if (weekdays.length === 0) return { error: 'X Times Per Week rows need at least one selected weekday.' };
     }
     if (timingFreq) {
         const expected = getExpectedTimeCount(timingFreq);
@@ -12285,10 +12529,7 @@ function ensurePrepackDayCodes(queue) {
 
 function prepackDayCodeMatches(day, scannedCode) {
     const normalized = normalizeMedicationCode(scannedCode);
-    return !!normalized && [
-        day?.prepackScanCode,
-        day?.prepackCode
-    ].some(code => normalizeMedicationCode(code) === normalized);
+    return !!normalized && prepackDayCodeList(day).includes(normalized);
 }
 
 function prepackDayCodeList(day) {
@@ -12299,10 +12540,50 @@ function prepackDayCodeList(day) {
     ].map(normalizeMedicationCode).filter(Boolean);
 }
 
+function recognizedPrepackQueues() {
+    const live = Array.isArray(db.prepackQueues) ? db.prepackQueues : [];
+    const archived = Array.isArray(db.prepackBarcodeArchive) ? db.prepackBarcodeArchive : [];
+    return [...live, ...archived];
+}
+
+function archivedPrepackIsResolved(queue) {
+    const items = (queue?.days || []).flatMap(day => (day.items || []).map(item => ({ day, item })));
+    return items.length > 0 && items.every(({ day, item }) =>
+        item.inventoryReturned || item.inventoryWasted || prepackItemHasDocumentedGivenDose(queue, day, item)
+    );
+}
+
+function maintainPrepackRetention(now = new Date()) {
+    db.prepackQueues = Array.isArray(db.prepackQueues) ? db.prepackQueues : [];
+    db.prepackBarcodeArchive = Array.isArray(db.prepackBarcodeArchive) ? db.prepackBarcodeArchive : [];
+    const cutoff = new Date(now);
+    cutoff.setDate(cutoff.getDate() - 30);
+    const keep = [];
+    const move = [];
+    db.prepackQueues.forEach(queue => {
+        const completedAt = queue.status === 'completed' && queue.completedAt ? new Date(queue.completedAt) : null;
+        if (completedAt && !Number.isNaN(completedAt.getTime()) && completedAt < cutoff) move.push(queue);
+        else keep.push(queue);
+    });
+    if (move.length) {
+        const existingIds = new Set(db.prepackBarcodeArchive.map(queue => queue.id));
+        move.forEach(queue => {
+            if (!existingIds.has(queue.id)) db.prepackBarcodeArchive.push({ ...queue, barcodeArchivedAt: now.toISOString() });
+        });
+        db.prepackQueues = keep;
+        const movedIds = new Set(move.map(queue => queue.id));
+        db.prepackRemovalBackups = ensurePrepackRemovalBackups().filter(backup => !movedIds.has(backup.queueId));
+        if (movedIds.has(activePrepackQueueId)) activePrepackQueueId = null;
+    }
+    const before = db.prepackBarcodeArchive.length;
+    db.prepackBarcodeArchive = db.prepackBarcodeArchive.filter(queue => !archivedPrepackIsResolved(queue));
+    return move.length > 0 || db.prepackBarcodeArchive.length !== before;
+}
+
 function findPrepackPackageByScanCode(scannedCode) {
     const normalized = normalizeMedicationCode(scannedCode);
     if (!normalized) return null;
-    for (const queue of db.prepackQueues || []) {
+    for (const queue of recognizedPrepackQueues()) {
         ensurePrepackDayCodes(queue);
         for (const [dayIndex, day] of (queue.days || []).entries()) {
             if (prepackDayCodeMatches(day, normalized)) {
@@ -12324,7 +12605,7 @@ function findPrepackPackageByScanCode(scannedCode) {
 function findPrepackItemByScanCode(scannedCode) {
     const scannedCodes = medicationCodesFromScannedPayload(scannedCode);
     if (scannedCodes.length === 0) return null;
-    for (const queue of db.prepackQueues || []) {
+    for (const queue of recognizedPrepackQueues()) {
         ensurePrepackDayCodes(queue);
         for (const [dayIndex, day] of (queue.days || []).entries()) {
             const matches = (day.items || []).filter(item => {
@@ -12375,7 +12656,7 @@ function resolveCommandScan(scannedCode, options = {}) {
 }
 
 function commandScanQueue(scan = activeCommandScan) {
-    return scan?.queueId ? (db.prepackQueues || []).find(queue => queue.id === scan.queueId) : null;
+    return scan?.queueId ? recognizedPrepackQueues().find(queue => queue.id === scan.queueId) : null;
 }
 
 function commandScanDay(scan = activeCommandScan) {
@@ -13270,7 +13551,7 @@ function isPreparedPrepackItem(item) {
 
 function normalizeRecordOnlyPrepackReturnFlags() {
     let changed = false;
-    (db.prepackQueues || []).forEach(queue => {
+    recognizedPrepackQueues().forEach(queue => {
         if (isInventoryUnitDoseQueue(queue)) return;
         (queue.days || []).forEach(day => {
             (day.items || []).forEach(item => {
@@ -13559,7 +13840,7 @@ function prepackedDoseCovers(scheduleId, date, time, med = null) {
     const currentMed = med || (schedule ? db.inventory.find(item => item.id === schedule.medId) : null);
     if (!schedule || !currentMed) return null;
     const exactKey = scheduleInstanceKey(scheduleId, date, time);
-    for (const queue of db.prepackQueues || []) {
+    for (const queue of recognizedPrepackQueues()) {
         if (isInventoryUnitDoseQueue(queue)) continue;
         for (const day of queue.days || []) {
             for (const item of day.items || []) {
@@ -14316,8 +14597,9 @@ function ensurePrepackRemovalBackups() {
 }
 
 function prepackRemovalBackupsForQueue(queueId = '') {
+    const unfinishedQueueIds = new Set((db.prepackQueues || []).filter(queue => queue.status !== 'completed').map(queue => queue.id));
     const backups = ensurePrepackRemovalBackups()
-        .filter(backup => !backup.restoredAt)
+        .filter(backup => !backup.restoredAt && unfinishedQueueIds.has(backup.queueId))
         .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
     return queueId ? backups.filter(backup => backup.queueId === queueId) : backups;
 }
@@ -14489,7 +14771,10 @@ function updatePrepackQueueStatus(queue) {
     queue.status = complete ? 'completed' : 'pending';
     if (complete && !queue.completedAt) queue.completedAt = new Date().toISOString();
     if (!complete) queue.completedAt = '';
-    if (complete) deductInventoryUnitDoseStock(queue);
+    if (complete) {
+        deductInventoryUnitDoseStock(queue);
+        db.prepackRemovalBackups = ensurePrepackRemovalBackups().filter(backup => backup.queueId !== queue.id);
+    }
 }
 
 function isPrepackDayComplete(day) {
@@ -14662,6 +14947,9 @@ window.renderPrepackageQueues = function() {
         ? prepackWorkspaceHtml(selected)
         : `${prepackRemovalBackupPanelHtml('')}<div class="empty-state">Select a prepack queue.</div>`;
     setTimeout(() => document.getElementById('prepack-scan-input')?.focus(), 0);
+    enhanceButtonIcons(activeList);
+    enhanceButtonIcons(completedList);
+    enhanceButtonIcons(workspace);
 };
 
 window.selectPrepackQueue = function(queueId) {
@@ -14731,7 +15019,7 @@ window.restorePrepackRemovalBackup = async function(backupId) {
 function returnablePrepackItems() {
     normalizeRecordOnlyPrepackReturnFlags();
     const rows = [];
-    (db.prepackQueues || []).forEach(queue => {
+    recognizedPrepackQueues().forEach(queue => {
         if (isInventoryUnitDoseQueue(queue)) return;
         if (!queue.memberId) return;
         (queue.days || []).forEach(day => {
@@ -15316,9 +15604,13 @@ window.openCommandScanInProfile = async function() {
     renderMemberCommandScanPanel();
 };
 
-window.openCommandScanQueue = function() {
+window.openCommandScanQueue = async function() {
     const queue = commandScanQueue(activeCommandScan);
     if (!queue) return;
+    if (!(db.prepackQueues || []).some(item => item.id === queue.id)) {
+        await appAlert('This completed prepack is outside the 30-day workspace history. Its barcode and unresolved prepared items are still recognized here; use Return / Waste for any remaining medication.', 'Retained Prepack Barcode');
+        return;
+    }
     const day = commandScanDay(activeCommandScan);
     if (day) {
         const index = (queue.days || []).indexOf(day);
@@ -17849,7 +18141,7 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
             Scheduled dose: <strong>${escapeHtml(originalDate)} ${escapeHtml(originalTime)}</strong>${currentDate !== originalDate || currentTime !== originalTime ? `<br>Current retimed dose: <strong>${escapeHtml(currentDate)} ${escapeHtml(currentTime)}</strong>` : ''}
         </div>
         <div class="field-row">
-            <label>New date:<input name="newDate" type="date" value="${escapeHtml(currentDate)}" min="${escapeHtml(schedule.startDate || originalDate)}" ${schedule.endDate && schedule.endDate !== 'Ongoing' ? `max="${escapeHtml(schedule.endDate)}"` : ''} onchange="renderRetimeDosePreview('${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')"></label>
+            <label>New date:<input name="newDate" type="date" value="${escapeHtml(currentDate < localDateKey() ? localDateKey() : currentDate)}" min="${escapeHtml(localDateKey())}" onchange="renderRetimeDosePreview('${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')"></label>
             <label>New time:<input name="newTime" type="time" value="${escapeHtml(currentTime)}" oninput="renderRetimeDosePreview('${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')"></label>
         </div>
         <input type="hidden" name="applyScope" value="single">
@@ -17875,11 +18167,18 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
         await appAlert('Choose the new date and time.');
         return;
     }
-    if (!isDateInsideScheduleWindow(schedule, newDate)) {
-        await appAlert('The new dose time must stay inside the medication therapy window.');
+    const targetWhen = dateTimeFromParts(newDate, newTime);
+    const currentMinute = new Date();
+    currentMinute.setSeconds(0, 0);
+    if (!targetWhen || targetWhen < currentMinute) {
+        await appAlert('The new dose time cannot be before the present time. Choose the current minute or a future date and time.');
         return;
     }
     const applyScope = result.applyScope || 'single';
+    if (applyScope === 'future' && !isDateInsideScheduleWindow(schedule, newDate)) {
+        await appAlert('A forward qXh schedule adjustment must stay inside the medication therapy window. Use Move only this dose for a one-time move beyond that window.');
+        return;
+    }
     const allowScheduleConflict = applyScope === 'future' && isQxh;
     if (retimeTargetConflicts(schedule, originalDate, originalTime, newDate, newTime, allowScheduleConflict)) {
         await appAlert('Another scheduled or documented dose already exists at the new date/time. Choose a different time or edit the existing documentation.');
@@ -17900,8 +18199,8 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
         }
         const original = dateTimeFromParts(originalDate, originalTime);
         const next = dateTimeFromParts(newDate, newTime);
-        if (!original || !next || next < original) {
-            await appAlert('For qXh forward adjustment, choose a new time at or after the original scheduled dose. Use single-dose move for earlier one-off retimes.');
+        if (!original || !next) {
+            await appAlert('Choose a valid date and time for the qXh schedule adjustment.');
             return;
         }
         schedule.rollingAnchorDate = newDate;
@@ -19982,7 +20281,7 @@ async function checkSchedules() {
         const dueMedicationReminders = new Map();
         for (const s of db.schedules) {
             if (!isScheduleDueOnDate(s, todayKey) ||
-                !getScheduleTimes(s).includes(currentTime) ||
+                !getScheduleTimesForDate(s, todayKey).includes(currentTime) ||
                 isScheduleInstanceDocumented(s.id, todayKey, currentTime)) continue;
 
             const med = db.inventory.find(m => m.id === s.medId);
@@ -20019,7 +20318,7 @@ async function checkSchedules() {
         for (const reminder of ensureCareReminderStore()) {
             if (reminder.enabled === false ||
                 !isScheduleDueOnDate(reminder, todayKey) ||
-                !getScheduleTimes(reminder).includes(currentTime) ||
+                !getScheduleTimesForDate(reminder, todayKey).includes(currentTime) ||
                 careReminderReadingLoggedForInstance(reminder, todayKey, currentTime)) continue;
 
             const member = db.family.find(f => f.id === reminder.memberId);
@@ -20151,6 +20450,8 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
         linkRules: linkRulesFromTargets(linkTargetIds, linkMode),
         qodStart: frequencyDetails.timingFreq === 'QOD' ? (document.getElementById('qod-start-date').value || startDate) : "",
         times: frequencyDetails.times,
+        customTimesByWeekday: frequencyDetails.customTimesByWeekday || {},
+        customScheduleSameTimes: frequencyDetails.customScheduleSameTimes === true,
         intervalHours: frequencyDetails.intervalHours,
         intervalWeeks: frequencyDetails.intervalWeeks || null,
         monthlyAnchor: frequencyDetails.monthlyAnchor || '',
@@ -20218,6 +20519,8 @@ function clearScheduleEntryFields() {
     if (monthlyAnchor) monthlyAnchor.value = '';
     const qodStart = document.getElementById('qod-start-date');
     if (qodStart) qodStart.value = '';
+    const customSchedule = document.getElementById('sched-custom-schedule');
+    if (customSchedule) customSchedule.innerHTML = '';
     setWeekdaySelections('sched-weekday-container', []);
     renderFrequencyControls('sched');
     document.querySelectorAll('#sched-time-fields input[type="time"]').forEach(input => { input.value = ''; });
@@ -20421,8 +20724,13 @@ function loadScheduleIntoScheduleEntry(order, { reorder = false } = {}) {
     document.getElementById('sched-prn-window-hours').value = order.prnWindowHours || 24;
     const prnScheduleFreq = document.getElementById('sched-prn-schedule-freq');
     if (prnScheduleFreq) prnScheduleFreq.value = order.prnScheduleFreq || '';
+    if (scheduleTimingFrequency(order) !== 'CUSTOM') document.getElementById('sched-custom-schedule').innerHTML = '';
     setMonitoringReminderSelection('sched', order.monitoringReminders || [], order.monitoringReminderNote || '', order.memberId || '', order.monitoringReminderSchedule || null, order.monitoringHoldRule || null);
-    renderFrequencyControls('sched', scheduleTimingFrequency(order) === 'QXH' ? [order.startTime || getScheduleTimes(order)[0]] : getScheduleTimes(order));
+    renderFrequencyControls(
+        'sched',
+        scheduleTimingFrequency(order) === 'QXH' ? [order.startTime || getScheduleTimes(order)[0]] : getScheduleTimes(order),
+        scheduleTimingFrequency(order) === 'CUSTOM' ? order : null
+    );
     setWeekdaySelections('sched-weekday-container', order.weekdays || []);
     calculateLiveDose();
     updateScheduleMedicationPreview();
@@ -20462,38 +20770,17 @@ window.reorderMedicationSchedule = async function(scheduleId) {
 function setMemberMedicationWorkPanelOpen(open) {
     const body = document.querySelector('#member-modal .member-profile-body');
     const dock = document.getElementById('member-order-work-dock');
+    const modal = document.getElementById('member-modal');
+    const profileWindow = modal?.querySelector('.member-profile-window');
     if (!body || !dock) return;
+    if (profileWindow && dock.parentElement !== profileWindow) profileWindow.appendChild(dock);
     body.classList.toggle('order-work-open', Boolean(open));
+    modal?.classList.toggle('order-dock-open', Boolean(open));
     dock.setAttribute('aria-hidden', open ? 'false' : 'true');
-    if (open) {
-        if (!body.dataset.orderDockGeometryBound) {
-            body.addEventListener('scroll', updateMemberMedicationWorkDockGeometry, { passive: true });
-            window.addEventListener('resize', updateMemberMedicationWorkDockGeometry);
-            body.dataset.orderDockGeometryBound = 'true';
-        }
-        updateMemberMedicationWorkDockGeometry();
-        requestAnimationFrame(updateMemberMedicationWorkDockGeometry);
-    }
 }
 
 function updateMemberMedicationWorkDockGeometry() {
-    const body = document.querySelector('#member-modal .member-profile-body');
-    const dock = document.getElementById('member-order-work-dock');
-    if (!body || !dock || !body.classList.contains('order-work-open')) return;
-    const calendarSection = body.querySelector('[data-member-section="orders"]:not(.member-scan-console)');
-    const profileWindow = document.querySelector('#member-modal .member-profile-window');
-    const profileRect = profileWindow?.getBoundingClientRect();
-    const calendarRect = calendarSection?.getBoundingClientRect();
-    const bodyRect = body.getBoundingClientRect();
-    const fallbackTop = bodyRect.top + 106;
-    const top = Math.max(fallbackTop, calendarRect?.top || fallbackTop);
-    const bottomLimit = Math.min(bodyRect.bottom, profileRect?.bottom || bodyRect.bottom);
-    const bottom = Math.max(8, window.innerHeight - bottomLimit + 8);
-    const scrollbarGutter = Math.max(16, body.offsetWidth - body.clientWidth + 8);
-    const right = Math.max(12, window.innerWidth - bodyRect.right + scrollbarGutter + 2);
-    dock.style.setProperty('--member-order-dock-top', `${Math.round(top)}px`);
-    dock.style.setProperty('--member-order-dock-bottom', `${Math.round(bottom)}px`);
-    dock.style.setProperty('--member-order-dock-right', `${Math.round(right)}px`);
+    // Medication Work participates in the profile grid, so no viewport positioning is needed.
 }
 
 window.openMemberMedicationWorkPanel = function(memberId = currentEditingMemberId) {
@@ -20575,6 +20862,8 @@ function applyScheduleDraftToExisting(draft, target) {
         instructions: draft.instructions || '',
         qodStart: draft.qodStart || '',
         times: draft.times || [],
+        customTimesByWeekday: draft.customTimesByWeekday || {},
+        customScheduleSameTimes: draft.customScheduleSameTimes === true,
         intervalHours: draft.intervalHours || null,
         intervalWeeks: draft.intervalWeeks || null,
         monthlyAnchor: draft.monthlyAnchor || '',
@@ -20627,6 +20916,8 @@ function applyScheduleDraftToOrderSetItem(draft, targetSchedule, beforeSchedule 
         freq: draft.freq,
         prnScheduleFreq: draft.prnScheduleFreq || '',
         times: draft.times || [],
+        customTimesByWeekday: draft.customTimesByWeekday || {},
+        customScheduleSameTimes: draft.customScheduleSameTimes === true,
         intervalHours: draft.intervalHours || null,
         intervalWeeks: draft.intervalWeeks || null,
         anchorDate: draft.freq === 'Monthly' || draft.freq === 'QW' ? (draft.monthlyAnchor || draft.startDate || '') : '',
@@ -20760,6 +21051,7 @@ async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {
             linkRules: linkRulesFromTargets(mappedTargets, order.linkMode || ''),
             linkGroup: order.linkMode && mappedTargets[0] ? linkGroupFromTarget(mappedTargets[0]) : ''
         };
+        removeScheduleLinkReferences(target.id);
         const before = applyScheduleDraftToExisting(orderForApply, target);
         applyScheduleDraftToOrderSetItem(orderForApply, target, before);
         const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === target.memberId);
@@ -21151,9 +21443,6 @@ window.renderProfileMonitoringModalTimes = function() {
         <div class="profile-modal-date-grid" style="${freq === 'QXW' ? '' : 'display:none;'}">
             <label>Every<input name="intervalWeeks" type="number" min="1" max="52" step="1" value="2"></label><span>weeks</span>
         </div>
-        <div class="profile-modal-date-grid" style="${freq === 'XPW' ? '' : 'display:none;'}">
-            <label>Times per week<input name="timesPerWeek" type="number" min="1" max="7" step="1" value="1"></label>
-        </div>
         <div class="weekday-picker profile-monitoring-weekdays" style="${['QXW', 'XPW'].includes(freq) ? '' : 'display:none;'}">${weekdays}</div>
         <div class="profile-modal-time-grid">
             ${Array.from({ length: count }, (_, index) => `<label>${freq === 'QXH' ? 'Start time' : `Time ${index + 1}`}<input name="time" type="time" value="${escapeHtml(defaults[index] || '08:00')}"></label>`).join('')}
@@ -21206,7 +21495,7 @@ window.openProfileMonitoringComposer = async function(memberId = currentEditingM
         intervalWeeks: parseInt(body.querySelector('[name="intervalWeeks"]')?.value, 10),
         monthlyAnchor: body.querySelector('[name="monthlyAnchor"]')?.value || '',
         weekdays: Array.from(body.querySelectorAll('[name="weekday"]:checked')).map(input => parseInt(input.value, 10)).sort(),
-        timesPerWeek: parseInt(body.querySelector('[name="timesPerWeek"]')?.value, 10),
+        timesPerWeek: Array.from(body.querySelectorAll('[name="weekday"]:checked')).length,
         qodStart: body.querySelector('[name="qodStart"]')?.value || '',
         note: body.querySelector('[name="note"]')?.value.trim() || ''
     }));
@@ -21214,9 +21503,7 @@ window.openProfileMonitoringComposer = async function(memberId = currentEditingM
     if (result.endDate !== 'Ongoing' && result.endDate < result.startDate) return appAlert('Monitoring end date cannot be before the start date.');
     if (result.freq === 'QXH' && (!Number.isInteger(result.intervalHours) || result.intervalHours < 1 || result.intervalHours > 24)) return appAlert('Every X hours must be between 1 and 24.');
     if (result.freq === 'QXW' && (!Number.isInteger(result.intervalWeeks) || result.intervalWeeks < 1 || result.intervalWeeks > 52)) return appAlert('Every X weeks must be between 1 and 52.');
-    if (result.freq === 'XPW' && (!Number.isInteger(result.timesPerWeek) || result.timesPerWeek < 1 || result.timesPerWeek > 7)) return appAlert('Times per week must be between 1 and 7.');
     if (['QXW', 'XPW'].includes(result.freq) && !result.weekdays.length) return appAlert('Select at least one weekday.');
-    if (result.freq === 'XPW' && result.weekdays.length !== result.timesPerWeek) return appAlert(`Select exactly ${result.timesPerWeek} weekday${result.timesPerWeek === 1 ? '' : 's'}.`);
     if (result.freq === 'Monthly' && !result.monthlyAnchor) return appAlert('Enter the first monthly monitoring date.');
     if (result.rawTimes.length !== (result.freq === 'QXH' ? 1 : getExpectedTimeCount(result.freq))) return appAlert('Enter all monitoring times.');
     const times = result.freq === 'QXH' ? generateIntervalTimes(result.rawTimes[0], result.intervalHours) : Array.from(new Set(result.rawTimes)).sort();
@@ -21523,11 +21810,21 @@ window.renderProfileScheduleComposerTimes = function() {
     const timeWrap = body.querySelector('[data-profile-schedule-times]');
     const intervalWrap = body.querySelector('[data-profile-schedule-interval]');
     const weeklyWrap = body.querySelector('[data-profile-schedule-weekdays]');
+    const weekInterval = body.querySelector('[data-profile-schedule-week-interval]');
     const monthlyWrap = body.querySelector('[data-profile-schedule-monthly]');
+    const customWrap = body.querySelector('[data-profile-custom-schedule]');
     if (!timeWrap) return;
     if (intervalWrap) intervalWrap.style.display = freq === 'QXH' ? '' : 'none';
     if (weeklyWrap) weeklyWrap.style.display = ['QXW', 'XPW'].includes(freq) ? '' : 'none';
+    if (weekInterval) weekInterval.style.display = freq === 'QXW' ? '' : 'none';
     if (monthlyWrap) monthlyWrap.style.display = freq === 'Monthly' ? '' : 'none';
+    if (customWrap) customWrap.style.display = freq === 'CUSTOM' ? '' : 'none';
+    if (freq === 'CUSTOM') {
+        timeWrap.innerHTML = '';
+        const prnWrap = body.querySelector('[data-profile-schedule-prn-controls]');
+        if (prnWrap) prnWrap.style.display = 'none';
+        return;
+    }
     const count = freq === 'QXH' ? 1 : getExpectedTimeCount(freq);
     if (freq === 'PRN') {
         timeWrap.innerHTML = '<span class="empty-state">As-needed medication: no scheduled time required.</span>';
@@ -21542,6 +21839,26 @@ window.renderProfileScheduleComposerTimes = function() {
         <label>${freq === 'QXH' ? 'Start time' : `Dose ${index + 1}`}<input name="time" type="time" value="${escapeHtml(defaultTimeForIndex(index, freq))}" oninput="renderProfileScheduleIntervalPreview()"></label>
     `).join('') + '<div data-profile-schedule-interval-preview class="interval-preview sunken-panel profile-schedule-interval-preview"></div>';
     renderProfileScheduleIntervalPreview();
+};
+
+window.syncProfileCustomScheduleTimes = function(sourceDay = null) {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const selectedDays = Array.from(body.querySelectorAll('input[name="customDay"]:checked')).map(input => input.value);
+    body.querySelectorAll('[data-custom-day-column]').forEach(column => {
+        const selected = selectedDays.includes(column.dataset.customDayColumn || '');
+        column.classList.toggle('selected', selected);
+        column.querySelectorAll('[data-custom-time]').forEach(input => { input.disabled = !selected; });
+    });
+    if (!body.querySelector('input[name="customSameTimes"]')?.checked || selectedDays.length < 2) return;
+    const filledDay = selectedDays.find(day => Array.from(body.querySelectorAll(`[data-custom-time="${day}"]`)).some(input => input.value));
+    const source = selectedDays.includes(String(sourceDay)) ? String(sourceDay) : (filledDay || selectedDays[0]);
+    const sourceValues = Array.from(body.querySelectorAll(`[data-custom-time="${source}"]`)).map(input => input.value);
+    selectedDays.filter(day => day !== source).forEach(day => {
+        Array.from(body.querySelectorAll(`[data-custom-time="${day}"]`)).forEach((input, index) => {
+            input.value = sourceValues[index] || '';
+        });
+    });
 };
 
 function collectProfileScheduleComposer(body, memberId) {
@@ -21559,10 +21876,17 @@ function collectProfileScheduleComposer(body, memberId) {
     }
     const times = Array.from(body.querySelectorAll('input[name="time"]')).map(input => input.value).filter(Boolean).sort();
     const intervalHours = freq === 'QXH' ? parseInt(body.querySelector('[name="intervalHours"]')?.value, 10) : null;
-    const weekdays = ['QXW', 'XPW'].includes(freq)
+    let weekdays = ['QXW', 'XPW'].includes(freq)
         ? Array.from(body.querySelectorAll('input[name="weekdays"]:checked')).map(input => parseInt(input.value, 10)).sort()
         : [];
-    if (freq !== 'PRN' && freq !== 'QXH' && times.length !== getExpectedTimeCount(freq)) {
+    const customTimesByWeekday = {};
+    if (freq === 'CUSTOM') {
+        weekdays = Array.from(body.querySelectorAll('input[name="customDay"]:checked')).map(input => parseInt(input.value, 10)).sort();
+        weekdays.forEach(day => {
+            customTimesByWeekday[day] = uniqueValues(Array.from(body.querySelectorAll(`[data-custom-time="${day}"]`)).map(input => input.value).filter(Boolean)).sort();
+        });
+    }
+    if (!['PRN', 'QXH', 'CUSTOM'].includes(freq) && times.length !== getExpectedTimeCount(freq)) {
         appAlert('Enter the required administration time(s).');
         return false;
     }
@@ -21572,6 +21896,10 @@ function collectProfileScheduleComposer(body, memberId) {
     }
     if (['QXW', 'XPW'].includes(freq) && weekdays.length === 0) {
         appAlert('Select at least one weekday.');
+        return false;
+    }
+    if (freq === 'CUSTOM' && (weekdays.length === 0 || weekdays.some(day => !customTimesByWeekday[day]?.length))) {
+        appAlert('Select at least one weekday and enter at least one administration time for every selected day.');
         return false;
     }
     const selectedLinkTargetIds = selectedOptionValues(body.querySelector('[data-profile-schedule-link-target]'));
@@ -21604,7 +21932,11 @@ function collectProfileScheduleComposer(body, memberId) {
         linkTargetId: linkTargetIds[0] || '',
         linkRules: linkRulesFromTargets(linkTargetIds, linkMode),
         qodStart: freq === 'QOD' ? startDate : '',
-        times: freq === 'QXH' ? generateIntervalTimes(times[0], intervalHours) : times,
+        times: freq === 'QXH'
+            ? generateIntervalTimes(times[0], intervalHours)
+            : (freq === 'CUSTOM' ? uniqueValues(Object.values(customTimesByWeekday).flat()).sort() : times),
+        customTimesByWeekday: freq === 'CUSTOM' ? customTimesByWeekday : {},
+        customScheduleSameTimes: freq === 'CUSTOM' ? !!body.querySelector('input[name="customSameTimes"]')?.checked : false,
         intervalHours: freq === 'QXH' ? intervalHours : null,
         intervalWeeks: freq === 'QXW' ? parseInt(body.querySelector('[name="intervalWeeks"]')?.value, 10) || 1 : null,
         monthlyAnchor: freq === 'Monthly' ? (body.querySelector('[name="monthlyAnchor"]')?.value || startDate) : '',
@@ -21619,7 +21951,7 @@ function collectProfileScheduleComposer(body, memberId) {
         monitoringHoldRule: null,
         reorderSourceId: body.querySelector('[name="reorderSourceId"]')?.value || '',
         modifySourceId,
-        startTime: times[0] || '',
+        startTime: freq === 'CUSTOM' ? (uniqueValues(Object.values(customTimesByWeekday).flat()).sort()[0] || '') : (times[0] || ''),
         isOneTime: freq === 'ONCE'
     };
     if (schedule.endDate !== 'Ongoing' && schedule.endDate < schedule.startDate) {
@@ -21695,7 +22027,7 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
                 <fieldset class="profile-schedule-timing-card">
                     <legend>Schedule</legend>
                     <div class="profile-schedule-row">
-                        <label>Frequency<select name="freq" onchange="renderProfileScheduleComposerTimes()">${frequencyOptionsHtml(existingOrder?.freq || 'QD')}</select></label>
+                        <label>Frequency<select name="freq" onchange="renderProfileScheduleComposerTimes()">${profileFrequencyOptionsHtml(existingOrder?.freq || 'QD')}</select></label>
                         <label>Start<input name="startDate" type="date" value="${escapeHtml(existingOrder?.startDate || today)}" onchange="renderProfileScheduleIntervalPreview()"></label>
                         <label>End<input name="endDate" type="date" value="${escapeHtml(existingOrder?.endDate === 'Ongoing' ? '' : (existingOrder?.endDate || ''))}" onchange="renderProfileScheduleIntervalPreview()"></label>
                     </div>
@@ -21703,8 +22035,9 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
                     <div data-profile-schedule-monthly style="display:none;"><label>First monthly date <input name="monthlyAnchor" type="date" value="${escapeHtml(existingOrder?.monthlyAnchor || existingOrder?.startDate || today)}"></label></div>
                     <div data-profile-schedule-weekdays class="profile-schedule-weekdays" style="display:none;">
                         ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((day, index) => `<label class="weekday-option"><input name="weekdays" type="checkbox" value="${index}" ${(existingOrder?.weekdays || []).map(Number).includes(index) ? 'checked' : ''}>${day}</label>`).join('')}
-                        <label>Every <input name="intervalWeeks" type="number" min="1" max="52" value="${escapeHtml(existingOrder?.intervalWeeks || 1)}"> week(s)</label>
+                        <label data-profile-schedule-week-interval>Every <input name="intervalWeeks" type="number" min="1" max="52" value="${escapeHtml(existingOrder?.intervalWeeks || 1)}"> week(s)</label>
                     </div>
+                    ${profileCustomScheduleHtml(existingOrder)}
                     <div data-profile-schedule-times class="profile-schedule-times"></div>
                     <div data-profile-schedule-prn-controls class="profile-schedule-prn" style="display:none;">
                         <label>PRN max doses<input name="prnMaxDoses" type="number" min="1" value="${escapeHtml(existingOrder?.prnMaxDoses || '')}"></label>
@@ -21736,6 +22069,7 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
         </div>
     `, existingOrder ? 'Update Worklist' : 'Add to Worklist', body => collectProfileScheduleComposer(body, memberId));
     window.renderProfileScheduleComposerTimes();
+    window.syncProfileCustomScheduleTimes();
     window.renderProfileScheduleLinkOptions(existingOrder?.linkTargetIds?.length ? existingOrder.linkTargetIds : (existingOrder?.linkTargetId || ''));
     if (existingOrder) {
         const body = document.getElementById('action-modal-body');
@@ -22273,7 +22607,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule',
         kitExpiry: stockPlan.kitExpiry || '',
         prepackQueueId: stockPlan.prepackQueueId || '',
         prepackItemId: stockPlan.prepackItemId || '',
-        stockDelta: consumesStock ? (Number.isFinite(stockPlan.stockDelta) ? stockPlan.stockDelta : stockPlan.qtyToSubtract) : (usesContainerTracking(med) ? 0 : parseAmount(sched.doseQty, 0)),
+        stockDelta: consumesStock ? (Number.isFinite(stockPlan.stockDelta) ? stockPlan.stockDelta : stockPlan.qtyToSubtract) : 0,
         stockLogDetail: stockPlan.logDetail,
         details: `${doseStatusLabel(status)}; ${scheduledText}${stockPlan.logDetail} via ${sourceLabel}${overrideText}${holdOverrideText}${noteText}`
     };
@@ -22452,6 +22786,8 @@ function isGivenAdministrationHistory(entry) {
 }
 
 function administrationStockDelta(entry, med, schedule) {
+    const status = entry?.doseStatus || 'given';
+    if (!isGivenStatus(status) && status !== 'wasted') return 0;
     const saved = parseAmount(entry.stockDelta, NaN);
     if (Number.isFinite(saved) && (saved > 0 || isGivenStatus(entry.doseStatus) || usesContainerTracking(med))) return saved;
     if (!med || usesContainerTracking(med)) return 0;
@@ -22672,7 +23008,9 @@ window.administerDose = async function(medId, scheduleId) {
             .map(item => item.id);
         const alreadyDocumented = db.history.some(entry =>
             linkedIds.includes(entry.scheduleId) &&
-            String(entry.timestamp || '').startsWith(`${actual.actualDate} ${actual.actualTime}`)
+            isGivenAdministrationHistory(entry) &&
+            (entry.scheduledDate || historyEntryDateTime(entry).date) === (actual.scheduledDate || actual.actualDate) &&
+            (entry.scheduledTime || historyEntryDateTime(entry).time) === (actual.scheduledTime || actual.actualTime)
         );
         if (alreadyDocumented && !await appConfirm('Another linked medication in this choose-one group is already documented for that date/time. Override and document this one too?', 'Linked Medication Warning')) {
             return;
@@ -22745,7 +23083,7 @@ window.finishTopicalContainer = async function(scheduleId) {
         medId: schedule.medId,
         memberId: schedule.memberId
     });
-    markScheduleCompleted(schedule);
+    markScheduleCompleted(schedule, new Date().toISOString(), 'container-finished');
     await sync();
     renderCalendar();
 };
