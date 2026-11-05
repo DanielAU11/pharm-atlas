@@ -6,6 +6,7 @@ const outDir = path.join(root, 'www');
 const files = [
   ['index.html', 'index.html'],
   ['style.css', 'style.css'],
+  ['sync-core.js', 'sync-core.js'],
   ['renderer.js', 'renderer.js'],
   ['mobile-api.js', 'mobile-api.js'],
   ['vendor/qrcode.js', 'vendor/qrcode.js'],
@@ -42,5 +43,7 @@ const mobileIndex = fs.readFileSync(mobileIndexPath, 'utf8')
   .replace('https://unpkg.com/98.css', 'vendor/98.css')
   .replace('node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js');
 fs.writeFileSync(mobileIndexPath, mobileIndex);
+
+fs.cpSync(path.join(root, 'assets'), path.join(outDir, 'assets'), { recursive: true });
 
 console.log(`Mobile web build written to ${outDir}`);

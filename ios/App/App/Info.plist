@@ -26,6 +26,15 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>PharmAtlas uses the camera to scan a pairing QR shown by the user's PharmAtlas desktop app.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PharmAtlas connects to the user's paired desktop on the same local network to synchronize medication records.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

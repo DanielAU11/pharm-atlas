@@ -110,6 +110,8 @@
                             <button type="button" onclick="archiveOldData()">Archive Old Data</button>
                             <button type="button" onclick="openFirstRunSetupGuide()">Setup Guide</button>
                             <button type="button" onclick="openPrinterCalibration()">Printer Calibration</button>
+                            <button id="desktop-device-sync-button" type="button" onclick="openDesktopDeviceSync()"><span class="win98-icon icon-view"></span> Device Sync</button>
+                            <button id="desktop-email-setup-button" type="button" onclick="openDesktopEmailSetup()"><span class="win98-icon icon-info"></span> Desktop Email Setup</button>
                             <button id="guided-help-toggle-button" type="button" class="guided-help-toggle" onclick="toggleGuidedHelp()">Hover help</button>
                         </div>
                         <div id="data-health-summary" class="maintenance-summary"></div>
@@ -1803,6 +1805,7 @@
             </div>
         </div>
     </div>
+    <script src="sync-core.js"></script>
     <script src="vendor/qrcode.js"></script>
     <script src="vendor/bwip-js-min.js"></script>
     <script src="mobile-api.js"></script>

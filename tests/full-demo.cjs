@@ -18,7 +18,12 @@ app.commandLine.appendSwitch('force-device-scale-factor', '1');
 
 async function capture(win, name) {
     if (!captureDir) return null;
-    await new Promise(resolve => setTimeout(resolve, 180));
+    if (!win.isVisible()) {
+        win.setOpacity(0);
+        win.showInactive();
+    }
+    win.webContents.invalidate();
+    await new Promise(resolve => setTimeout(resolve, 260));
     const captured = await win.webContents.capturePage();
     const image = deviceConfig.scale === 1 ? captured : captured.resize({
         width: deviceConfig.width * deviceConfig.scale,
@@ -39,10 +44,11 @@ app.whenReady().then(async () => {
         width: deviceConfig.width,
         height: deviceConfig.height,
         enableLargerThanScreen: true,
-        webPreferences: { contextIsolation: false, nodeIntegration: false }
+        webPreferences: { contextIsolation: false, nodeIntegration: false, backgroundThrottling: false }
     });
-    win.webContents.on('console-message', (_event, level, message) => {
-        const text = String(message);
+    win.webContents.on('console-message', details => {
+        const text = String(details.message || '');
+        const level = typeof details.level === 'number' ? details.level : ({ error: 3, warning: 2 }[details.level] || 0);
         if (level >= 2 && !text.includes('Electron Security Warning') && !text.includes('using deprecated parameters for the initialization function')) errors.push(text);
     });
     await win.loadFile(path.join(__dirname, '..', 'www', 'index.html'));
@@ -114,6 +120,14 @@ app.whenReady().then(async () => {
             barcodeRendered: typeof qr === 'string' && qr.startsWith('data:image/'),
             persistence: saved === true && loaded.family?.[0]?.id === 'demo-member',
             mobileRuntime: document.documentElement.classList.contains('mobile-runtime'),
+            mobileCompanionPanel: !!document.getElementById('mobile-companion-panel'),
+            simplifiedMobileNavigation: document.getElementById('tab-prepackage')?.hidden === true && document.getElementById('tab-recipes')?.hidden === true,
+            mobileUiState: {
+                classes: document.documentElement.className,
+                title: document.querySelector('.app-window > .title-bar .title-bar-text')?.textContent,
+                companionDisplay: getComputedStyle(document.getElementById('mobile-companion-panel')).display,
+                desktopSyncDisplay: getComputedStyle(document.getElementById('desktop-device-sync-button')).display
+            },
             overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
             renderErrors: [...document.querySelectorAll('.render-error')].map(item => item.textContent.trim())
         };
@@ -121,12 +135,13 @@ app.whenReady().then(async () => {
 
     const screenshots = [];
     if (captureDir) {
+        if (fs.existsSync(captureDir)) fs.rmSync(captureDir, { recursive: true, force: true });
         const states = [
             ['dashboard', `switchTab('dashboard'); window.scrollTo(0,0);`],
             ['schedule', `switchTab('schedules'); window.scrollTo(0,0);`],
-            ['prepack', `switchTab('prepackage'); activePrepackQueueId='queue-1'; renderPrepackageQueues(); window.scrollTo(0,0);`],
+            ['monitoring', `switchTab('vitals'); window.scrollTo(0,0);`],
             ['inventory', `switchTab('inventory'); window.scrollTo(0,0);`],
-            ['regimens', `switchTab('order-sets'); window.scrollTo(0,0);`]
+            ['members', `switchTab('family'); window.scrollTo(0,0);`]
         ];
         for (const [name, command] of states) {
             await win.webContents.executeJavaScript(command);
@@ -137,7 +152,8 @@ app.whenReady().then(async () => {
     const failed = !logic.pastPreserved || !logic.qodFutureMoved || !logic.linkedTimeAligned ||
         Object.values(logic.panels).some(value => !value) || logic.unresolvedButtons.length > 0 ||
         logic.inventoryRows < 5 || logic.scheduleRows < 6 || logic.prepackReturnable < 1 ||
-        !logic.barcodeRendered || !logic.persistence || logic.overflow > 0 || logic.renderErrors.length > 0 || errors.length > 0;
+        !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || !logic.simplifiedMobileNavigation ||
+        logic.overflow > 0 || logic.renderErrors.length > 0 || errors.length > 0;
     process.stdout.write(JSON.stringify({ device, logic, screenshots, consoleErrors: errors }, null, 2));
     win.destroy();
     app.exit(failed ? 1 : 0);

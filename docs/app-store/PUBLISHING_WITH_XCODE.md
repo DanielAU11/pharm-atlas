@@ -26,7 +26,7 @@ Always open the workspace, not the `.xcodeproj`, so CocoaPods dependencies are i
 1. Select the **App** target in Xcode.
 2. In **Signing & Capabilities**, select the correct development team.
 3. Keep **Automatically manage signing** enabled.
-4. Confirm bundle identifier `com.pharmatlas.app`, version `1.1.0`, and build `1`.
+4. Confirm bundle identifier `com.pharmatlas.app`, version `1.2.0`, and a build number not previously uploaded.
 5. Confirm iPhone and iPad are both selected as supported destinations.
 
 ## 4. Test Before Archiving
@@ -34,8 +34,10 @@ Always open the workspace, not the `.xcodeproj`, so CocoaPods dependencies are i
 1. Run on at least one current iPhone simulator and one current iPad simulator.
 2. Run on a physical device.
 3. Verify persistence after force-quit and relaunch.
-4. Verify schedule creation, single-dose and future-dose retiming, inventory subtraction, prepack recognition, barcode scanning, backup/restore, PDF generation, sharing, and accessibility text sizing.
-5. In Xcode, use **Product > Analyze** and resolve release-blocking findings.
+4. Verify schedule creation, single-dose and future-dose retiming, inventory subtraction, native local notifications, backup/restore, PDF generation, sharing, and accessibility text sizing.
+5. Pair with a running Windows desktop on the same Wi-Fi network. Verify QR camera permission, manual pairing fallback, phone-to-desktop and desktop-to-phone changes, conflict merging, deletion handling, and automatic desktop safety backups.
+6. Force-quit the iOS app and verify already-scheduled reminders still appear without email or a network connection.
+7. In Xcode, use **Product > Analyze** and resolve release-blocking findings.
 
 ## 5. Archive And Upload
 

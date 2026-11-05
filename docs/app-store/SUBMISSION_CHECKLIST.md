@@ -13,7 +13,10 @@
 - [ ] Signing, entitlements, and bundle identifier are correct.
 - [ ] Physical iPhone and iPad tests pass.
 - [ ] Backup/restore and persistence after relaunch pass.
-- [ ] Medication scheduling, retiming, administration, inventory, prepack, return/waste, monitoring, reports, and sharing pass.
+- [ ] Native iOS reminders work after force-quit and do not depend on email.
+- [ ] Camera QR pairing, manual pairing, local-network permission, encrypted sync, conflict merge, and desktop safety backup pass on physical devices.
+- [ ] Medication scheduling, retiming, administration, inventory, monitoring, reports, and sharing pass on iOS.
+- [ ] Desktop-only Prepack and Recipe Builder tabs are absent from iOS navigation.
 - [ ] App Review notes clearly state intended use and provide a review path.
 - [ ] TestFlight acceptance pass is complete.
 - [ ] The processed build is selected and submitted for review.

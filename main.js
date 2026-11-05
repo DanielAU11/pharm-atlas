@@ -2,7 +2,10 @@ const { app, BrowserWindow, ipcMain, Notification, nativeImage, dialog } = requi
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const http = require('http');
+const os = require('os');
 const nodemailer = require('nodemailer');
+const SyncCore = require('./sync-core');
 
 if (require('electron-squirrel-startup')) app.quit();
 
@@ -38,9 +41,13 @@ const defaultDataDir = path.join(app.getPath('desktop'), 'PharmAtlasData');
 const dataLocationConfigPath = path.join(runtimeDataDir, 'data-location.json');
 let dataDir = loadDataDirSetting();
 let dbPath = path.join(dataDir, 'db.json');
-const emailConfigPath = path.join(defaultDataDir, 'email-config.json');
+const emailConfigPath = path.join(runtimeDataDir, 'email-config.json');
+const localSyncConfigPath = path.join(runtimeDataDir, 'local-sync.json');
 let lastKnownDbMtimeMs = 0;
 let lastKnownDbFingerprint = '';
+let localSyncServer = null;
+let localSyncState = loadLocalSyncConfig();
+const localSyncNonces = new Map();
 
 function dbFingerprintFromText(text) {
     return crypto.createHash('sha256').update(String(text || '').replace(/^\uFEFF/, '')).digest('hex');
@@ -48,6 +55,37 @@ function dbFingerprintFromText(text) {
 
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function randomBase64Url(bytes = 32) {
+    return crypto.randomBytes(bytes).toString('base64url');
+}
+
+function loadLocalSyncConfig() {
+    try {
+        if (fs.existsSync(localSyncConfigPath)) {
+            const saved = JSON.parse(fs.readFileSync(localSyncConfigPath, 'utf8').replace(/^\uFEFF/, ''));
+            return {
+                enabled: saved.enabled === true,
+                deviceId: saved.deviceId || `desktop-${crypto.randomUUID()}`,
+                key: saved.key || randomBase64Url(),
+                port: Number(saved.port) || 43127,
+                pairedAt: saved.pairedAt || ''
+            };
+        }
+    } catch (error) {
+        console.error('Unable to read local sync configuration:', error.message);
+    }
+    return { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, pairedAt: '' };
+}
+
+function saveLocalSyncConfig() {
+    ensureDir(runtimeDataDir);
+    fs.writeFileSync(localSyncConfigPath, JSON.stringify(localSyncState, null, 2));
+}
+
+function desktopDeviceId() {
+    return localSyncState.deviceId;
 }
 
 function loadDataDirSetting() {
@@ -203,17 +241,241 @@ function loadEmailConfig() {
 
     return {
         user: process.env.PHARMATLAS_EMAIL_USER || savedConfig.user || '',
-        pass: process.env.PHARMATLAS_EMAIL_APP_PASSWORD || savedConfig.appPassword || savedConfig.pass || ''
+        pass: process.env.PHARMATLAS_EMAIL_APP_PASSWORD || savedConfig.appPassword || savedConfig.pass || '',
+        host: savedConfig.host || 'smtp.gmail.com',
+        port: Number(savedConfig.port) || 465,
+        secure: savedConfig.secure !== false
     };
 }
 
-const emailConfig = loadEmailConfig();
-const transporter = emailConfig.user && emailConfig.pass
-    ? nodemailer.createTransport({
-        service: 'gmail',
-        auth: emailConfig
-    })
-    : null;
+let emailConfig = loadEmailConfig();
+let transporter = createEmailTransporter(emailConfig);
+
+function createEmailTransporter(config) {
+    if (!config?.user || !config?.pass) return null;
+    return nodemailer.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        auth: { user: config.user, pass: config.pass }
+    });
+}
+
+function emailStatus() {
+    return {
+        configured: !!transporter,
+        user: emailConfig.user || '',
+        host: emailConfig.host || '',
+        port: emailConfig.port || 465,
+        secure: emailConfig.secure !== false
+    };
+}
+
+function privateIpv4Addresses() {
+    const addresses = [];
+    Object.values(os.networkInterfaces()).flat().forEach(entry => {
+        if (!entry || entry.internal || entry.family !== 'IPv4') return;
+        if (/^(169\.254|127\.)/.test(entry.address)) return;
+        addresses.push(entry.address);
+    });
+    return addresses.sort((a, b) => {
+        const privateA = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a) ? 0 : 1;
+        const privateB = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(b) ? 0 : 1;
+        return privateA - privateB;
+    });
+}
+
+function localSyncKeyBuffer() {
+    return Buffer.from(localSyncState.key, 'base64url');
+}
+
+function encryptLocalSyncPayload(value) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', localSyncKeyBuffer(), iv);
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
+    return {
+        iv: iv.toString('base64url'),
+        data: encrypted.toString('base64url'),
+        tag: cipher.getAuthTag().toString('base64url')
+    };
+}
+
+function decryptLocalSyncPayload(envelope) {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', localSyncKeyBuffer(), Buffer.from(envelope.iv, 'base64url'));
+    decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
+    return JSON.parse(Buffer.concat([
+        decipher.update(Buffer.from(envelope.data, 'base64url')),
+        decipher.final()
+    ]).toString('utf8'));
+}
+
+function localSyncSignature(method, requestPath, timestamp, nonce, body) {
+    return crypto.createHmac('sha256', localSyncKeyBuffer())
+        .update([method.toUpperCase(), requestPath, timestamp, nonce, body].join('\n'))
+        .digest('base64url');
+}
+
+function timingSafeTextEqual(left, right) {
+    const a = Buffer.from(String(left || ''));
+    const b = Buffer.from(String(right || ''));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function localSyncRequestIsAuthorized(request, body) {
+    const timestamp = String(request.headers['x-pharmatlas-timestamp'] || '');
+    const nonce = String(request.headers['x-pharmatlas-nonce'] || '');
+    const signature = String(request.headers['x-pharmatlas-signature'] || '');
+    const timestampMs = Number(timestamp);
+    if (!timestamp || !nonce || !signature || !Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 120000) return false;
+    const nonceKey = `${timestamp}|${nonce}`;
+    if (localSyncNonces.has(nonceKey)) return false;
+    const expected = localSyncSignature(request.method, request.url, timestamp, nonce, body);
+    if (!timingSafeTextEqual(signature, expected)) return false;
+    localSyncNonces.set(nonceKey, Date.now());
+    for (const [key, seenAt] of localSyncNonces) {
+        if (Date.now() - seenAt > 180000) localSyncNonces.delete(key);
+    }
+    return true;
+}
+
+function localSyncCorsHeaders(request) {
+    const origin = String(request.headers.origin || '');
+    const allowed = !origin || origin === 'capacitor://localhost' || origin === 'http://localhost' || origin === 'https://localhost';
+    return {
+        'Access-Control-Allow-Origin': allowed && origin ? origin : 'capacitor://localhost',
+        'Vary': 'Origin',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, X-PharmAtlas-Timestamp, X-PharmAtlas-Nonce, X-PharmAtlas-Signature',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff'
+    };
+}
+
+function sendLocalSyncJson(response, request, status, value) {
+    const body = JSON.stringify(value);
+    response.writeHead(status, { ...localSyncCorsHeaders(request), 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+    response.end(body);
+}
+
+function preserveMobileSyncBackup() {
+    if (!fs.existsSync(dbPath)) return '';
+    const backupDir = path.join(dataDir, 'sync-backups');
+    ensureDir(backupDir);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const target = path.join(backupDir, `db_before_mobile_sync_${stamp}.json`);
+    fs.copyFileSync(dbPath, target);
+    return target;
+}
+
+async function handleLocalSyncRequest(request, response) {
+    if (request.method === 'OPTIONS') {
+        response.writeHead(204, localSyncCorsHeaders(request));
+        return response.end();
+    }
+    const expectedPrefix = `/pharmatlas-sync/${encodeURIComponent(localSyncState.deviceId)}/`;
+    if (request.method !== 'POST' || !request.url?.startsWith(expectedPrefix)) return sendLocalSyncJson(response, request, 404, { error: 'Not found' });
+    let body = '';
+    for await (const chunk of request) {
+        body += chunk;
+        if (body.length > 25 * 1024 * 1024) {
+            request.destroy();
+            return;
+        }
+    }
+    if (!localSyncRequestIsAuthorized(request, body)) return sendLocalSyncJson(response, request, 401, { error: 'Pairing credentials were rejected.' });
+    try {
+        const payload = decryptLocalSyncPayload(JSON.parse(body));
+        if (request.url.endsWith('/pull')) {
+            const data = readDbFromPath(dbPath);
+            return sendLocalSyncJson(response, request, 200, encryptLocalSyncPayload({
+                protocol: 1,
+                desktopName: os.hostname(),
+                revision: dbFingerprintFromText(JSON.stringify(data)),
+                data
+            }));
+        }
+        if (request.url.endsWith('/push')) {
+            if (!payload?.data || typeof payload.data !== 'object') throw new Error('The phone did not send a valid database.');
+            const current = readDbFromPath(dbPath);
+            const merged = SyncCore.mergeDatabases(current, payload.data, desktopDeviceId());
+            const currentFingerprint = dbFingerprintFromText(JSON.stringify(current));
+            const mergedFingerprint = dbFingerprintFromText(JSON.stringify(merged));
+            let backupPath = '';
+            if (currentFingerprint !== mergedFingerprint) {
+                backupPath = preserveMobileSyncBackup();
+                writeDbToPath(dbPath, merged);
+                localSyncState.pairedAt = localSyncState.pairedAt || new Date().toISOString();
+                saveLocalSyncConfig();
+                win?.webContents.send('db-updated-from-mobile', { deviceName: payload.deviceName || 'iPhone or iPad', backupPath });
+            }
+            return sendLocalSyncJson(response, request, 200, encryptLocalSyncPayload({
+                protocol: 1,
+                revision: dbFingerprintFromText(JSON.stringify(merged)),
+                changed: currentFingerprint !== mergedFingerprint,
+                data: merged
+            }));
+        }
+        return sendLocalSyncJson(response, request, 404, { error: 'Unknown sync action.' });
+    } catch (error) {
+        console.error('Local companion sync failed:', error.message);
+        return sendLocalSyncJson(response, request, 400, { error: 'Unable to decrypt or merge this companion sync request.' });
+    }
+}
+
+function localSyncPairingInfo() {
+    const host = privateIpv4Addresses()[0] || '';
+    if (!host || !localSyncServer) return { enabled: !!localSyncServer, available: false, error: 'Connect this desktop to the same Wi-Fi network as the iPhone or iPad.' };
+    const payload = new URL('pharmatlas-sync://pair');
+    payload.searchParams.set('v', '1');
+    payload.searchParams.set('host', host);
+    payload.searchParams.set('port', String(localSyncState.port));
+    payload.searchParams.set('id', localSyncState.deviceId);
+    payload.searchParams.set('key', localSyncState.key);
+    payload.searchParams.set('name', os.hostname());
+    return {
+        enabled: true,
+        available: true,
+        host,
+        port: localSyncState.port,
+        deviceId: localSyncState.deviceId,
+        pairingPayload: payload.toString(),
+        pairedAt: localSyncState.pairedAt || ''
+    };
+}
+
+function startLocalSyncServer() {
+    if (localSyncServer) return Promise.resolve(localSyncPairingInfo());
+    const listen = port => new Promise((resolve, reject) => {
+        const server = http.createServer((request, response) => handleLocalSyncRequest(request, response));
+        server.once('error', reject);
+        server.listen(port, '0.0.0.0', () => {
+            server.removeListener('error', reject);
+            server.on('error', error => console.error('Local companion sync server error:', error.message));
+            localSyncServer = server;
+            localSyncState.enabled = true;
+            localSyncState.port = server.address().port;
+            saveLocalSyncConfig();
+            resolve(localSyncPairingInfo());
+        });
+    });
+    const preferredPort = localSyncState.port || 43127;
+    return listen(preferredPort).catch(error => {
+        if (error?.code !== 'EADDRINUSE') throw error;
+        console.warn(`Local sync port ${preferredPort} is already in use; selecting another local port.`);
+        return listen(0);
+    });
+}
+
+function stopLocalSyncServer() {
+    return new Promise(resolve => {
+        localSyncState.enabled = false;
+        saveLocalSyncConfig();
+        if (!localSyncServer) return resolve(true);
+        const server = localSyncServer;
+        localSyncServer = null;
+        server.close(() => resolve(true));
+    });
+}
 
 function createWindow() {
     const { screen } = require('electron');
@@ -255,7 +517,7 @@ async function sendEmailNotification(recipient, subject, text) {
     if (!transporter) {
         return {
             success: false,
-            error: 'Email is not configured. Add email-config.json to the PharmAtlasData folder.'
+            error: 'Desktop email is not configured. Open Desktop Email Setup and enter your own sender account.'
         };
     }
 
@@ -321,10 +583,47 @@ ipcMain.handle('send-email', async (event, { to, subject, body }) => {
     return await sendEmailNotification(to, subject, body);
 });
 
+ipcMain.handle('get-email-status', () => emailStatus());
+
+ipcMain.handle('configure-email', async (event, config) => {
+    const next = {
+        user: String(config?.user || '').trim(),
+        appPassword: String(config?.pass || ''),
+        host: String(config?.host || 'smtp.gmail.com').trim(),
+        port: Number(config?.port) || 465,
+        secure: config?.secure !== false
+    };
+    if (!next.user || !next.appPassword || !next.host) return { success: false, error: 'Enter your sender email, SMTP host, and app password.' };
+    const candidate = createEmailTransporter({ ...next, pass: next.appPassword });
+    try {
+        await candidate.verify();
+        ensureDir(runtimeDataDir);
+        fs.writeFileSync(emailConfigPath, JSON.stringify(next, null, 2));
+        emailConfig = { ...next, pass: next.appPassword };
+        transporter = candidate;
+        return { success: true, status: emailStatus() };
+    } catch (error) {
+        candidate.close?.();
+        return { success: false, error: `The SMTP account could not be verified: ${error.message}` };
+    }
+});
+
+ipcMain.handle('get-local-sync-status', () => localSyncPairingInfo());
+ipcMain.handle('start-local-sync', () => startLocalSyncServer());
+ipcMain.handle('stop-local-sync', () => stopLocalSyncServer());
+ipcMain.handle('reset-local-sync-pairing', async () => {
+    await stopLocalSyncServer();
+    localSyncState = { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, pairedAt: '' };
+    saveLocalSyncConfig();
+    return startLocalSyncServer();
+});
+
 ipcMain.handle('save-db', (event, data) => {
     const conflictBackup = preserveDbConflictBackupIfNeeded();
-    writeDbToPath(dbPath, data);
-    return { success: true, conflictBackup };
+    const current = readDbFromPath(dbPath);
+    const prepared = SyncCore.prepareDatabase(current, data, desktopDeviceId());
+    writeDbToPath(dbPath, prepared);
+    return { success: true, conflictBackup, revision: dbFingerprintFromText(JSON.stringify(prepared)) };
 });
 
 ipcMain.handle('load-db', () => {
@@ -517,7 +816,7 @@ ipcMain.handle('email-pdf-report', async (event, { html, fileName, to, subject, 
     if (!transporter) {
         return {
             success: false,
-            error: 'Email is not configured. Add email-config.json to the PharmAtlasData folder.'
+            error: 'Desktop email is not configured. Open Desktop Email Setup and enter your own sender account.'
         };
     }
 
@@ -545,9 +844,22 @@ ipcMain.handle('notify', (event, title, body) => {
     new Notification({ title, body }).show();
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+    createWindow();
+    if (localSyncState.enabled) {
+        try {
+            await startLocalSyncServer();
+        } catch (error) {
+            console.error('Unable to resume local companion sync:', error.message);
+        }
+    }
+});
 
 // Handle app quitting properly
 app.on('before-quit', () => {
     app.isQuiting = true;
+    if (localSyncServer) {
+        localSyncServer.close();
+        localSyncServer = null;
+    }
 });

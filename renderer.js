@@ -8919,6 +8919,14 @@ window.switchTab = function(tabName) {
     applyDashboardCommandPanelState();
 };
 
+window.applyMobileSyncedDatabase = function(data) {
+    db = { ...emptyDb, ...(data || {}), settings: { ...emptyDb.settings, ...(data?.settings || {}) } };
+    normalizeScheduleLinkRelationships();
+    updateScheduleCompletionStates();
+    maintainPrepackRetention();
+    renderAll();
+};
+
 async function sync() {
     normalizeScheduleLinkRelationships();
     updateScheduleCompletionStates();
@@ -8948,6 +8956,95 @@ async function sync() {
         renderMemberCommandScanPanel();
     }
 }
+
+window.openDesktopEmailSetup = async function() {
+    if (!window.api.getEmailStatus || !window.api.configureEmail) {
+        return appAlert('Desktop email setup is only available in the installed Windows app.', 'Desktop Email');
+    }
+    const status = await window.api.getEmailStatus();
+    const result = await showActionModal('Desktop Email Setup', `
+        <div class="form-help">PharmAtlas sends desktop email only through the account entered here. Credentials stay in this Windows user profile and are not included in phone sync or medication backups.</div>
+        <div class="email-setup-grid">
+            <label>Sender email<input name="user" type="email" required value="${escapeHtml(status?.user || '')}" placeholder="you@example.com"></label>
+            <label>SMTP app password<input name="pass" type="password" required autocomplete="new-password" placeholder="App-specific password"></label>
+            <label>SMTP host<input name="host" type="text" required value="${escapeHtml(status?.host || 'smtp.gmail.com')}"></label>
+            <label>Port<input name="port" type="number" min="1" max="65535" value="${escapeHtml(status?.port || 465)}"></label>
+            <label class="checkbox-line"><input name="secure" type="checkbox" ${status?.secure !== false ? 'checked' : ''}> Use TLS immediately (normally port 465)</label>
+        </div>
+        <div class="important-note">Use an app-specific password when your email provider supports one. PharmAtlas never supplies or uses the developer's email account.</div>
+    `, 'Verify & Save');
+    if (!result) return;
+    const saved = await window.api.configureEmail({
+        user: result.user,
+        pass: result.pass,
+        host: result.host,
+        port: result.port,
+        secure: result.secure === true || result.secure === 'on'
+    });
+    if (!saved?.success) return appAlert(saved?.error || 'Unable to verify that email account.', 'Email Setup Failed');
+    await appAlert(`Desktop email will be sent from ${saved.status.user}.`, 'Desktop Email Ready');
+};
+
+window.openDesktopDeviceSync = async function() {
+    if (!window.api.startLocalSync) return appAlert('Device sync is only available in the installed desktop app.', 'Device Sync');
+    let info;
+    try {
+        info = await window.api.startLocalSync();
+    } catch (error) {
+        return appAlert(`The local sync service could not start. ${error.message || ''}`, 'Device Sync');
+    }
+    if (!info?.available) return appAlert(info?.error || 'Connect the desktop to Wi-Fi, then try again.', 'Device Sync');
+    const qr = rawQrDataUrl(info.pairingPayload);
+    await showActionModal('Pair iPhone or iPad', `
+        <div class="device-sync-dialog">
+            <div class="device-sync-qr">${qr ? `<img src="${qr}" alt="Encrypted PharmAtlas pairing QR">` : ''}</div>
+            <div class="device-sync-copy">
+                <h3><span class="win98-icon icon-view"></span> Same-network companion sync</h3>
+                <ol>
+                    <li>Keep PharmAtlas open on this desktop.</li>
+                    <li>On the iPhone or iPad Dashboard, tap <b>Pair Desktop</b>.</li>
+                    <li>Scan this code and approve Local Network access.</li>
+                </ol>
+                <p>Medication data is encrypted before it crosses the local network. It is not routed through email or a PharmAtlas cloud server.</p>
+                <div class="sunken-panel device-sync-address">${escapeHtml(info.host)}:${escapeHtml(info.port)}</div>
+                <div class="field-row">
+                    <button type="button" onclick="resetDesktopDeviceSyncPairing()"><span class="win98-icon icon-view"></span> New Pairing Code</button>
+                    <button type="button" onclick="stopDesktopDeviceSync()"><span class="win98-icon icon-clear"></span> Stop Sync</button>
+                </div>
+            </div>
+        </div>
+    `, 'Done');
+};
+
+window.stopDesktopDeviceSync = async function() {
+    await window.api.stopLocalSync?.();
+    document.getElementById('action-modal-cancel')?.click();
+    await appAlert('Local companion sync is stopped. Existing phone data remains on that device.', 'Device Sync Stopped');
+};
+
+window.resetDesktopDeviceSyncPairing = async function() {
+    await window.api.resetLocalSyncPairing?.();
+    document.getElementById('action-modal-cancel')?.click();
+    await openDesktopDeviceSync();
+};
+
+async function reloadDatabaseFromMobileSync(details = {}) {
+    const loaded = await window.api.load();
+    db = { ...emptyDb, ...loaded, settings: { ...emptyDb.settings, ...(loaded?.settings || {}) } };
+    normalizeScheduleLinkRelationships();
+    updateScheduleCompletionStates();
+    renderAll();
+    if (currentEditingMemberId && document.getElementById('member-modal')?.style.display === 'flex') {
+        const activeTab = document.querySelector('.member-profile-tab.active')?.dataset.memberProfileTab || 'orders';
+        await openMemberModal(currentEditingMemberId, activeTab);
+    }
+    const source = details.deviceName || 'paired iPhone or iPad';
+    await appAlert(`Changes from ${source} are now reflected on this desktop.${details.backupPath ? '\nA pre-sync safety backup was created.' : ''}`, 'Companion Sync Complete');
+}
+
+window.api.onDatabaseUpdatedFromMobile?.(details => {
+    reloadDatabaseFromMobileSync(details).catch(error => console.error('Unable to refresh mobile sync changes:', error));
+});
 
 // --- FAMILY ---
 window.removeMember = async function(id) {
@@ -20583,7 +20680,7 @@ async function checkSchedules() {
                 reminderLogChanged = reminderLogChanged || sent;
             }
 
-            if (member.email && notificationPrefs.emailReminders === true) {
+            if (!window.__PHARMATLAS_MOBILE__ && member.email && notificationPrefs.emailReminders === true) {
                 const sent = await dispatchReminderOnce(emailKey, () => window.api.sendEmail({
                     to: member.email,
                     subject: `PharmAtlas: Medication Reminder for ${member.firstName}`,
@@ -20621,7 +20718,7 @@ async function checkSchedules() {
                 reminderLogChanged = reminderLogChanged || sent;
             }
 
-            if (member.email && notificationPrefs.emailReminders === true) {
+            if (!window.__PHARMATLAS_MOBILE__ && member.email && notificationPrefs.emailReminders === true) {
                 const sent = await dispatchReminderOnce(emailKey, () => window.api.sendEmail({
                     to: member.email,
                     subject: `PharmAtlas: Monitoring Reminder for ${member.firstName}`,
@@ -20645,7 +20742,7 @@ async function checkSchedules() {
             for (const member of linkedMembers) {
                 const notificationPrefs = member.notificationPrefs || {};
                 const emailKey = `${eventBaseKey}|${member.id}|email`;
-                if (!member.email || notificationPrefs.emailReminders !== true) continue;
+                if (window.__PHARMATLAS_MOBILE__ || !member.email || notificationPrefs.emailReminders !== true) continue;
                 const emailSent = await dispatchReminderOnce(emailKey, () => window.api.sendEmail({
                     to: member.email,
                     subject: `PharmAtlas: Task Reminder for ${member.firstName}`,

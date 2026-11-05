@@ -3855,6 +3855,123 @@ button {
 .icon-order { background-image: url("assets/ui-icons/order.ico"); }
 .icon-receive { background-image: url("assets/ui-icons/receive.ico"); }
 
+.email-setup-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 8px;
+    margin: 9px 0;
+}
+
+.email-setup-grid label:not(.checkbox-line) {
+    display: grid;
+    gap: 3px;
+}
+
+.email-setup-grid .checkbox-line {
+    grid-column: 1 / -1;
+}
+
+.device-sync-dialog {
+    display: grid;
+    grid-template-columns: 230px minmax(280px, 1fr);
+    gap: 12px;
+    align-items: start;
+    max-width: 660px;
+}
+
+.device-sync-qr {
+    padding: 8px;
+    border: 2px inset #fff;
+    background: #fff;
+    min-height: 210px;
+}
+
+.device-sync-qr img {
+    display: block;
+    width: 100%;
+    image-rendering: pixelated;
+}
+
+.device-sync-copy h3 {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 2px 0 8px;
+    color: #000080;
+}
+
+.device-sync-copy ol {
+    padding-left: 22px;
+}
+
+.device-sync-address {
+    margin: 8px 0;
+    padding: 6px;
+    background: #fff;
+    font-family: monospace;
+}
+
+.mobile-companion-panel {
+    display: none;
+}
+
+.mobile-runtime.mobile-companion-mode #tab-prepackage,
+.mobile-runtime.mobile-companion-mode #tab-recipes,
+.mobile-runtime.mobile-companion-mode #desktop-device-sync-button,
+.mobile-runtime.mobile-companion-mode #desktop-email-setup-button,
+.mobile-runtime.mobile-companion-mode .data-sync-panel {
+    display: none !important;
+}
+
+.mobile-runtime .mobile-companion-panel {
+    display: block;
+    margin: 0 0 8px;
+    padding: 8px;
+    border: 2px outset #fff;
+    background: #eef8ff;
+}
+
+.mobile-companion-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #000080;
+    margin-bottom: 7px;
+}
+
+.mobile-companion-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 5px;
+}
+
+.mobile-companion-actions button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 36px;
+    white-space: normal;
+}
+
+.mobile-pairing-code {
+    width: 100%;
+    margin-top: 6px;
+}
+
+.mobile-companion-status {
+    margin-top: 6px;
+    padding: 5px;
+    border: 1px solid #808080;
+    background: #fff;
+    overflow-wrap: anywhere;
+}
+
+.mobile-companion-status.error {
+    color: #b00000;
+    background: #fff0f0;
+}
+
 .barcode-warning {
     color: #b00000;
     font-weight: bold;
@@ -11904,6 +12021,68 @@ button {
 
     .mobile-runtime .linked-timing-impact {
         font-size: 12px;
+    }
+
+    .mobile-runtime.mobile-companion-mode #tab-prepackage,
+    .mobile-runtime.mobile-companion-mode #tab-recipes,
+    .mobile-runtime.mobile-companion-mode #desktop-device-sync-button,
+    .mobile-runtime.mobile-companion-mode #desktop-email-setup-button,
+    .mobile-runtime.mobile-companion-mode .data-sync-panel {
+        display: none !important;
+    }
+
+    .mobile-runtime .mobile-companion-panel {
+        display: block;
+        margin: 0 0 8px;
+        padding: 8px;
+        border: 2px outset #fff;
+        background: #eef8ff;
+    }
+
+    .mobile-companion-heading {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #000080;
+        margin-bottom: 7px;
+    }
+
+    .mobile-companion-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+    }
+
+    .mobile-companion-actions button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-height: 42px;
+        white-space: normal;
+    }
+
+    .mobile-pairing-code {
+        width: 100%;
+        margin-top: 6px;
+    }
+
+    .mobile-companion-status {
+        margin-top: 6px;
+        padding: 5px;
+        border: 1px solid #808080;
+        background: #fff;
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-companion-status.error {
+        color: #b00000;
+        background: #fff0f0;
+    }
+
+    .email-setup-grid,
+    .device-sync-dialog {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

@@ -70,9 +70,13 @@ It is not a substitute for professional medical judgment, pharmacy dispensing so
 
 ## Privacy
 
-PharmAtlas stores data locally on the user's computer unless the user exports files, sends emails, creates backups, or stores the app/data folder in a third-party sync location such as OneDrive.
+PharmAtlas stores data locally on the user's device unless the user exports files, sends emails, creates backups, stores the data folder in a third-party sync location such as OneDrive, or explicitly pairs an iPhone/iPad with the desktop app over the local network.
 
-Users are responsible for protecting their computer, backups, exported PDFs, email settings, and any health information entered into the app.
+Desktop email uses SMTP credentials configured by that Windows user in their local app profile. No developer email account is included. iPhone and iPad reminders are scheduled by iOS on the device and do not use email.
+
+Optional companion sync uses a QR pairing secret and encrypted, authenticated messages between the phone/tablet and a running PharmAtlas desktop on the same local network. A desktop safety backup is created before incoming mobile changes are written. No PharmAtlas cloud or developer-operated sync service is involved.
+
+Users are responsible for protecting their devices, local network, backups, exported PDFs, email settings, and any health information entered into the app.
 
 ## Desktop Build
 
@@ -108,7 +112,9 @@ out/make/squirrel.windows/x64/
 
 ## iPhone And iPad
 
-PharmAtlas includes a Capacitor iOS project with an adaptive phone/tablet interface and IndexedDB-backed local persistence. Build the mobile web bundle and synchronize it into Xcode with:
+PharmAtlas includes a Capacitor iOS project with an adaptive phone/tablet interface, IndexedDB-backed local persistence, native iOS reminders, and optional QR-paired local-network synchronization with PharmAtlas Desktop. The mobile companion intentionally focuses on scheduling, regimens, monitoring, inventory, members, and documentation; desktop-only Prepack and Recipe Builder workspaces are hidden on iPhone and iPad.
+
+Build the mobile web bundle and synchronize it into Xcode with:
 
 ```powershell
 npm run cap:sync
@@ -118,10 +124,11 @@ The native project is in `ios/App/App.xcworkspace`. App Store metadata, privacy 
 
 ## Verification
 
-Run the repeatable synthetic-data demo to exercise the major workspaces, future-dose retiming, linked schedules, barcode rendering, button wiring, and mobile persistence:
+Run the repeatable synthetic-data demo to exercise the major workspaces, future-dose retiming, linked schedules, barcode rendering, button wiring, simplified mobile navigation, companion controls, and mobile persistence. Run the merge suite to verify offline edits and deletion tombstones:
 
 ```powershell
 npm run test:demo
+npm run test:sync
 ```
 
 Generate App Store-ready iPhone and iPad screenshots with:
