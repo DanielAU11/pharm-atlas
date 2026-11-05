@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>PharmAtlas</title>
     <!-- Link to the Windows 98 CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/98.css">
+    <link rel="stylesheet" href="vendor/98.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,16 +22,19 @@
 
         <div class="window-body">
             <div class="tabs">
-            <menu role="tablist">
-                <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')">Dashboard</a></li>
-                <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')">Schedule Medications</a></li>
-                <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')">Prepackage Meds</a></li>
-                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')">Regimens</a></li>
-                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')">Monitoring</a></li>
-                <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')">Inventory</a></li>
-                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')">Drug/Vaccine Information</a></li>
-                <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')">Members</a></li>
+            <menu role="tablist" class="tab-list" ondragstart="handleTabDragStart(event)" ondragover="handleTabDragOver(event)" ondrop="handleTabDrop(event)">
+                <li role="tab" id="tab-dashboard" class="active"><a href="#" onclick="switchTab('dashboard')"><span class="win98-icon icon-dashboard"></span>Dashboard</a></li>
+                <li role="tab" id="tab-schedules"><a href="#" onclick="switchTab('schedules')"><span class="win98-icon icon-calendar"></span>Schedule Medications</a></li>
+                <li role="tab" id="tab-prepackage"><a href="#" onclick="switchTab('prepackage')"><span class="win98-icon icon-box"></span>Prepackage Meds</a></li>
+                <li role="tab" id="tab-order-sets"><a href="#" onclick="switchTab('order-sets')"><span class="win98-icon icon-regimen"></span>Regimens</a></li>
+                <li role="tab" id="tab-vitals"><a href="#" onclick="switchTab('vitals')"><span class="win98-icon icon-monitor"></span>Monitoring</a></li>
+                <li role="tab" id="tab-inventory"><a href="#" onclick="switchTab('inventory')"><span class="win98-icon icon-inventory"></span>Inventory</a></li>
+                <li role="tab" id="tab-recipes"><a href="#" onclick="switchTab('recipes')"><span class="win98-icon icon-recipe"></span>Recipes</a></li>
+                <li role="tab" id="tab-family"><a href="#" onclick="switchTab('family')"><span class="win98-icon icon-family"></span>Members</a></li>
+                <li role="tab" id="tab-drug-info"><a href="#" onclick="switchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug/Vaccine Information</a></li>
+                <li role="tab" id="tab-help"><a href="#" onclick="switchTab('help')"><span class="win98-icon icon-info"></span>Help</a></li>
             </menu>
+            <div id="workspace-taskbar" class="workspace-taskbar"></div>
 
         <!-- Tab Content Container -->
         <div class="window app-panel-window" role="tabpanel">
@@ -39,34 +42,77 @@
                 
                 <!-- 1. DASHBOARD -->
                 <div id="panel-dashboard">
-                    <fieldset>
-                        <legend>Medication Schedule Calendar</legend>
-                        <div class="calendar-controls">
-                            <button type="button" onclick="shiftDashboardCalendar(-7)">Previous 7 Days</button>
-                            <strong id="dashboard-calendar-range"></strong>
-                            <button type="button" onclick="shiftDashboardCalendar(7)">Next 7 Days</button>
-                            <button type="button" onclick="resetDashboardCalendar()">Today</button>
-                        </div>
-                        <div id="calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: #808080; border: 2px inset white; padding: 2px;">
-                            <!-- Calendar headers and days will be injected here -->
-                        </div>
-                    </fieldset>
+                    <div class="dashboard-workspace">
+                        <div class="dashboard-main-column">
+                            <fieldset>
+                                <legend>Medication Schedule Calendar</legend>
+                                <div class="calendar-controls">
+                                    <button type="button" onclick="shiftDashboardCalendar(-7)">Previous 7 Days</button>
+                                    <strong id="dashboard-calendar-range"></strong>
+                                    <button type="button" onclick="shiftDashboardCalendar(7)">Next 7 Days</button>
+                                    <button type="button" onclick="resetDashboardCalendar()">Today</button>
+                                    <span id="dashboard-calendar-view-toggle" class="calendar-view-toggle"></span>
+                                </div>
+                                <div id="calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; background: #808080; border: 2px inset white; padding: 2px;">
+                                    <!-- Calendar headers and days will be injected here -->
+                                </div>
+                            </fieldset>
 
-                    <fieldset style="margin-top: 10px;">
-                        <legend>Monitoring Trends</legend>
-                        <div id="vitals-dashboard"></div>
-                    </fieldset>
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Custom Tasks &amp; Events</legend>
+                                <div class="calendar-controls">
+                                    <button type="button" onclick="openCustomEventEditor()">+ Add Event</button>
+                                    <button type="button" onclick="shiftCustomEventCalendar(-7)">Previous</button>
+                                    <strong id="custom-event-calendar-range"></strong>
+                                    <button type="button" onclick="shiftCustomEventCalendar(7)">Next</button>
+                                    <button type="button" onclick="resetCustomEventCalendar()">Today</button>
+                                    <span id="custom-event-calendar-view-toggle" class="calendar-view-toggle"></span>
+                                </div>
+                                <div id="custom-event-calendar-grid" class="custom-event-calendar-grid"></div>
+                            </fieldset>
 
-                    <fieldset style="margin-top: 10px;">
-                        <legend>Inventory Status</legend>
-                        <div id="inventory-status"></div>
-                    </fieldset>
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Today View</legend>
+                                <div id="today-view-dashboard"></div>
+                            </fieldset>
+
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Monitoring Trends</legend>
+                                <div id="vitals-dashboard"></div>
+                            </fieldset>
+
+                            <fieldset style="margin-top: 10px;">
+                                <legend>Inventory Status</legend>
+                                <div id="inventory-status"></div>
+                            </fieldset>
+                        </div>
+                        <aside class="workspace-right-rail dashboard-command-rail">
+                            <div class="rail-titlebar daily-command-title"><span>Daily Command Panel</span><button id="dashboard-command-toggle" type="button" onclick="toggleDashboardCommandPanel()">Hide</button></div>
+                            <div id="dashboard-right-panel"></div>
+                        </aside>
+                    </div>
 
                     <fieldset style="margin-top: 10px;">
                         <legend>PDF Reports</legend>
                         <div class="field-row">
                             <button onclick="generateInventoryPdfReport()">Current Inventory PDF</button>
+                            <button type="button" onclick="backupAppData()">Backup Data</button>
+                            <button type="button" onclick="restoreAppData()">Restore Data</button>
                         </div>
+                    </fieldset>
+
+                    <fieldset style="margin-top: 10px;">
+                        <legend>Maintenance &amp; Safety</legend>
+                        <div class="field-row">
+                            <button type="button" onclick="runDataHealthCheck()">Workflow Health Check</button>
+                            <button type="button" onclick="repairDataHealthIssues()">Repair Safe Issues</button>
+                            <button type="button" onclick="viewAuditTrail()">Audit Trail</button>
+                            <button type="button" onclick="archiveOldData()">Archive Old Data</button>
+                            <button type="button" onclick="openFirstRunSetupGuide()">Setup Guide</button>
+                            <button type="button" onclick="openPrinterCalibration()">Printer Calibration</button>
+                            <button id="guided-help-toggle-button" type="button" class="guided-help-toggle" onclick="toggleGuidedHelp()">Hover help</button>
+                        </div>
+                        <div id="data-health-summary" class="maintenance-summary"></div>
                     </fieldset>
 
                     <fieldset style="margin-top: 10px;">
@@ -74,7 +120,21 @@
                         <div id="history-log" class="tree-view" style="height: 120px; overflow-y: scroll; background: white;"></div>
                         <button onclick="clearHistory()" style="margin-top:5px;">Clear Log</button>
                     </fieldset>
-        
+
+                    <fieldset class="data-sync-panel" style="margin-top: 10px;">
+                        <legend>Desktop Sync Folder</legend>
+                        <div class="data-sync-grid">
+                            <div>
+                                <strong id="data-location-status">Local data folder</strong>
+                                <div id="data-location-path" class="data-location-path">Checking data folder...</div>
+                            </div>
+                            <div class="field-row data-sync-actions">
+                                <button type="button" onclick="chooseDesktopSyncFolder()">Use Synced Folder</button>
+                                <button type="button" onclick="useLocalDesktopDataFolder()">Use Local Folder</button>
+                            </div>
+                        </div>
+                    </fieldset>
+
                 </div>
 
 
@@ -85,7 +145,7 @@
                         <legend>Prescription Entry</legend>
                         <div class="field-row">
                             <label>Who:</label>
-                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); renderPendingScheduleOrders(); renderScheduleLinkOptions();"></select>
+                            <select id="select-member" onchange="renderSchedulePrescriberOptions(); updateSchedStrength(); renderPendingScheduleOrders(); renderScheduleLinkOptions(); renderMonitoringParameterOptions('sched'); syncMonitoringParameterScheduleUi('sched');"></select>
                             <label>Medication:</label>
                             <input list="med-options" id="med-search-input" oninput="updateSchedStrength()" style="width:120px;" placeholder="Search...">
                             <datalist id="med-options"></datalist>
@@ -111,21 +171,22 @@
                             <label>Frequency:</label>
                             <select id="sched-freq" onchange="renderFrequencyControls('sched')">
                                 <option value="ONCE">One Time Dose</option>
-                                <option value="QD">QD (Daily)</option>
-                                <option value="BID">BID (Twice Daily)</option>
-                                <option value="TID">TID (Thrice Daily)</option>
-                                <option value="QID">QID (Four Times)</option>
+                                <option value="QD">Daily</option>
+                                <option value="BID">Twice daily</option>
+                                <option value="TID">3 times daily</option>
+                                <option value="QID">4 times daily</option>
                                 <option value="Nightly">Nightly</option>
-                                <option value="QOD">QOD (Every Other Day)</option>
+                                <option value="QOD">Every other day</option>
                                 <option value="QW">Once Weekly</option>
                                 <option value="QXW">Every X Weeks</option>
                                 <option value="XPW">X Times Per Week</option>
                                 <option value="QXH">Every X Hours</option>
-                                <option value="PRN">PRN (As Needed)</option>
+                                <option value="PRN">As needed</option>
                                 <option value="Monthly">Once Monthly</option>
+                                <option value="CUSTOM">User specified</option>
                             </select>
                             <div id="qod-start-container" style="display:none;">
-                                <label>Start Day:</label><input id="qod-start-date" type="date">
+                                <label>Every-other-day start:</label><input id="qod-start-date" type="date">
                             </div>
                             <div id="sched-monthly-container" style="display:none;">
                                 <label>First monthly dose:</label><input id="sched-monthly-anchor" type="date">
@@ -150,26 +211,67 @@
                             <span class="weekday-option"><input id="sched-weekday-5" type="checkbox" value="5"><label for="sched-weekday-5">Fri</label></span>
                             <span class="weekday-option"><input id="sched-weekday-6" type="checkbox" value="6"><label for="sched-weekday-6">Sat</label></span>
                         </div>
+                        <div id="sched-custom-schedule" class="profile-custom-schedule schedule-custom-editor" style="display:none;"></div>
                         <div id="sched-prn-limit-container" class="field-row" style="display:none; margin-top:8px;">
                             <label>PRN Max:</label>
                             <input id="sched-prn-max-doses" type="number" min="1" step="1" style="width:45px;">
                             <span>doses per</span>
                             <input id="sched-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;">
                             <span>hrs</span>
+                            <label>Frequency:</label>
+                            <select id="sched-prn-schedule-freq" onchange="renderFrequencyControls('sched')">
+                                <option value="">None</option>
+                                <option value="ONCE">One time</option>
+                                <option value="QD">Daily</option>
+                                <option value="BID">BID</option>
+                                <option value="TID">TID</option>
+                                <option value="QID">QID</option>
+                                <option value="Nightly">Nightly</option>
+                                <option value="QOD">Every other day</option>
+                                <option value="QW">Weekly</option>
+                                <option value="QXW">Every X weeks</option>
+                                <option value="XPW">X times per week</option>
+                                <option value="QXH">Every X hours</option>
+                                <option value="Monthly">Monthly</option>
+                            </select>
                             <span style="font-size:11px;">Each administration counts as 1 dose of the Give Qty.</span>
                         </div>
                         <div class="field-row" style="margin-top:8px;">
-                            <label>Start:</label><input id="sched-start" type="date">
-                            <label>End:</label><input id="sched-end" type="date">
+                            <span id="sched-start-date-wrap"><label>Start:</label><input id="sched-start" type="date" onchange="syncMonitoringParameterScheduleUi('sched');"></span>
+                            <span><label>End:</label><input id="sched-end" type="date" onchange="syncMonitoringParameterScheduleUi('sched');"></span>
                         </div>
                         <div class="field-row-stacked" style="margin-top:8px;">
                             <label>Administration Time(s):</label>
                             <div id="sched-time-fields"></div>
                         </div>
                         <div class="field-row-stacked" style="margin-top:8px;">
+                            <label>Used for / Indication:</label>
+                            <input id="sched-indication" type="text" placeholder="e.g. allergies, migraine, blood pressure, vitamin support">
+                        </div>
+                        <div class="field-row-stacked" style="margin-top:8px;">
                             <label>Additional Instructions:</label>
                             <textarea id="sched-instructions" rows="2" class="schedule-instructions"></textarea>
                         </div>
+                        <fieldset class="monitoring-reminder-panel" style="margin-top:8px;">
+                            <legend>Monitoring Parameters</legend>
+                            <div class="monitoring-reminder-layout">
+                                <div class="monitoring-select-wrap">Parameters:
+                                    <div id="sched-monitoring-parameter-options" class="monitoring-parameter-toggle-list"></div>
+                                </div>
+                                <div class="monitoring-reminder-schedule">
+                                    <div id="sched-monitor-schedule-list" class="monitoring-parameter-schedule-list"></div>
+                                </div>
+                            </div>
+                            <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                                <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Parameter Types</button>
+                            </div>
+                            <div id="sched-monitor-hold-rules" class="monitoring-hold-rule-list"></div>
+                            <div class="field-row-stacked" style="margin-top:6px;">
+                                <label>Monitoring note:</label>
+                                <input id="sched-reminder-note" type="text" placeholder="Optional note shown with the monitoring reminder">
+                            </div>
+                            <div class="form-help">Monitoring dates are limited to the medication schedule. Hold rules show a red pause marker and ask for confirmation before documenting a dose.</div>
+                        </fieldset>
                         <div class="field-row" style="margin-top:8px;">
                             <label>Link to:</label><div id="sched-link-target" class="link-choice-panel"></div>
                             <label>Meaning:</label>
@@ -209,6 +311,9 @@
                         <select id="prepack-member-filter" onchange="renderPrepackageQueues()">
                             <option value="">All members</option>
                         </select>
+                        <button type="button" onclick="createInventoryUnitDosePrepack()"><span class="win98-icon icon-box"></span>Inventory Unit-Dose Prepack</button>
+                        <button type="button" onclick="createBulkInventoryContainer()"><span class="win98-icon icon-box"></span>Bulk Bottle/Container</button>
+                        <button type="button" onclick="openAuxiliaryLabelBuilder('prepack')"><span class="win98-icon icon-label"></span>Auxiliary Labels</button>
                     </div>
                     <div class="prepack-layout">
                         <fieldset>
@@ -236,21 +341,72 @@
 
                 <!-- 3. REGIMENS -->
                 <div id="panel-order-sets" style="display: none;">
-                    <fieldset>
+                    <fieldset class="regimen-builder-fieldset">
                         <legend>Regimen Builder</legend>
                         <input type="hidden" id="order-set-edit-id">
-                        <div class="field-row">
-                            <label>Who:</label><select id="order-set-member"></select>
-                            <label>Name:</label><input id="order-set-name" type="text" style="width:180px;" placeholder="e.g. Hypertension">
-                            <label>Start:</label><input id="order-set-start" type="date">
-                            <label>End:</label><input id="order-set-end" type="date">
+                        <div class="regimen-builder-grid">
+                            <div class="regimen-builder-main">
+                                <div class="regimen-header-strip">
+                                    <label>Who:<select id="order-set-member" onchange="renderMonitoringParameterOptions('order-set'); syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></select></label>
+                                    <label>Name:<input id="order-set-name" type="text" placeholder="e.g. Hypertension"></label>
+                                    <label>Start:<input id="order-set-start" type="date" onchange="syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></label>
+                                    <label>End:<input id="order-set-end" type="date" onchange="syncMonitoringParameterScheduleUi('order-set'); renderOrderSetPdfPreview();"></label>
+                                </div>
+                                <div id="order-set-med-list" class="regimen-med-list"></div>
+                                <div class="regimen-add-row">
+                                    <button type="button" onclick="addOrderSetMedicationRow()">+ Add Medication</button>
+                                </div>
+                            </div>
+                            <div class="regimen-grid-resizer" title="Drag to resize regimen panels"></div>
+                            <div class="regimen-builder-side">
+                                <fieldset>
+                                    <legend>Selected Medication</legend>
+                                    <div id="order-set-med-preview" class="schedule-med-preview regimen-med-preview">
+                                        <div class="schedule-med-no-photo">Select a medication.</div>
+                                    </div>
+                                </fieldset>
+                                <fieldset>
+                                    <legend>Regimen Summary</legend>
+                                    <div id="order-set-builder-summary" class="sunken-panel regimen-builder-summary">No medications added yet.</div>
+                                </fieldset>
+                                <fieldset class="monitoring-reminder-panel regimen-reminder-panel">
+                                    <legend>Monitoring Parameters</legend>
+                                    <div class="monitoring-reminder-layout">
+                                        <div class="monitoring-select-wrap">Parameters:
+                                            <div id="order-set-monitoring-parameter-options" class="monitoring-parameter-toggle-list"></div>
+                                        </div>
+                                        <div class="monitoring-reminder-schedule">
+                                            <div id="order-set-monitor-schedule-list" class="monitoring-parameter-schedule-list"></div>
+                                        </div>
+                                    </div>
+                                    <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                                        <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Types</button>
+                                    </div>
+                                    <div id="order-set-monitor-hold-rules" class="monitoring-hold-rule-list"></div>
+                                    <div class="field-row-stacked" style="margin-top:6px;">
+                                        <label>Monitoring note:</label>
+                                        <input id="order-set-reminder-note" type="text" placeholder="Optional regimen reminder note" oninput="renderOrderSetPdfPreview()">
+                                    </div>
+                                    <div class="form-help">Monitoring dates are limited to the regimen dates. Assigned regimens create the reminders for that member.</div>
+                                </fieldset>
+                            </div>
+                            <div class="regimen-preview-side">
+                                <fieldset class="regimen-preview-fieldset">
+                                    <legend>Live Regimen PDF Preview</legend>
+                                    <div class="regimen-preview-actions">
+                                        <button type="button" onclick="generateRegimenPreviewPdf()">PDF</button>
+                                        <button type="button" onclick="printRegimenPreview()">Print</button>
+                                        <button type="button" onclick="emailRegimenPreview()">Email</button>
+                                    </div>
+                                    <div id="order-set-pdf-preview" class="regimen-pdf-preview"></div>
+                                </fieldset>
+                            </div>
                         </div>
-                        <div id="order-set-med-list" style="margin-top:8px;"></div>
-                        <div class="field-row" style="justify-content:space-between; margin-top:8px;">
-                            <button onclick="addOrderSetMedicationRow()">+ Add Medication</button>
+                        <div class="field-row regimen-builder-command-row">
+                            <span class="form-help">Drag the divider to resize the regimen workspace.</span>
                             <span>
-                                <button onclick="saveOrderSet()">Save Regimen</button>
-                                <button onclick="clearOrderSetBuilder()">Clear</button>
+                                <button type="button" onclick="saveOrderSet()">Save Regimen</button>
+                                <button type="button" onclick="clearOrderSetBuilder()">Clear</button>
                             </span>
                         </div>
                     </fieldset>
@@ -326,6 +482,18 @@
                             <label>Prescriber:</label>
                             <select id="med-prescriber" style="width:220px;"></select>
                         </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label>Pharmacy:</label>
+                            <select id="med-pharmacy" style="width:220px;"></select>
+                        </div>
+                        <div class="field-row" style="margin-top:8px;">
+                            <label for="med-assignment-mode">Assign to:</label>
+                            <select id="med-assignment-mode" onchange="updateMedicationAssignmentMode('med')" style="width:150px;">
+                                <option value="all">All members</option>
+                                <option value="selected">Selected members</option>
+                            </select>
+                            <div id="med-assigned-members" class="member-assignment-list"></div>
+                        </div>
                         <div class="field-row inventory-photo-row">
                             <label>Photo:</label>
                             <input id="med-image-input" type="file" accept="image/*" />
@@ -340,9 +508,34 @@
                         <div id="combination-fields" style="display:none; margin-top:10px; border:1px dashed gray; padding:10px; background:#f0f0f0;">
                             <strong>Active Ingredients:</strong>
                             <span class="form-help">For liquids, enter each ingredient amount and the shared volume, such as 100 mg per 5 mL.</span>
+                            <div class="combo-basis-panel">
+                                <label><input id="combo-use-shared-per" type="checkbox" checked onchange="updateInventoryEntryMode(); updateCombinationPreview('med');"> Use one package/concentration basis for all ingredients</label>
+                                <span>per</span>
+                                <input id="combo-shared-per-amount" type="number" min="0.001" step="any" value="1" oninput="updateCombinationPreview('med')">
+                                <select id="combo-shared-per-unit" onchange="updateCombinationPreview('med')">
+                                    <option value="">unit</option>
+                                    <option value="mL">mL</option>
+                                    <option value="g">g</option>
+                                    <option value="mg">mg</option>
+                                    <option value="tablet">tablet</option>
+                                    <option value="capsule">capsule</option>
+                                    <option value="lozenge">lozenge</option>
+                                    <option value="packet">packet</option>
+                                    <option value="spray">spray</option>
+                                    <option value="drop">drop</option>
+                                    <option value="inhalation">inhalation</option>
+                                    <option value="patch">patch</option>
+                                    <option value="suppository">suppository</option>
+                                    <option value="vial">vial</option>
+                                    <option value="syringe">syringe</option>
+                                    <option value="film">film</option>
+                                    <option value="unit">unit</option>
+                                </select>
+                            </div>
                             <div id="ingredient-list">
                                 <!-- Dynamic ingredient rows go here -->
                             </div>
+                            <div id="combination-preview" class="combo-strength-preview">Add ingredients to preview the combined strength.</div>
                             <button type="button" onclick="addIngredientRow()">+ Add Ingredient</button>
                         </div>
 
@@ -377,12 +570,21 @@
                                 <select id="med-per-unit">
                                     <option value="">unit</option>
                                     <option value="mL">mL</option>
+                                    <option value="g">g</option>
+                                    <option value="mg">mg</option>
                                     <option value="tablet">tablet</option>
                                     <option value="capsule">capsule</option>
+                                    <option value="lozenge">lozenge</option>
                                     <option value="packet">packet</option>
                                     <option value="spray">spray</option>
                                     <option value="drop">drop</option>
+                                    <option value="inhalation">inhalation</option>
                                     <option value="patch">patch</option>
+                                    <option value="suppository">suppository</option>
+                                    <option value="vial">vial</option>
+                                    <option value="syringe">syringe</option>
+                                    <option value="film">film</option>
+                                    <option value="unit">unit</option>
                                 </select>
                             </span>
                         
@@ -412,11 +614,19 @@
                             <select id="med-formulation" onchange="updateInventoryEntryMode()">
                                 <option value="Tablets">Tablets</option>
                                 <option value="Capsules">Capsules</option>
+                                <option value="Chewable">Chewable tablet</option>
+                                <option value="ODT">Orally disintegrating tablet</option>
+                                <option value="Sublingual">Sublingual tablet/film</option>
+                                <option value="Lozenge">Lozenge</option>
                                 <option value="mL">Liquid (mL)</option>
+                                <option value="Powder">Powder / Bulk Powder</option>
                                 <option value="Granules">Granules</option>
                                 <option value="Packet">Packet</option>
                                 <option value="Inhalations">Inhalations</option>
                                 <option value="Sprays">Sprays</option>
+                                <option value="Injection">Injection / vial concentration</option>
+                                <option value="Vial">Vial</option>
+                                <option value="Prefilled Syringe">Prefilled syringe</option>
                                 <option value="Suppository">Suppository</option>
                                 <option value="Cream">Cream</option>
                                 <option value="Ointment">Ointment</option>
@@ -446,12 +656,40 @@
 
                     <fieldset>
                         <legend>Inventory</legend>
-                        <div class="field-row" style="margin-bottom:6px;">
-                            <label for="inventory-search">Search:</label>
-                            <input id="inventory-search" type="search" placeholder="Find medication..." style="width:220px;" oninput="renderAll()">
-                            <button type="button" onclick="clearInventorySearch()">Clear</button>
-                            <button type="button" onclick="printAllInventoryLabels()">Print Inventory Labels</button>
+                        <div class="inventory-command-strip">
+                            <div class="inventory-search-strip">
+                                <label for="inventory-search">Search:</label>
+                                <input id="inventory-search" type="search" placeholder="Find medication..." oninput="renderAll()">
+                                <button type="button" class="inventory-mini-button" onclick="clearInventorySearch()"><span class="win98-icon icon-clear"></span>Clear</button>
+                            </div>
+                            <div class="inventory-command-groups">
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Labels</span>
+                                    <button type="button" class="inventory-mini-button" onclick="printAllInventoryLabels()"><span class="win98-icon icon-label"></span>Inventory Labels</button>
+                                    <button type="button" class="inventory-mini-button" onclick="openCustomLabelBuilder()"><span class="win98-icon icon-label"></span>Custom Label</button>
+                                    <button type="button" class="inventory-mini-button" onclick="openAuxiliaryLabelBuilder('inventory')"><span class="win98-icon icon-label"></span>Auxiliary</button>
+                                    <button type="button" class="inventory-mini-button" onclick="scanCustomLabelForSupplementalDose()"><span class="win98-icon icon-label"></span>Scan Label</button>
+                                </div>
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Formulary</span>
+                                    <button type="button" class="inventory-mini-button" onclick="createEditFormulary()"><span class="win98-icon icon-formulary"></span>Edit</button>
+                                    <button type="button" class="inventory-mini-button" onclick="viewFormulary()"><span class="win98-icon icon-view"></span>View</button>
+                                </div>
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Orders</span>
+                                    <button type="button" class="inventory-mini-button" onclick="createInventoryOrder()"><span class="win98-icon icon-order"></span>Create</button>
+                                    <button type="button" class="inventory-mini-button" onclick="receiveInventoryOrder()"><span class="win98-icon icon-receive"></span>Receive</button>
+                                    <button type="button" class="inventory-mini-button" onclick="viewInventoryOrderLog()"><span class="win98-icon icon-view"></span>Log</button>
+                                    <button type="button" class="inventory-mini-button" onclick="printInventoryOrderPdf()"><span class="win98-icon icon-order"></span>PDF</button>
+                                </div>
+                                <div class="inventory-command-group">
+                                    <span class="inventory-command-title">Stock Tools</span>
+                                    <button type="button" class="inventory-mini-button" onclick="returnPrepackedDispense()"><span class="win98-icon icon-box"></span>Return Prepack</button>
+                                    <button type="button" class="inventory-mini-button" onclick="openMedKits()"><span class="win98-icon icon-box"></span>Med Kits</button>
+                                </div>
+                            </div>
                         </div>
+                        <div id="inventory-workflow-summary" class="inventory-workflow-summary"></div>
                         <div class="sunken-panel" style="height: 800px; width: 100%; overflow-y: scroll;">
                             <table class="interactive" style="width: 100%;">
                                 <thead>
@@ -462,6 +700,7 @@
                                         <th>Qty</th>
                                         <th>Alert</th>
                                         <th>Exp Date</th>
+                                        <th>Assigned</th>
                                         <th>Actions</th>
                                         
                                     </tr>
@@ -472,7 +711,106 @@
                     </fieldset>
                 </div> <!-- Correctly closes panel-inventory -->
 
-                <!-- 5. DRUG / VACCINE INFORMATION -->
+                <!-- 5. RECIPES / COMPOUNDING -->
+                <div id="panel-recipes" style="display: none;">
+                    <div class="compound-layout">
+                        <fieldset class="compound-builder">
+                            <legend><span class="win98-icon icon-recipe"></span>Compounding Recipe Creator</legend>
+                            <input type="hidden" id="recipe-edit-id">
+                            <datalist id="recipe-inventory-options"></datalist>
+                            <div class="recipe-form-grid">
+                                <label>Recipe name<input id="recipe-name" type="text" placeholder="e.g. Bactrim dilution"></label>
+                                <label>Final product name<input id="recipe-final-name" type="text" placeholder="What appears in inventory"></label>
+                                <label>Strength<input id="recipe-final-strength" type="text" placeholder="auto-calculated or manual"></label>
+                                <label>Units<input id="recipe-final-units" type="text" placeholder="mg/mL"></label>
+                                <label>Formulation
+                                    <select id="recipe-formulation" onchange="updateRecipeDosageDefaults()">
+                                        <option value="mL">Liquid (mL)</option>
+                                        <option value="Powder">Powder / Bulk Powder</option>
+                                        <option value="Cream">Cream</option>
+                                        <option value="Ointment">Ointment</option>
+                                        <option value="Gel">Gel</option>
+                                        <option value="Topical Solution">Topical Solution</option>
+                                        <option value="Sprays">Sprays</option>
+                                        <option value="Drops">Drops</option>
+                                        <option value="Capsules">Capsules</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </label>
+                                <label>Batch yield<input id="recipe-yield-qty" type="number" step="any" placeholder="50" oninput="updateRecipeCalculation()"></label>
+                                <label>Yield unit<input id="recipe-yield-unit" type="text" placeholder="mL" oninput="updateRecipeCalculation()"></label>
+                                <label>BUD days<input id="recipe-bud-days" type="number" min="0" step="1" placeholder="14"></label>
+                                <label>Storage
+                                    <select id="recipe-storage">
+                                        <option value="Room Temp">Room Temp</option>
+                                        <option value="Refrigerated">Refrigerated</option>
+                                        <option value="Frozen">Frozen</option>
+                                    </select>
+                                </label>
+                                <label>Package size<input id="recipe-package-size" type="text" placeholder="50 mL bottle"></label>
+                                <label>Control
+                                    <select id="recipe-control-level">
+                                        <option value="N/A">N/A</option>
+                                        <option value="C-V">C-V</option>
+                                        <option value="C-IV">C-IV</option>
+                                        <option value="C-III">C-III</option>
+                                        <option value="C-II">C-II</option>
+                                    </select>
+                                </label>
+                                <label>Low stock alert<input id="recipe-min-threshold" type="number" step="any" placeholder="1"></label>
+                            </div>
+                            <div class="recipe-calculation-panel">
+                                <label><input id="recipe-auto-calc" type="checkbox" checked onchange="updateRecipeCalculation()"> Auto-calculate strength/concentration from active ingredients</label>
+                                <div id="recipe-calculation-preview">Enter an active ingredient quantity and batch yield to calculate final strength.</div>
+                            </div>
+                            <div class="field-row-stacked" style="margin-top:8px;">
+                                <label>Default label instructions</label>
+                                <textarea id="recipe-instructions" rows="2" placeholder="Shake well, refrigerate, beyond-use instructions, etc."></textarea>
+                            </div>
+                            <div class="field-row-stacked" style="margin-top:8px;">
+                                <label>Compounding notes / procedure</label>
+                                <textarea id="recipe-notes" rows="3" placeholder="Steps, equipment, calculations, auxiliary labeling, checks."></textarea>
+                            </div>
+                            <fieldset class="compound-ingredients-fieldset">
+                                <legend>Ingredients</legend>
+                                <div id="recipe-ingredient-list"></div>
+                                <button type="button" onclick="addRecipeIngredientRow()">Add Ingredient</button>
+                            </fieldset>
+                            <fieldset class="compound-builder-history-fieldset">
+                                <legend>Recent Batches</legend>
+                                <div id="compound-builder-history" class="compound-builder-history">
+                                    <div class="empty-state">Select a saved recipe to see completed batches.</div>
+                                </div>
+                            </fieldset>
+                            <div class="compound-builder-actions">
+                                <button type="button" onclick="saveCompoundRecipe()">Save Recipe</button>
+                                <button type="button" onclick="clearCompoundRecipeBuilder()">Clear</button>
+                                <button type="button" onclick="openAuxiliaryLabelBuilder('recipes')"><span class="win98-icon icon-label"></span>Auxiliary Labels</button>
+                            </div>
+                        </fieldset>
+
+                        <div class="compound-side">
+                            <fieldset>
+                                <legend>Saved Recipes</legend>
+                                <div class="recipe-search-row">
+                                    <label>Search
+                                        <input id="recipe-search" type="text" placeholder="Find recipe, ingredient, strength, or note..." oninput="renderRecipes()">
+                                    </label>
+                                    <button type="button" onclick="clearRecipeSearch()">Clear</button>
+                                </div>
+                                <div id="compound-recipe-list" class="sunken-panel compound-recipe-list"></div>
+                            </fieldset>
+                            <fieldset>
+                                <legend>Prep Panel</legend>
+                                <div id="compound-prep-panel" class="compound-prep-panel">
+                                    <div class="empty-state">Select a saved recipe to prepare a compounded product.</div>
+                                </div>
+                            </fieldset>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. DRUG / VACCINE INFORMATION -->
                 <div id="panel-drug-info" style="display: none;">
                     <fieldset>
                         <legend>Drug References</legend>
@@ -537,6 +875,184 @@
                             </details></li>
                         </ul>
                     </fieldset>
+                </div>
+
+                <!-- HELP -->
+                <div id="panel-help" style="display: none;">
+                    <section class="help-hero">
+                        <div>
+                            <h2>PharmAtlas Help Center</h2>
+                            <p>A practical guide for setting up members, scheduling medications, documenting administrations, managing inventory, preparing labels, tracking monitoring values, and keeping backup records.</p>
+                        </div>
+                    </section>
+
+                    <div class="help-grid">
+                        <fieldset class="help-card">
+                            <legend>1. Recommended Setup</legend>
+                            <ol>
+                                <li>Add each person in the <strong>Members</strong> tab.</li>
+                                <li>Add providers, pharmacies, diagnoses, allergies, intolerance notes, monitoring goals, height/weight/BMI details, and contact information in each member profile.</li>
+                                <li>Add inventory items before scheduling them. Use formulation, stock unit, give/apply unit, expiration date, storage, barcode, and assignment fields.</li>
+                                <li>Create regimens for grouped routines such as supplements, rescue plans, or condition-specific medication groups.</li>
+                                <li>Make a backup before heavy editing or before testing a major workflow.</li>
+                            </ol>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>2. Scheduling Medications</legend>
+                            <ul>
+                                <li>Use <strong>Schedule Medications</strong> to stage medications before adding them to a profile.</li>
+                                <li>Pending scheduled medications can be reviewed, modified, removed, and then finalized.</li>
+                                <li>Supported frequencies include one-time, daily, BID, TID, QID, nightly, PRN, every other day, weekly, every X weeks, X times per week, monthly, and every X hours.</li>
+                                <li>Every X hours schedules preview upcoming times and can adjust future times after late/early documentation.</li>
+                                <li>Use linked medications when items must be taken together or when only one formulation should be selected.</li>
+                                <li>Regimen therapy days let one medication run for a smaller window inside a larger regimen, such as days 1-5 of a treatment cycle.</li>
+                                <li>Medication, current-list, and regimen PDF/Print tools open a built-in preview where medications and columns can be included or excluded.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>3. Documenting Doses</legend>
+                            <ul>
+                                <li>Use <strong>Administer</strong> from a member profile, regimen, calendar, active order, PRN order, or inventory Take button.</li>
+                                <li>Document the actual date/time, and mark doses as given, late, early, skipped, or missed.</li>
+                                <li>Purple timeline blocks mean a dose was given at a different time than originally scheduled.</li>
+                                <li>Skipped and missed doses remain in the administration record and affect adherence.</li>
+                                <li>If a medication exists in a Med Kit, the administration dialog lets you choose whether stock came from main inventory or from that kit.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>4. Progress Notes / Diary</legend>
+                            <ul>
+                                <li>Use each member profile's <strong>Progress Notes / Diary</strong> tab for daily observations, care handoffs, symptoms, side effects, provider calls, and lab follow-up.</li>
+                                <li>Templates can start common note types, and custom diary templates can be created or edited for your own workflows.</li>
+                                <li>Rich text tools support bold, italics, underline, lists, and text color.</li>
+                                <li>Notes can be pinned, marked important, flagged for follow-up, marked private for caregiver-only context, or marked resolved.</li>
+                                <li>Smart tag suggestions help organize notes. Search and tag/flag filters narrow the list quickly.</li>
+                                <li>Notes can link back to medications, administrations, monitoring readings, lab PDFs, regimens, or inventory items.</li>
+                                <li>Pain, mood, sleep, nausea, and energy scales can be saved with each entry for trend context.</li>
+                                <li>Images and PDFs can be attached. Diary reports can be printed or saved as PDFs by date range, with private notes excluded unless selected.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>5. Inventory Basics</legend>
+                            <ul>
+                                <li>Inventory tracks name, strength, formulation, quantity, expiration, storage, control level, notes, photos, barcode aliases, prescriber, and member assignment.</li>
+                                <li>For tablets, capsules, mL, sprays, drops, and similar items, administered doses reduce stock.</li>
+                                <li>For container-based products such as many topicals, stock can stay unchanged until the container is marked finished.</li>
+                                <li>Use <strong>Restock</strong> to add received quantities directly to inventory.</li>
+                                <li>Use <strong>Print Inventory Labels</strong> or individual Label buttons to generate inventory labels.</li>
+                                <li>Use <strong>Custom Label Builder</strong> for optional free-form inventory labels with editable fields, label sizes, and Aztec barcodes.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>6. Recipes &amp; Compounding</legend>
+                            <ul>
+                                <li>Use <strong>Recipes</strong> to create reusable compounding formulas with ingredients, yield, storage, beyond-use dating, instructions, and prep notes.</li>
+                                <li>The prep panel shows ingredient requirements, barcode/QR scan checks, bottle label preview, lot details, and completed batch history.</li>
+                                <li>Completing a prep subtracts marked ingredients from inventory and adds the finished compounded preparation to Inventory.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>7. Med Kits</legend>
+                            <ul>
+                                <li>Use <strong>Inventory &gt; Med Kits</strong> to create named kits such as Travel Kit, Emergency Kit, School Kit, Work Kit, or First Aid Kit.</li>
+                                <li>Search inventory items, enter a quantity, and add them into the selected kit.</li>
+                                <li>Adding an item to a kit subtracts that quantity from main inventory.</li>
+                                <li>Use Restock to add more of an existing kit item, Adjust Quantity to correct counts, and Return/Discard to choose whether removed stock goes back to main inventory.</li>
+                                <li>Kits and kit items turn red when any item is expired or expiring within 10 days.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>8. Formulary & Orders</legend>
+                            <ul>
+                                <li>The formulary is a master reorder list. It can include inventory items and non-inventory items.</li>
+                                <li>Create Orders can add low/expired items, formulary items, current inventory, or new non-inventory items.</li>
+                                <li>New non-inventory order items are highlighted yellow until received and entered into inventory.</li>
+                                <li>The Order Log lets you edit active orders, delete order records, generate PDFs, and modify received order records.</li>
+                                <li>Prices are line prices for the ordered item, not price multiplied by tablets, mL, capsules, or units.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>9. Prepackaging & Labels</legend>
+                            <ul>
+                                <li>Prepack queues can be created for date ranges and later printed when it is time to prepare doses.</li>
+                                <li>Use scanning when available, or use manual completion when a scanner is not available.</li>
+                                <li>Prepack labels can be grouped by all times, daytime, or evening.</li>
+                                <li>If medications change after labels are generated, affected prepacks are marked for reprint.</li>
+                                <li>Inventory labels can include QR/barcode codes for verification workflows.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>10. Monitoring & Reports</legend>
+                            <ul>
+                                <li>Monitoring supports BP/HR, blood glucose, weight, temperature, INR, drug levels, and custom lab goals.</li>
+                                <li>Member profiles display monitoring graphs, adherence, calendars, active orders, PRN orders, completed schedules, and administration logs.</li>
+                                <li>Medication/Supplement summaries show active scheduled and PRN items, inventory forecasts, and last documented doses.</li>
+                                <li>PDFs are available for inventory, schedules, monitoring, progress notes/diary, formulary, and inventory orders.</li>
+                                <li>Schedule PDFs can be used as paper check-off sheets for trips, caregivers, or periods away from the app.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>11. Today, Audit & Health</legend>
+                            <ul>
+                                <li>Today View shows overdue, due-soon, later, completed, and PRN items for quick daily work.</li>
+                                <li>Setup Guide walks through a first-use checklist and can jump directly to the needed tab.</li>
+                                <li>Hover help adds small question-mark tips near common controls and can be disabled from the Dashboard.</li>
+                                <li>Workflow Health Check looks for broken schedule links, orphaned records, duplicate barcodes, missing times, impossible stock counts, stale prepack labels, return/waste inconsistencies, monitoring link problems, and pending unapproved medication work.</li>
+                                <li>Audit Trail records safety-relevant changes such as scheduling, discontinuing, administration, restocking, profile edits, and overrides. Medication rows also have an Audit button for order-specific history.</li>
+                                <li>Printer Calibration previews a test label so label borders, font size, and scanner text can be checked before a large print run.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card">
+                            <legend>12. Local Sync & Privacy</legend>
+                            <ul>
+                                <li>Desktop Sync Folder can place PharmAtlas data inside OneDrive, Google Drive Desktop, Dropbox, or another user-controlled synced folder.</li>
+                                <li>Avoid editing from two computers at the same time. Let the sync app finish before opening PharmAtlas elsewhere.</li>
+                                <li>PharmAtlas data, PDFs, labels, backups, synced folders, and emails may contain private health information.</li>
+                                <li>Protect your computer account, cloud account, email app password, backups, and exported files.</li>
+                            </ul>
+                        </fieldset>
+
+                        <fieldset class="help-card help-wide">
+                            <legend>Safety Checklist Before Real Use</legend>
+                            <div class="help-checklist">
+                                <label><input type="checkbox"> Verify medication names, strengths, formulations, and doses.</label>
+                                <label><input type="checkbox"> Confirm start dates, end dates, frequencies, and administration times.</label>
+                                <label><input type="checkbox"> Review allergies, intolerances, linked medications, and PRN maximum dose settings.</label>
+                                <label><input type="checkbox"> Test labels with your printer before relying on a large print job.</label>
+                                <label><input type="checkbox"> Test inventory subtraction for each formulation type you use.</label>
+                                <label><input type="checkbox"> Confirm Med Kit stock movements match your real-world kit counts.</label>
+                                <label><input type="checkbox"> Run Workflow Health Check after major changes, prepacking, returns/waste, or restores.</label>
+                                <label><input type="checkbox"> Create a backup after important updates.</label>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="help-card help-wide">
+                            <legend>Troubleshooting</legend>
+                            <div class="help-troubleshooting">
+                                <div><strong>Text or windows look cramped:</strong><span>Use the app at normal desktop scaling when possible. Wide windows and taskbar-minimized workspaces are designed for desktop use.</span></div>
+                                <div><strong>Printer preview is unavailable:</strong><span>Use PharmAtlas label preview first, then print. Some embedded print engines do not expose a native preview screen.</span></div>
+                                <div><strong>Inventory stock looks wrong:</strong><span>Check whether the dose was documented from main inventory, a Med Kit, or a container-finish workflow.</span></div>
+                                <div><strong>Order item is yellow:</strong><span>It is a new non-inventory item and needs full product details during receiving.</span></div>
+                                <div><strong>Administration history changed after editing:</strong><span>Use the timeline and administration log to edit documentation rather than recreating schedules whenever possible.</span></div>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="help-card help-wide">
+                            <legend>Important Note</legend>
+                            <p>PharmAtlas is an organization and documentation tool. It does not replace a licensed prescriber, pharmacist, clinical medication review, or emergency care. Always verify medication instructions, vaccine decisions, and monitoring goals with qualified healthcare professionals.</p>
+                        </fieldset>
+                    </div>
                 </div>
 
                 <!-- 4. FAMILY -->
@@ -605,10 +1121,24 @@
                         <select id="modal-prescriber" style="width:150px;"></select>
                     </div>
                     <div class="field-row">
-                        <label for="modal-barcode-code">QR code:</label>
-                        <input id="modal-barcode-code" type="text" style="width:170px;">
-                        <button type="button" onclick="generateMedicationCode('modal-barcode-code')">Generate</button>
+                        <label>Pharmacy:</label>
+                        <select id="modal-pharmacy" style="width:150px;"></select>
                     </div>
+                    <div class="field-row">
+                        <label for="modal-assignment-mode">Assign to:</label>
+                        <select id="modal-assignment-mode" onchange="updateMedicationAssignmentMode('modal')" style="width:150px;">
+                            <option value="all">All members</option>
+                            <option value="selected">Selected members</option>
+                        </select>
+                    </div>
+                    <div id="modal-assigned-members" class="member-assignment-list"></div>
+                    <div class="field-row barcode-entry-row">
+                        <label for="modal-barcode-code">QR / barcode:</label>
+                        <input id="modal-barcode-code" type="text" style="width:170px;" placeholder="Scan, paste, or generate">
+                        <button type="button" onclick="generateMedicationCode('modal-barcode-code')">Generate</button>
+                        <button type="button" onclick="addModalBarcodeCode()">Add Code</button>
+                    </div>
+                    <div id="modal-barcode-list" class="barcode-code-list"></div>
                 </div>
             </div>
             <fieldset class="med-profile-details">
@@ -618,11 +1148,19 @@
                     <select id="modal-formulation" onchange="updateMedProfileMode()">
                         <option value="Tablets">Tablets</option>
                         <option value="Capsules">Capsules</option>
+                        <option value="Chewable">Chewable tablet</option>
+                        <option value="ODT">Orally disintegrating tablet</option>
+                        <option value="Sublingual">Sublingual tablet/film</option>
+                        <option value="Lozenge">Lozenge</option>
                         <option value="mL">Liquid (mL)</option>
+                        <option value="Powder">Powder / Bulk Powder</option>
                         <option value="Granules">Granules</option>
                         <option value="Packet">Packet</option>
                         <option value="Inhalations">Inhalations</option>
                         <option value="Sprays">Sprays</option>
+                        <option value="Injection">Injection / vial concentration</option>
+                        <option value="Vial">Vial</option>
+                        <option value="Prefilled Syringe">Prefilled syringe</option>
                         <option value="Suppository">Suppository</option>
                         <option value="Cream">Cream</option>
                         <option value="Ointment">Ointment</option>
@@ -647,7 +1185,32 @@
                     <option value="mEq"><option value="IU"><option value="units"><option value="CFU">
                 </datalist>
                 <div id="modal-combination-fields" style="display:none; margin-top:6px;">
+                    <div class="combo-basis-panel">
+                        <label><input id="modal-combo-use-shared-per" type="checkbox" checked onchange="updateMedProfileMode(); updateCombinationPreview('modal');"> Use one package/concentration basis for all ingredients</label>
+                        <span>per</span>
+                        <input id="modal-combo-shared-per-amount" type="number" min="0.001" step="any" value="1" oninput="updateCombinationPreview('modal')">
+                        <select id="modal-combo-shared-per-unit" onchange="updateCombinationPreview('modal')">
+                            <option value="">unit</option>
+                            <option value="mL">mL</option>
+                            <option value="g">g</option>
+                            <option value="mg">mg</option>
+                            <option value="tablet">tablet</option>
+                            <option value="capsule">capsule</option>
+                            <option value="lozenge">lozenge</option>
+                            <option value="packet">packet</option>
+                            <option value="spray">spray</option>
+                            <option value="drop">drop</option>
+                            <option value="inhalation">inhalation</option>
+                            <option value="patch">patch</option>
+                            <option value="suppository">suppository</option>
+                            <option value="vial">vial</option>
+                            <option value="syringe">syringe</option>
+                            <option value="film">film</option>
+                            <option value="unit">unit</option>
+                        </select>
+                    </div>
                     <div id="modal-ingredient-list"></div>
+                    <div id="modal-combination-preview" class="combo-strength-preview">Add ingredients to preview the combined strength.</div>
                     <button type="button" onclick="addModalIngredientRow()">+ Add Ingredient</button>
                 </div>
                 <div class="field-row" style="margin-top:6px;">
@@ -687,100 +1250,345 @@
         <div class="title-bar">
             <div class="title-bar-text" id="member-modal-title">Add New Member</div>
             <div class="title-bar-controls">
+                <button aria-label="Minimize" onclick="minimizeMemberModal()"></button>
                 <button aria-label="Close" onclick="closeMemberModal()"></button>
             </div>
         </div>
         <div class="window-body member-profile-body">
-            <div style="display:flex; gap:10px;">
-                <div class="field-row-stacked"><label>First Name</label><input id="m-first" type="text"></div>
-                <div class="field-row-stacked"><label>Middle</label><input id="m-middle" type="text" style="width:50px;"></div>
-                <div class="field-row-stacked"><label>Last Name</label><input id="m-last" type="text"></div>
+            <div class="profile-demographics-strip">
+                <div class="profile-name-grid">
+                    <label class="field-row-stacked">First Name<input id="m-first" type="text"></label>
+                    <label class="field-row-stacked profile-middle-name">Middle<input id="m-middle" type="text"></label>
+                    <label class="field-row-stacked">Last Name<input id="m-last" type="text"></label>
+                </div>
+
+                <div class="profile-demo-grid">
+                    <label>Sex<select id="m-sex">
+                        <option value="Male">Male (Blue)</option>
+                        <option value="Female">Female (Pink)</option>
+                    </select></label>
+                    <label>Age<input id="m-age" type="number"></label>
+                    <label>DOB<input id="m-dob" type="date"></label>
+                    <label>Height<input id="m-height" type="number" step="0.1" oninput="updateMemberBmiPreview()"></label>
+                    <label>Units<select id="m-height-unit" onchange="updateMemberBmiPreview()"><option value="in">in</option><option value="cm">cm</option></select></label>
+                    <label>Weight<input id="m-current-weight" type="number" step="0.1" oninput="updateMemberBmiPreview()"></label>
+                    <label>Units<select id="m-current-weight-unit" onchange="updateMemberBmiPreview()"><option value="lb">lb</option><option value="kg">kg</option></select></label>
+                    <label>BMI<input id="m-bmi" type="text" readonly></label>
+                    <label>Calendar color<input id="m-calendar-color" type="color" value="#000080" title="Color used for this member on the calendar"></label>
+                </div>
             </div>
 
-            <div class="field-row" style="margin-top:10px;">
-                <label>Sex:</label>
-                <select id="m-sex">
-                    <option value="Male">Male (Blue)</option>
-                    <option value="Female">Female (Pink)</option>
-                </select>
-                <label>Age:</label><input id="m-age" type="number" style="width:50px;">
-                <label>DOB:</label><input id="m-dob" type="date">
-                <label>Calendar color:</label><input id="m-calendar-color" type="color" value="#000080" title="Color used for this member on the calendar">
+            <div class="member-profile-tabbar">
+                <button type="button" class="member-profile-tab active" data-member-profile-tab="main" onclick="switchMemberProfileTab('main')">Main</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="orders" onclick="switchMemberProfileTab('orders')">Scheduled Medications</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="summary" onclick="switchMemberProfileTab('summary')">Current List / Summary</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="monitoring" onclick="switchMemberProfileTab('monitoring')">Monitoring</button>
+                <button type="button" class="member-profile-tab" data-member-profile-tab="diary" onclick="switchMemberProfileTab('diary')">Progress Notes / Diary</button>
             </div>
 
-            <fieldset style="margin-top:10px;">
-                <legend>Contact & Medical</legend>
+            <input id="m-current-med-list-data" type="hidden">
+            <input id="m-current-discontinued-med-list-data" type="hidden">
+            <input id="m-lab-documents-data" type="hidden">
+            <input id="m-progress-notes-data" type="hidden">
+
+            <aside id="member-profile-right-panel" class="workspace-right-rail member-context-rail"></aside>
+
+            <section data-member-section="main" class="profile-main-grid">
                 <input id="m-providers" type="hidden">
                 <input id="m-diag" type="hidden">
-                <div class="field-row"><label>Address:</label><input id="m-addr" type="text" style="width:100%;"></div>
-                <div style="display:flex; gap:5px; margin-top:5px;">
-                    <div class="field-row-stacked"><label>Phone</label><input id="m-phone" type="text"></div>
-                    <div class="field-row-stacked"><label>Email</label><input id="m-email" type="text"></div>
-                </div>
-                <fieldset class="profile-notification-options">
-                    <legend>Notifications</legend>
-                    <div class="notification-toggle-list">
-                        <div class="notification-toggle">
-                            <input id="m-notify-enabled" type="checkbox" checked>
-                            <label for="m-notify-enabled">Medication reminders</label>
+                <input id="m-prescriber-ids-data" type="hidden">
+                <input id="m-primary-prescriber-id" type="hidden">
+                <input id="m-pharmacy-ids-data" type="hidden">
+                <input id="m-primary-pharmacy-id" type="hidden">
+                <input id="m-diagnoses-data" type="hidden">
+                <input id="m-allergies-data" type="hidden">
+
+                <fieldset class="profile-card profile-card-contact">
+                    <legend>Contact &amp; Reminders</legend>
+                    <div class="profile-card-title">Home Base</div>
+                    <div class="profile-contact-grid">
+                        <label class="field-row-stacked profile-span-2">Address<input id="m-addr" type="text"></label>
+                        <label class="field-row-stacked">Phone<input id="m-phone" type="text"></label>
+                        <label class="field-row-stacked">Email<input id="m-email" type="text"></label>
+                    </div>
+                    <fieldset class="profile-notification-options">
+                        <legend>Notifications</legend>
+                        <div class="notification-toggle-list">
+                            <div class="notification-toggle">
+                                <input id="m-notify-enabled" type="checkbox" checked>
+                                <label for="m-notify-enabled">Medication &amp; monitoring reminders</label>
+                            </div>
+                            <div class="notification-toggle">
+                                <input id="m-email-reminders" type="checkbox">
+                                <label for="m-email-reminders">Email reminders (opt in)</label>
+                            </div>
                         </div>
-                        <div class="notification-toggle">
-                            <input id="m-email-reminders" type="checkbox">
-                            <label for="m-email-reminders">Email reminders (opt in)</label>
+                    </fieldset>
+                    <label class="field-row-stacked profile-care-note">Care Notes / Handoff
+                        <textarea id="m-care-notes" rows="3" placeholder="Optional notes for routines, preferences, emergency context, or caregiver handoff."></textarea>
+                    </label>
+                </fieldset>
+
+                <fieldset class="profile-card profile-card-care">
+                    <legend>Care Team</legend>
+                    <div class="profile-two-column">
+                        <div>
+                            <div class="profile-list-heading">Provider Profiles</div>
+                            <div id="m-prescriber-list" class="profile-list-panel"></div>
+                            <button type="button" onclick="addMemberPrescriber()">Add Provider</button>
+                        </div>
+                        <div>
+                            <div class="profile-list-heading">Preferred Pharmacy Profiles</div>
+                            <div id="m-pharmacy-list" class="profile-list-panel"></div>
+                            <button type="button" onclick="addMemberPharmacy()">Add Pharmacy</button>
                         </div>
                     </div>
                 </fieldset>
-                <input id="m-prescriber-ids-data" type="hidden">
-                <input id="m-diagnoses-data" type="hidden">
-                <div class="field-row" style="align-items:flex-start; margin-top:8px;">
-                    <div style="flex:1;">
-                        <strong>Provider Profiles</strong>
-                        <div id="m-prescriber-list" class="sunken-panel" style="height:72px; overflow-y:auto; background:white; margin-top:3px;"></div>
-                        <button type="button" onclick="addMemberPrescriber()">Add Provider</button>
+
+                <fieldset class="profile-card profile-card-safety">
+                    <legend>Safety Snapshot</legend>
+                    <div class="profile-two-column">
+                        <div>
+                            <div class="profile-list-heading">Diagnoses</div>
+                            <div id="m-diagnosis-list" class="profile-list-panel"></div>
+                            <button type="button" onclick="addMemberDiagnosis()">Add Diagnosis</button>
+                        </div>
+                        <div>
+                            <div class="profile-list-heading">Allergies &amp; Intolerances</div>
+                            <div id="m-allergy-list" class="profile-list-panel profile-list-panel-tall"></div>
+                            <button type="button" onclick="addMemberAllergy()">Add Allergy / Intolerance</button>
+                        </div>
                     </div>
-                    <div style="flex:1;">
-                        <strong>Diagnoses</strong>
-                        <div id="m-diagnosis-list" class="sunken-panel" style="height:72px; overflow-y:auto; background:white; margin-top:3px;"></div>
-                        <button type="button" onclick="addMemberDiagnosis()">Add Diagnosis</button>
+                </fieldset>
+
+                <fieldset class="profile-card profile-card-goals">
+                    <legend>Monitoring Goals</legend>
+                    <div class="goal-card-grid">
+                        <section class="goal-card goal-card-glucose">
+                            <div class="goal-card-header">
+                                <strong>Blood Glucose</strong>
+                                <select id="m-glucose-preset" onchange="applyGlucosePreset()">
+                                    <option value="diabetic">ADA adult diabetes range</option>
+                                    <option value="diabetic_fasting">ADA before meals</option>
+                                    <option value="nondiabetic">General non-diabetic tracking</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="goal-range-row">
+                                <label>Low<input id="m-glucose-low" type="number" oninput="markGoalPresetCustom('m-glucose-preset')"></label>
+                                <span>to</span>
+                                <label>High<input id="m-glucose-high" type="number" oninput="markGoalPresetCustom('m-glucose-preset')"></label>
+                                <strong>mg/dL</strong>
+                            </div>
+                            <div id="m-glucose-goal-note" class="goal-reference-note"></div>
+                        </section>
+
+                        <section class="goal-card goal-card-bp">
+                            <div class="goal-card-header">
+                                <strong>Blood Pressure</strong>
+                                <select id="m-bp-preset" onchange="applyBpPreset()">
+                                    <option value="treated">Common treated goal</option>
+                                    <option value="normal">Normal range category</option>
+                                    <option value="stage2_alert">High alert threshold</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="bp-goal-grid">
+                                <label>Sys low<input id="m-bp-sys-low" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                                <label>Sys high<input id="m-bp-sys-high" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                                <label>Dia low<input id="m-bp-dia-low" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                                <label>Dia high<input id="m-bp-dia-high" type="number" oninput="markGoalPresetCustom('m-bp-preset')"></label>
+                            </div>
+                            <div id="m-bp-goal-note" class="goal-reference-note"></div>
+                        </section>
+
+                        <section class="goal-card goal-card-hr">
+                            <div class="goal-card-header"><strong>Heart Rate</strong><span>bpm</span></div>
+                            <div class="goal-range-row">
+                                <label>Low<input id="m-hr-low" type="number"></label>
+                                <span>to</span>
+                                <label>High<input id="m-hr-high" type="number"></label>
+                            </div>
+                        </section>
+
+                        <section class="goal-card goal-card-weight">
+                            <div class="goal-card-header">
+                                <strong>Weight Watch Range</strong>
+                                <select id="m-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select>
+                            </div>
+                            <div class="goal-range-row">
+                                <label>Low<input id="m-weight-low" type="number" step="0.1"></label>
+                                <span>to</span>
+                                <label>High<input id="m-weight-high" type="number" step="0.1"></label>
+                            </div>
+                        </section>
                     </div>
+                </fieldset>
+
+            </section>
+
+            <fieldset data-member-section="diary" class="profile-card profile-card-diary" style="margin-top:10px;">
+                    <legend>Progress Notes / Diary</legend>
+                    <div class="profile-diary-layout">
+                        <div class="profile-diary-editor">
+                            <div class="profile-diary-header">
+                                <strong>New Entry</strong>
+                                <div class="field-row">
+                                    <label>Date:</label><input id="m-progress-note-date" type="date">
+                                    <label>Time:</label><input id="m-progress-note-time" type="time">
+                                </div>
+                            </div>
+                            <div class="profile-diary-template-row">
+                                <label>Template:
+                                    <select id="m-progress-note-template" onchange="applyProgressNoteTemplate(this.value)">
+                                        <option value="">Blank note</option>
+                                    </select>
+                                </label>
+                                <button type="button" onclick="openProgressNoteTemplateManager()">Create / Edit Templates</button>
+                            </div>
+                            <div class="profile-diary-title-grid">
+                                <input id="m-progress-note-title" type="text" placeholder="Title or quick summary" oninput="refreshProgressNoteTagSuggestions()">
+                                <input id="m-progress-note-tags" type="text" placeholder="Tags, comma separated" oninput="refreshProgressNoteTagSuggestions()">
+                            </div>
+                            <div id="m-progress-note-tag-suggestions" class="profile-diary-tag-suggestions"></div>
+                            <div class="profile-diary-link-grid">
+                                <label>Link to:
+                                    <select id="m-progress-note-link-type" onchange="renderProgressNoteLinkOptions()">
+                                        <option value="">No linked event</option>
+                                        <option value="medication">Medication / supplement</option>
+                                        <option value="administration">Administration entry</option>
+                                        <option value="vital">Monitoring reading</option>
+                                        <option value="lab">Lab PDF</option>
+                                        <option value="regimen">Regimen</option>
+                                        <option value="inventory">Inventory item</option>
+                                    </select>
+                                </label>
+                                <label>Item:
+                                    <select id="m-progress-note-link-id">
+                                        <option value="">Choose after selecting a link type</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="profile-diary-flags">
+                                <span class="profile-diary-flags-title">Note flags:</span>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-pinned" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Pinned</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-important" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Important</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-followup" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Follow-up</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-provider" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Discuss with provider</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-private" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Private caregiver note</span></label>
+                                <label class="profile-diary-flag-toggle"><input id="m-progress-note-resolved" type="checkbox" onchange="updateProgressNoteFlagVisuals()"><span>Resolved</span></label>
+                            </div>
+                            <div class="profile-diary-scale-toggle-row">
+                                <button type="button" onclick="toggleProgressNoteScales()">Add ratings</button>
+                                <label class="profile-diary-ratings-off-toggle"><input id="m-progress-note-disable-ratings" type="checkbox" onchange="toggleProgressNoteRatingsDisabled(this.checked)"><span>Ratings off for this entry</span></label>
+                                <span class="form-help">Optional subjective diary ratings: pain/nausea 0 none to 10 worst; mood/sleep/energy 1 low to 5 best.</span>
+                            </div>
+                            <div id="m-progress-note-scales-panel" class="profile-diary-scale-panel" style="display:none;">
+                                <div class="profile-diary-scale-grid">
+                                    <label>Pain 0-10<input id="m-progress-note-pain" type="number" min="0" max="10" step="1" placeholder="-"></label>
+                                    <label>Mood 1-5<input id="m-progress-note-mood" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                    <label>Sleep 1-5<input id="m-progress-note-sleep" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                    <label>Nausea 0-10<input id="m-progress-note-nausea" type="number" min="0" max="10" step="1" placeholder="-"></label>
+                                    <label>Energy 1-5<input id="m-progress-note-energy" type="number" min="1" max="5" step="1" placeholder="-"></label>
+                                </div>
+                            </div>
+                            <input id="m-progress-note-edit-id" type="hidden">
+                            <div class="rich-text-toolbar" aria-label="Progress note formatting">
+                                <button type="button" class="rich-tool-button" onclick="formatProgressNote('bold')" title="Bold"><span class="rich-tool-icon rich-tool-bold">B</span></button>
+                                <button type="button" class="rich-tool-button" onclick="formatProgressNote('italic')" title="Italic"><span class="rich-tool-icon rich-tool-italic">I</span></button>
+                                <button type="button" class="rich-tool-button" onclick="formatProgressNote('underline')" title="Underline"><span class="rich-tool-icon rich-tool-underline">U</span></button>
+                                <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressNote('insertUnorderedList')" title="Bulleted list"><span class="rich-tool-icon">&bull;</span> List</button>
+                                <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressNote('insertOrderedList')" title="Numbered list"><span class="rich-tool-icon">1.</span> List</button>
+                                <label class="rich-color-tool" title="Text color">
+                                    <span class="rich-tool-icon rich-tool-color">A</span>
+                                    <input id="m-progress-note-color" type="color" value="#000000" onchange="applyProgressNoteColor(this.value)">
+                                </label>
+                                <button type="button" class="rich-tool-button rich-tool-wide" onclick="formatProgressNote('removeFormat')" title="Clear formatting">Clear Format</button>
+                            </div>
+                            <div id="m-progress-note-editor" class="rich-text-editor" contenteditable="true" data-placeholder="Type a progress note, symptom diary entry, care update, or observation..." oninput="refreshProgressNoteTagSuggestions()"></div>
+                            <div class="profile-diary-attachment-row">
+                                <label>Attachments:
+                                    <input id="m-progress-note-attachment" type="file" multiple accept="image/*,application/pdf" onchange="addProgressNoteAttachments(this)">
+                                </label>
+                                <div id="m-progress-note-attachment-list" class="profile-diary-attachments"></div>
+                            </div>
+                            <div class="profile-diary-actions">
+                                <button id="m-progress-note-save-button" type="button" data-icon-enhanced="true" onclick="saveMemberProgressNote()"><span class="button-plus-sign">+</span>Add Entry</button>
+                                <button type="button" onclick="clearMemberProgressNoteEditor()">Clear</button>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="profile-list-heading">Entries by Day</div>
+                            <div class="profile-diary-filterbar">
+                                <input id="m-progress-note-search" type="text" placeholder="Search notes..." oninput="renderMemberProgressNotes()">
+                                <select id="m-progress-note-tag-filter" onchange="renderMemberProgressNotes()">
+                                    <option value="">All tags</option>
+                                </select>
+                                <select id="m-progress-note-flag-filter" onchange="renderMemberProgressNotes()">
+                                    <option value="">All flags</option>
+                                    <option value="pinned">Pinned</option>
+                                    <option value="important">Important</option>
+                                    <option value="followup">Follow-up</option>
+                                    <option value="provider">Discuss with provider</option>
+                                    <option value="private">Private</option>
+                                </select>
+                            </div>
+                            <div class="profile-diary-exportbar">
+                                <label>From<input id="m-progress-note-report-from" type="date"></label>
+                                <label>To<input id="m-progress-note-report-to" type="date"></label>
+                                <label class="profile-diary-include-private"><input id="m-progress-note-report-private" type="checkbox"> Include private</label>
+                                <button type="button" class="diary-output-button" onclick="printMemberProgressNotesReport()">Print</button>
+                                <button type="button" class="diary-output-button" onclick="generateMemberProgressNotesPdfReport()">Diary PDF</button>
+                            </div>
+                            <div id="m-progress-note-list" class="profile-diary-list"></div>
+                            <div class="profile-list-heading" style="margin-top:8px;">Timeline View</div>
+                            <div id="m-progress-note-timeline" class="profile-diary-timeline"></div>
+                        </div>
+                    </div>
+                </fieldset>
+
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
+                <legend>Monitoring Parameters</legend>
+                <div class="care-reminder-panel">
+                    <div class="care-reminder-builder">
+                        <label>Reminder:
+                            <select id="m-care-reminder-type"></select>
+                        </label>
+                        <label>Frequency:
+                            <select id="m-care-reminder-freq" onchange="renderCareReminderFrequencyControls('m')">
+                                <option value="ONCE">Once</option>
+                                <option value="QD">Daily</option>
+                                <option value="BID">Twice daily</option>
+                                <option value="TID">3 times daily</option>
+                                <option value="QID">4 times daily</option>
+                                <option value="Nightly">Nightly</option>
+                                <option value="QOD">Every other day</option>
+                                <option value="QW">Weekly</option>
+                                <option value="QXW">Every X weeks</option>
+                                <option value="XPW">X times per week</option>
+                                <option value="QXH">Every X hours</option>
+                                <option value="Monthly">Monthly</option>
+                            </select>
+                        </label>
+                        <label>Start:<input id="m-care-reminder-start" type="date"></label>
+                        <label>End:<input id="m-care-reminder-end" type="date"></label>
+                    </div>
+                    <div id="m-care-reminder-frequency-controls" class="care-reminder-frequency-controls"></div>
+                    <div class="field-row-stacked" style="margin-top:6px;">
+                        <label>Reminder note:</label>
+                        <input id="m-care-reminder-note" type="text" placeholder="e.g. before breakfast, seated for 5 minutes, fasting if needed">
+                    </div>
+                    <div class="field-row" style="justify-content:flex-end; margin-top:6px;">
+                        <input id="m-care-reminder-edit-id" type="hidden">
+                        <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Types</button>
+                        <button id="m-care-reminder-save-button" type="button" onclick="saveMemberCareReminder()">Add Reminder</button>
+                        <button type="button" onclick="clearMemberCareReminderForm()">Clear</button>
+                    </div>
+                    <div id="member-care-reminder-list" class="sunken-panel member-care-reminder-list"></div>
                 </div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
-                <legend>Vitals Goals</legend>
-                <div class="field-row">
-                    <label>Glucose Goals:</label>
-                    <select id="m-glucose-preset" onchange="applyGlucosePreset()">
-                        <option value="diabetic">ADA Diabetes</option>
-                        <option value="nondiabetic">Non-Diabetic</option>
-                        <option value="custom">Custom</option>
-                    </select>
-                    <label>Low:</label><input id="m-glucose-low" type="number" style="width:55px;">
-                    <label>High:</label><input id="m-glucose-high" type="number" style="width:55px;">
-                    <span>mg/dL</span>
-                </div>
-                <div class="field-row" style="margin-top:6px;">
-                    <label>BP Goals:</label>
-                    <label>Sys Min:</label><input id="m-bp-sys-low" type="number" style="width:55px;">
-                    <label>Sys Max:</label><input id="m-bp-sys-high" type="number" style="width:55px;">
-                    <label>Dia Min:</label><input id="m-bp-dia-low" type="number" style="width:55px;">
-                    <label>Dia Max:</label><input id="m-bp-dia-high" type="number" style="width:55px;">
-                </div>
-                <div class="field-row" style="margin-top:6px;">
-                    <label>Heart Rate Goals:</label>
-                    <label>Min:</label><input id="m-hr-low" type="number" style="width:55px;">
-                    <label>Max:</label><input id="m-hr-high" type="number" style="width:55px;">
-                    <span>bpm</span>
-                </div>
-                <div class="field-row" style="margin-top:6px;">
-                    <label>Weight Goals:</label>
-                    <label>Low:</label><input id="m-weight-low" type="number" step="0.1" style="width:60px;">
-                    <label>High:</label><input id="m-weight-high" type="number" step="0.1" style="width:60px;">
-                    <select id="m-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select>
-                </div>
-            </fieldset>
-
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Medication &amp; Lab Monitoring</legend>
                 <div id="member-monitoring-list" class="sunken-panel" style="min-height:62px; max-height:180px; overflow-y:auto; background:white;"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
@@ -788,38 +1596,103 @@
                 </div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
-                <legend>Active Medications</legend>
-                <div id="member-active-meds-list"></div>
-            </fieldset>
-
-            <fieldset style="margin-top:10px;">
-                <legend>PRN Medications</legend>
-                <div id="member-prn-meds-list"></div>
-            </fieldset>
-
-            <fieldset style="margin-top:10px;">
-                <legend>Completed Medication Schedules</legend>
-                <div id="member-completed-meds-list"></div>
-            </fieldset>
-
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>Medication Schedule Calendar</legend>
                 <div class="calendar-controls">
                     <button type="button" onclick="shiftMemberCalendar(-7)">Previous 7 Days</button>
                     <strong id="member-calendar-range"></strong>
                     <button type="button" onclick="shiftMemberCalendar(7)">Next 7 Days</button>
                     <button type="button" onclick="resetMemberCalendar()">Today</button>
+                    <button type="button" class="schedule-medications-button" onclick="scheduleMedicationForCurrentMember()"><span class="win98-icon icon-order"></span> Schedule</button>
+                    <span id="member-calendar-view-toggle" class="calendar-view-toggle"></span>
                 </div>
                 <div id="member-calendar-grid" class="member-calendar-grid"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <aside id="member-order-work-dock" class="member-order-work-dock" aria-hidden="true">
+                <div id="member-order-worklist"></div>
+            </aside>
+
+            <fieldset data-member-section="orders" class="member-scan-console" style="margin-top:10px;">
+                <legend>Scanned Prepack / Label</legend>
+                <div class="member-scan-terminal">
+                    <label>Scan Aztec / barcode:
+                        <input id="member-command-scan-code" type="text" placeholder="Scan package or medication code"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();scanDailyCommandCode(this.value, { source: 'member' });}">
+                    </label>
+                    <button type="button" onclick="scanDailyCommandCode(document.getElementById('member-command-scan-code')?.value, { source: 'member' })">Open</button>
+                </div>
+                <div id="member-command-scan-panel" class="member-command-scan-panel">
+                    <div class="empty-state">Scan a prepack or medication label to review package contents and action history.</div>
+                </div>
+            </fieldset>
+
+            <fieldset data-member-section="summary" style="margin-top:10px;">
+                <legend>Current Meds / Supplements List</legend>
+                <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
+                    <button type="button" onclick="generateMemberCurrentMedsPdfReport()">PDF</button>
+                    <button type="button" onclick="printMemberCurrentMedsReport()">Print</button>
+                    <button type="button" onclick="openMemberCurrentMedsBuilder()">Create/Edit Current List</button>
+                </div>
+                <div id="member-current-med-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="summary" style="margin-top:10px;">
+                <legend>Medications/Supplements Summary</legend>
+                <div class="field-row" style="justify-content:flex-end; margin-bottom:6px;">
+                    <button type="button" onclick="generateMemberMedicationSummaryPdfReport()">PDF</button>
+                    <button type="button" onclick="emailMemberMedicationSummaryReport()">Send to Provider</button>
+                    <button type="button" onclick="printMemberMedicationSummaryReport()">Print</button>
+                </div>
+                <div id="member-med-review"></div>
+            </fieldset>
+
+            <fieldset data-member-section="orders" style="margin-top:10px;">
+                <legend>Active Medications</legend>
+                <div id="member-active-meds-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="orders" style="margin-top:10px;">
+                <legend>PRN Medications</legend>
+                <div id="member-prn-meds-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="orders" style="margin-top:10px;">
+                <legend>Completed Medication Schedules</legend>
+                <div id="member-completed-meds-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
+                <legend>Lab PDF Documents</legend>
+                <div class="member-lab-upload">
+                    <div class="lab-upload-heading">
+                        <strong>Save Lab Reports</strong>
+                        <span>Attach PDF lab results to this member's monitoring record.</span>
+                    </div>
+                    <div class="lab-upload-grid">
+                        <label class="field-row-stacked lab-title-control">Title<input id="member-lab-title" type="text" placeholder="e.g. CMP 8/14/26"></label>
+                        <label class="field-row-stacked">Document date<input id="member-lab-date" type="date"></label>
+                        <label class="field-row-stacked lab-file-control">PDF file<input id="member-lab-pdf-input" type="file" accept="application/pdf"></label>
+                        <label class="field-row-stacked lab-notes-control">Notes<textarea id="member-lab-notes" rows="2" placeholder="e.g. CMP, CBC, INR, lipid panel"></textarea></label>
+                        <div class="lab-upload-actions">
+                            <button type="button" onclick="addMemberLabPdf()">Add Lab PDF</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="member-lab-document-list" class="member-lab-document-list"></div>
+            </fieldset>
+
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
+                <legend>Medication Adherence</legend>
+                <div id="member-adherence-chart"></div>
+            </fieldset>
+
+            <fieldset data-member-section="orders" style="margin-top:10px;">
                 <legend>Administration Log</legend>
                 <div id="member-admin-log" class="sunken-panel" style="height:500px; overflow-y:scroll; background:white;"></div>
             </fieldset>
 
-            <fieldset style="margin-top:10px;">
+            <fieldset data-member-section="monitoring" style="margin-top:10px;">
                 <legend>Monitoring Trends</legend>
                 <div id="member-vitals-trends"></div>
                 <div class="field-row" style="justify-content:flex-end; margin-top:8px;">
@@ -837,29 +1710,30 @@
 </div>
 <!--Order Modifier Modal-->
 <div id="order-modifier-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:20000; align-items:center; justify-content:center;">
-    <div class="window" style="width:420px;">
+    <div class="window order-modifier-window">
         <div class="title-bar"><div class="title-bar-text" id="mod-title">Modify Order</div></div>
         <div class="window-body">
             <input type="hidden" id="mod-sched-id">
-            <div class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date"></div>
-            <div class="field-row-stacked"><label>End Date</label><input id="mod-end" type="date"></div>
+            <div id="mod-start-date-wrap" class="field-row-stacked"><label>Start Date</label><input id="mod-start" type="date" onchange="syncMonitoringParameterScheduleUi('mod');"></div>
+            <div class="field-row-stacked"><label>End Date</label><input id="mod-end" type="date" onchange="syncMonitoringParameterScheduleUi('mod');"></div>
             <div class="field-row-stacked"><label>Dose Quantity</label><input id="mod-dose-qty" type="number" step="0.1"></div>
             <div class="field-row-stacked"><label>Prescriber</label><select id="mod-prescriber"></select></div>
             <div class="field-row-stacked"><label>Frequency</label>
                 <select id="mod-freq" onchange="renderFrequencyControls('mod')">
                     <option value="ONCE">One Time Dose</option>
-                    <option value="QD">QD</option>
-                    <option value="BID">BID</option>
-                    <option value="TID">TID</option>
-                    <option value="QID">QID</option>
+                    <option value="QD">Daily</option>
+                    <option value="BID">Twice daily</option>
+                    <option value="TID">3 times daily</option>
+                    <option value="QID">4 times daily</option>
                     <option value="Nightly">Nightly</option>
-                    <option value="QOD">QOD</option>
+                    <option value="QOD">Every other day</option>
                     <option value="QW">Once Weekly</option>
                     <option value="QXW">Every X Weeks</option>
                     <option value="XPW">X Times Per Week</option>
                     <option value="QXH">Every X Hours</option>
-                    <option value="PRN">PRN</option>
+                    <option value="PRN">As needed</option>
                     <option value="Monthly">Once Monthly</option>
+                    <option value="CUSTOM">User specified</option>
                 </select>
             </div>
             <div id="mod-qod-start-container" class="field-row-stacked" style="display:none;"><label>Every Other Day Start</label><input id="mod-qod-start-date" type="date"></div>
@@ -877,10 +1751,32 @@
                 <span class="weekday-option"><input id="mod-weekday-5" type="checkbox" value="5"><label for="mod-weekday-5">Fri</label></span>
                 <span class="weekday-option"><input id="mod-weekday-6" type="checkbox" value="6"><label for="mod-weekday-6">Sat</label></span>
             </div>
-            <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span></div>
-            <div class="field-row link-rule-row"><label>Link to</label><div id="mod-link-target" class="link-choice-panel"></div><label>Meaning</label><select id="mod-link-mode"><option value="">None</option><option value="together">Must take together</option><option value="choose-one">Choose only one</option></select></div>
+            <div id="mod-custom-schedule" class="profile-custom-schedule schedule-custom-editor" style="display:none;"></div>
+            <div id="mod-prn-limit-container" class="field-row" style="display:none;"><label>PRN Max:</label><input id="mod-prn-max-doses" type="number" min="1" step="1" style="width:45px;"><span>doses per</span><input id="mod-prn-window-hours" type="number" min="1" max="168" step="1" value="24" style="width:45px;"><span>hrs</span><label>Frequency:</label><select id="mod-prn-schedule-freq" onchange="renderFrequencyControls('mod')"><option value="">None</option><option value="ONCE">One time</option><option value="QD">Daily</option><option value="BID">BID</option><option value="TID">TID</option><option value="QID">QID</option><option value="Nightly">Nightly</option><option value="QOD">Every other day</option><option value="QW">Weekly</option><option value="QXW">Every X weeks</option><option value="XPW">X times per week</option><option value="QXH">Every X hours</option><option value="Monthly">Monthly</option></select></div>
+                            <div class="field-row link-rule-row"><label>Link to</label><div id="mod-link-target" class="link-choice-panel"></div><label>Meaning</label><select id="mod-link-mode" onchange="markModifierLinksEdited()"><option value="">None</option><option value="mixed" disabled>Mixed link meanings</option><option value="together">Must take together</option><option value="choose-one">Choose only one</option></select></div>
+            <div id="mod-linked-timing-impact" class="linked-timing-impact" style="display:none;"></div>
             <div class="field-row-stacked"><label>Administration Time(s)</label><div id="mod-time-fields"></div></div>
+            <div class="field-row-stacked"><label>Used for / Indication</label><input id="mod-indication" type="text" placeholder="Reason this medication/supplement is used"></div>
             <div class="field-row-stacked"><label>Instructions</label><textarea id="mod-instr" rows="3"></textarea></div>
+            <fieldset class="monitoring-reminder-panel" style="margin-top:8px;">
+                <legend>Monitoring Parameters</legend>
+                <div class="monitoring-reminder-layout">
+                    <div class="monitoring-select-wrap">Parameters:
+                        <div id="mod-monitoring-parameter-options" class="monitoring-parameter-toggle-list"></div>
+                    </div>
+                    <div class="monitoring-reminder-schedule">
+                        <div id="mod-monitor-schedule-list" class="monitoring-parameter-schedule-list"></div>
+                    </div>
+                </div>
+                <div class="field-row" style="justify-content:flex-end; margin-top:5px;">
+                    <button type="button" onclick="openMonitoringParameterTypeManager()">Create/Edit Parameter Types</button>
+                </div>
+                <div id="mod-monitor-hold-rules" class="monitoring-hold-rule-list"></div>
+                <div class="field-row-stacked" style="margin-top:6px;">
+                    <label>Monitoring note:</label>
+                    <input id="mod-reminder-note" type="text" placeholder="Optional note shown with the monitoring reminder">
+                </div>
+            </fieldset>
             <div style="text-align:right; margin-top:10px;">
                 <button onclick="saveOrderModification()">Update Order</button>
                 <button onclick="document.getElementById('order-modifier-modal').style.display='none'">Cancel</button>
@@ -908,6 +1804,7 @@
         </div>
     </div>
     <script src="vendor/qrcode.js"></script>
+    <script src="vendor/bwip-js-min.js"></script>
     <script src="mobile-api.js"></script>
     <script src="renderer.js"></script>
 </body>

@@ -1317,8 +1317,10 @@ function formatFrequency(schedule) {
 function scheduleExceptionText(schedule) {
     const count = Array.isArray(schedule?.excludedInstances) ? schedule.excludedInstances.length : 0;
     const retimed = normalizedScheduleInstanceOverrides(schedule).length;
+    const futureChanges = normalizedFutureDoseShifts(schedule).length;
     const parts = [];
     if (retimed) parts.push(`${retimed} retimed dose${retimed === 1 ? '' : 's'}`);
+    if (futureChanges) parts.push(`${futureChanges} future timing change${futureChanges === 1 ? '' : 's'}`);
     if (count > retimed) parts.push(`${count - retimed} excluded dose${count - retimed === 1 ? '' : 's'}`);
     return parts.length ? ` | ${parts.join(', ')}` : '';
 }
@@ -3842,6 +3844,44 @@ function normalizedScheduleInstanceOverrides(schedule) {
         : [];
 }
 
+function normalizedFutureDoseShifts(schedule) {
+    if (!schedule || !Array.isArray(schedule.futureDoseShifts)) return [];
+    return schedule.futureDoseShifts
+        .filter(item => item && item.effectiveOriginalDate && item.effectiveOriginalTime && Number.isFinite(Number(item.offsetMinutes)))
+        .map(item => ({ ...item, offsetMinutes: Number(item.offsetMinutes) }))
+        .sort((a, b) => `${a.effectiveOriginalDate} ${a.effectiveOriginalTime}`.localeCompare(`${b.effectiveOriginalDate} ${b.effectiveOriginalTime}`));
+}
+
+function futureDoseShiftForOriginal(schedule, originalDate, originalTime) {
+    const originalWhen = dateTimeFromParts(originalDate, originalTime);
+    if (!originalWhen) return null;
+    return normalizedFutureDoseShifts(schedule)
+        .filter(item => {
+            const effective = dateTimeFromParts(item.effectiveOriginalDate, item.effectiveOriginalTime);
+            return effective && effective <= originalWhen;
+        })
+        .pop() || null;
+}
+
+function shiftScheduleInstance(schedule, instance) {
+    const shift = futureDoseShiftForOriginal(schedule, instance.date, instance.time);
+    if (!shift) return instance;
+    const originalWhen = dateTimeFromParts(instance.date, instance.time);
+    if (!originalWhen) return instance;
+    const shiftedWhen = new Date(originalWhen.getTime() + (shift.offsetMinutes * 60 * 1000));
+    const shifted = dateTimeParts(shiftedWhen);
+    return {
+        date: shifted.date,
+        time: shifted.time,
+        key: scheduleInstanceKey(schedule.id, shifted.date, shifted.time),
+        originalDate: instance.date,
+        originalTime: instance.time,
+        originalKey: instance.key,
+        futureShiftId: shift.id || '',
+        retimed: true
+    };
+}
+
 function scheduleOverrideInstancesForDate(schedule, dateStr) {
     return normalizedScheduleInstanceOverrides(schedule)
         .filter(item => item.date === dateStr)
@@ -3870,18 +3910,17 @@ function mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances = 
     const excluded = new Set(schedule?.excludedInstances || []);
     const byKey = new Map();
     baseInstances
-        .filter(instance => !excluded.has(instance.key))
+        .filter(instance => !excluded.has(instance.originalKey || instance.key))
         .forEach(instance => byKey.set(instance.key, instance));
     scheduleOverrideInstancesForDate(schedule, dateStr)
-        .filter(instance => !excluded.has(instance.key))
         .forEach(instance => byKey.set(instance.key, instance));
     return Array.from(byKey.values()).sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 }
 
-function getScheduleInstancesForDate(schedule, dateStr) {
+function getBaseScheduleInstancesForDate(schedule, dateStr) {
     if (!schedule) return [];
     const isDue = isScheduleDueOnDate(schedule, dateStr);
-    if (!isDue) return mergeScheduleInstancesWithOverrides(schedule, dateStr, []);
+    if (!isDue) return [];
     if (scheduleTimingFrequency(schedule) === 'QXH') {
         const dayStart = parseLocal(dateStr);
         const dayEnd = parseLocal(dateStr);
@@ -3899,19 +3938,45 @@ function getScheduleInstancesForDate(schedule, dateStr) {
                 time: instance.time,
                 key: scheduleInstanceKey(schedule.id, instance.date, instance.time)
             }));
-        return mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances);
+        return baseInstances;
     }
     const times = getScheduleTimesForDate(schedule, dateStr);
     if (times.length === 0) {
-        return mergeScheduleInstancesWithOverrides(schedule, dateStr, [
+        return [
             { date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }
-        ]);
+        ];
     }
     const baseInstances = times
         .slice()
         .sort((a, b) => timeToMinutes(a) - timeToMinutes(b))
         .map(time => ({ date: dateStr, time, key: scheduleInstanceKey(schedule.id, dateStr, time) }));
-    return mergeScheduleInstancesWithOverrides(schedule, dateStr, baseInstances);
+    return baseInstances;
+}
+
+function getScheduleInstancesForDate(schedule, dateStr) {
+    if (!schedule) return [];
+    const shifts = scheduleTimingFrequency(schedule) === 'QXH' ? [] : normalizedFutureDoseShifts(schedule);
+    if (!shifts.length) {
+        return mergeScheduleInstancesWithOverrides(schedule, dateStr, getBaseScheduleInstancesForDate(schedule, dateStr));
+    }
+
+    const largestOffsetDays = Math.max(1, ...shifts.map(item => Math.ceil(Math.abs(item.offsetMinutes) / 1440) + 1));
+    const targetDate = parseLocal(dateStr);
+    if (!targetDate) return [];
+    const shiftedInstances = [];
+    for (let dayOffset = -largestOffsetDays; dayOffset <= largestOffsetDays; dayOffset += 1) {
+        const originalDate = new Date(targetDate);
+        originalDate.setDate(originalDate.getDate() + dayOffset);
+        getBaseScheduleInstancesForDate(schedule, localDateKey(originalDate)).forEach(instance => {
+            const shifted = shiftScheduleInstance(schedule, instance);
+            if (shifted.date !== dateStr) return;
+            if (schedule.endDate && schedule.endDate !== 'Ongoing' && shifted.date > schedule.endDate) return;
+            shiftedInstances.push(shifted);
+        });
+    }
+    const uniqueInstances = Array.from(new Map(shiftedInstances.map(instance => [instance.key, instance])).values())
+        .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+    return mergeScheduleInstancesWithOverrides(schedule, dateStr, uniqueInstances);
 }
 
 function getAvailableScheduleInstancesForDate(schedule, dateStr) {
@@ -7388,6 +7453,7 @@ window.updateProgressNoteSidePanel = function(forceOpen = false) {
         return;
     }
     const member = currentEditingMemberId ? db.family.find(item => item.id === currentEditingMemberId) : null;
+    if (window.matchMedia?.('(max-width: 760px)').matches) setMemberMedicationWorkPanelOpen(false);
     const title = panel.querySelector('.title-bar-text');
     if (title) title.textContent = member ? `Draft Note - ${memberDisplayName(member)}` : 'Draft Note';
     dockProgressNoteEditorToSidePanel();
@@ -8186,6 +8252,34 @@ function linkRulesFromTargets(targetIds, mode) {
         : [];
 }
 
+function canonicalTargetLinkRules(schedule) {
+    const byTarget = new Map();
+    scheduleLinkRules(schedule).forEach(rule => {
+        if (!rule.targetId) return;
+        const existing = byTarget.get(rule.targetId);
+        if (!existing || (!existing.mode && rule.mode)) {
+            byTarget.set(rule.targetId, { targetId: rule.targetId, mode: rule.mode || '' });
+        }
+    });
+    return Array.from(byTarget.values());
+}
+
+function remappedScheduleLinkState(schedule, idMap = new Map()) {
+    const rules = canonicalTargetLinkRules(schedule).map(rule => ({
+        targetId: idMap.get(rule.targetId) || rule.targetId,
+        mode: rule.mode || ''
+    }));
+    const targetIds = uniqueValues(rules.map(rule => rule.targetId));
+    const modes = uniqueValues(rules.map(rule => rule.mode));
+    return {
+        linkRules: rules,
+        linkTargetIds: targetIds,
+        linkTargetId: targetIds[0] || '',
+        linkMode: modes.length === 1 ? modes[0] : '',
+        linkGroup: targetIds.length ? linkGroupFromTarget([schedule.id || '', ...targetIds].filter(Boolean).sort()[0]) : ''
+    };
+}
+
 function scheduleLinkRules(schedule) {
     const rules = [];
     if (Array.isArray(schedule?.linkRules)) {
@@ -8439,14 +8533,86 @@ window.openModifierLinkPicker = async function() {
     if (!panel) return;
     const schedule = db.schedules.find(item => item.id === (panel.dataset.excludeId || ''));
     const choices = schedule ? scheduleLinkChoicesForModifier(schedule) : scheduleLinkChoices(panel.dataset.memberId || '', panel.dataset.excludeId || '');
-    const selected = await chooseLinkedMedications('Choose Linked Medications', choices, selectedOptionValues(panel));
+    const previous = selectedOptionValues(panel).sort();
+    const selected = await chooseLinkedMedications('Choose Linked Medications', choices, previous);
     if (selected === null) return;
     renderLinkChoicePanel(panel, choices, selected, 'openModifierLinkPicker()');
+    if (JSON.stringify(previous) !== JSON.stringify([...selected].sort())) panel.dataset.linksEdited = 'true';
+    renderModifierLinkedTimingImpact();
+};
+
+window.markModifierLinksEdited = function() {
+    const panel = document.getElementById('mod-link-target');
+    if (panel) panel.dataset.linksEdited = 'true';
+    renderModifierLinkedTimingImpact();
+};
+
+window.renderModifierLinkedTimingImpact = function() {
+    const scheduleId = document.getElementById('mod-sched-id')?.value || '';
+    const schedule = db.schedules.find(item => item.id === scheduleId);
+    const impact = document.getElementById('mod-linked-timing-impact');
+    if (!schedule || !impact) return;
+    const panel = document.getElementById('mod-link-target');
+    const linksEdited = panel?.dataset.linksEdited === 'true';
+    const mode = document.getElementById('mod-link-mode')?.value || '';
+    const targetIds = ['together', 'choose-one'].includes(mode) ? selectedOptionValues(panel) : [];
+    const preview = linksEdited ? {
+        ...schedule,
+        linkMode: mode,
+        linkTargetIds: targetIds,
+        linkTargetId: targetIds[0] || '',
+        linkRules: linkRulesFromTargets(targetIds, mode)
+    } : schedule;
+    const candidates = db.schedules
+        .filter(item => item.memberId === schedule.memberId)
+        .map(item => item.id === schedule.id ? preview : item);
+    const html = linkedTimingImpactHtml(preview, candidates);
+    impact.innerHTML = html;
+    impact.style.display = html ? '' : 'none';
 };
 
 function linkedSchedulesFor(schedule, candidates = null) {
     const pool = candidates || db.schedules.filter(item => item.memberId === schedule.memberId && !isScheduleArchived(item));
     return pool.filter(item => item.id !== schedule.id && !!scheduleLinkModeBetween(schedule, item));
+}
+
+function linkedScheduleComponent(schedule, candidates = null, mode = '') {
+    if (!schedule) return [];
+    const sourcePool = candidates || db.schedules.filter(item => item.memberId === schedule.memberId && !isScheduleArchived(item));
+    const pool = Array.from(new Map([...sourcePool, schedule]
+        .filter(item => item && item.memberId === schedule.memberId)
+        .map(item => [item.id, item])).values());
+    const byId = new Map(pool.map(item => [item.id, item]));
+    const visited = new Set([schedule.id]);
+    const queue = [schedule.id];
+    while (queue.length) {
+        const current = byId.get(queue.shift());
+        if (!current) continue;
+        pool.forEach(candidate => {
+            if (visited.has(candidate.id) || candidate.id === current.id) return;
+            const pairMode = scheduleLinkModeBetween(current, candidate);
+            if (!pairMode || (mode && pairMode !== mode)) return;
+            visited.add(candidate.id);
+            queue.push(candidate.id);
+        });
+    }
+    return [...visited].map(id => byId.get(id)).filter(Boolean);
+}
+
+function linkedTogetherSchedules(schedule, candidates = null) {
+    return linkedScheduleComponent(schedule, candidates, 'together')
+        .filter(item => item.id !== schedule.id);
+}
+
+function linkedTimingMedicationNames(schedule, candidates = null) {
+    return linkedTogetherSchedules(schedule, candidates)
+        .map(item => db.inventory.find(med => med.id === item.medId)?.name || 'Linked medication');
+}
+
+function linkedTimingImpactHtml(schedule, candidates = null) {
+    const names = linkedTimingMedicationNames(schedule, candidates);
+    if (!names.length) return '';
+    return `<strong>Linked timing group:</strong> Changing dates, frequency, or times also updates ${escapeHtml(names.join(', '))}. Dose quantities, instructions, prescribers, monitoring, and inventory remain medication-specific.`;
 }
 
 function linkModeLabel(mode) {
@@ -8500,6 +8666,10 @@ function applyLinkedScheduleTiming(source, target) {
     target.completedAt = '';
 }
 
+function cloneScheduleSnapshot(schedule) {
+    return schedule ? JSON.parse(JSON.stringify(schedule)) : null;
+}
+
 function removeScheduleLinkReferences(scheduleIds) {
     const removed = new Set(Array.isArray(scheduleIds) ? scheduleIds : [scheduleIds]);
     db.schedules.forEach(schedule => {
@@ -8536,7 +8706,8 @@ function normalizeScheduleLinkRelationships() {
             if (!target || target.id === source.id || target.memberId !== source.memberId || !rule.mode) return;
             const ids = [source.id, target.id].sort();
             const key = ids.join('|');
-            if (!pairs.has(key)) pairs.set(key, { ids, mode: rule.mode });
+            if (!pairs.has(key)) pairs.set(key, { ids, modes: new Set() });
+            pairs.get(key).modes.add(rule.mode);
         });
     });
     schedules.forEach(schedule => {
@@ -8544,7 +8715,9 @@ function normalizeScheduleLinkRelationships() {
         const idRules = [];
         pairs.forEach(pair => {
             if (!pair.ids.includes(schedule.id)) return;
-            idRules.push({ targetId: pair.ids.find(id => id !== schedule.id), mode: pair.mode });
+            const pairModes = [...pair.modes];
+            const resolvedMode = pairModes.includes('together') ? 'together' : pairModes[0];
+            idRules.push({ targetId: pair.ids.find(id => id !== schedule.id), mode: resolvedMode });
         });
         schedule.linkRules = [...rowRules, ...idRules];
         schedule.linkTargetIds = idRules.map(rule => rule.targetId);
@@ -8557,6 +8730,11 @@ function normalizeScheduleLinkRelationships() {
             schedule.linkMode = '';
             schedule.linkGroup = '';
         }
+    });
+    schedules.forEach(schedule => {
+        if (!scheduleLinkRules(schedule).some(rule => rule.targetId)) return;
+        const componentIds = linkedScheduleComponent(schedule, schedules).map(item => item.id).sort();
+        if (componentIds.length > 1) schedule.linkGroup = linkGroupFromTarget(componentIds[0]);
     });
     return before !== snapshot();
 }
@@ -8573,9 +8751,9 @@ function directTogetherSchedules(schedule, schedules = activeAdminOrderSetSchedu
 
 function requiredTogetherSchedules(schedule, schedules = activeAdminOrderSetSchedules) {
     const required = new Map();
-    directTogetherSchedules(schedule, schedules).forEach(other => required.set(other.id, other));
+    linkedTogetherSchedules(schedule, schedules).forEach(other => required.set(other.id, other));
     chooseOneAlternatives(schedule, schedules).forEach(alternative => {
-        directTogetherSchedules(alternative, schedules).forEach(other => {
+        linkedTogetherSchedules(alternative, schedules).forEach(other => {
             if (other.id !== schedule.id) required.set(other.id, other);
         });
     });
@@ -9460,12 +9638,12 @@ window.openOrderModifier = function(scheduleId) {
     const modPrnScheduleFreq = document.getElementById('mod-prn-schedule-freq');
     if (modPrnScheduleFreq) modPrnScheduleFreq.value = sched.prnScheduleFreq || '';
     const modLinkTarget = document.getElementById('mod-link-target');
+    const currentLinkedSchedules = linkedSchedulesFor(
+        sched,
+        db.schedules.filter(candidate => candidate.memberId === sched.memberId && candidate.id !== sched.id)
+    );
     if (modLinkTarget) {
         const choices = scheduleLinkChoicesForModifier(sched);
-        const currentLinkedSchedules = linkedSchedulesFor(
-            sched,
-            db.schedules.filter(candidate => candidate.memberId === sched.memberId && candidate.id !== sched.id)
-        );
         const selectedLinks = new Set(uniqueValues([
             ...(sched.linkTargetIds || []),
             sched.linkTargetId || '',
@@ -9477,15 +9655,13 @@ window.openOrderModifier = function(scheduleId) {
             .map(choice => choice.id);
         modLinkTarget.dataset.memberId = sched.memberId;
         modLinkTarget.dataset.excludeId = sched.id;
+        modLinkTarget.dataset.linksEdited = 'false';
         renderLinkChoicePanel(modLinkTarget, choices, selected, 'openModifierLinkPicker()');
     }
-    const currentLinkedMode = linkedSchedulesFor(
-        sched,
-        db.schedules.filter(candidate => candidate.memberId === sched.memberId && candidate.id !== sched.id)
-    )
-        .map(linked => scheduleLinkModeBetween(sched, linked))
-        .find(Boolean);
-    document.getElementById('mod-link-mode').value = sched.linkMode || currentLinkedMode || '';
+    const currentLinkedModes = uniqueValues(currentLinkedSchedules.map(linked => scheduleLinkModeBetween(sched, linked)));
+    document.getElementById('mod-link-mode').value = currentLinkedModes.length > 1
+        ? 'mixed'
+        : (sched.linkMode || currentLinkedModes[0] || '');
     if (scheduleTimingFrequency(sched) !== 'CUSTOM') document.getElementById('mod-custom-schedule').innerHTML = '';
     renderFrequencyControls(
         'mod',
@@ -9498,13 +9674,14 @@ window.openOrderModifier = function(scheduleId) {
     setMonitoringReminderSelection('mod', sched.monitoringReminders || [], sched.monitoringReminderNote || '', sched.memberId || '', sched.monitoringReminderSchedule || null, sched.monitoringHoldRule || null);
 
     document.getElementById('order-modifier-modal').style.display = 'flex';
+    renderModifierLinkedTimingImpact();
 };
 
 window.saveOrderModification = async function() {
     const id = document.getElementById('mod-sched-id').value;
     const sched = db.schedules.find(s => s.id === id);
     if (sched) {
-        const beforeModification = { ...sched };
+        const beforeModification = cloneScheduleSnapshot(sched);
         const previousStartDate = sched.startDate;
         const previousEndDate = sched.endDate;
         const previousIntervalTiming = JSON.stringify({
@@ -9521,6 +9698,13 @@ window.saveOrderModification = async function() {
         const requestedStartDate = frequencyDetails.timingFreq === 'QOD'
             ? (document.getElementById('mod-qod-start-date')?.value || document.getElementById('mod-start').value)
             : document.getElementById('mod-start').value;
+        const requestedEndDate = frequencyDetails.timingFreq === 'ONCE'
+            ? requestedStartDate
+            : (document.getElementById('mod-end').value || 'Ongoing');
+        if (!requestedStartDate || (requestedEndDate !== 'Ongoing' && requestedEndDate < requestedStartDate)) {
+            await appAlert(!requestedStartDate ? 'Choose a start date.' : 'End date cannot be before start date.');
+            return;
+        }
         const today = localDateKey();
         const shouldApplyQxhForward = frequencyDetails.timingFreq === 'QXH' &&
             previousStartDate &&
@@ -9531,7 +9715,7 @@ window.saveOrderModification = async function() {
         sched.doseQty = document.getElementById('mod-dose-qty').value;
         sched.prescriberId = document.getElementById('mod-prescriber')?.value || '';
         sched.freq = frequencyDetails.freq;
-        sched.endDate = frequencyDetails.timingFreq === 'ONCE' ? sched.startDate : (document.getElementById('mod-end').value || "Ongoing");
+        sched.endDate = frequencyDetails.timingFreq === 'ONCE' ? sched.startDate : requestedEndDate;
         sched.times = frequencyDetails.times;
         sched.customTimesByWeekday = frequencyDetails.customTimesByWeekday || {};
         sched.customScheduleSameTimes = frequencyDetails.customScheduleSameTimes === true;
@@ -9561,6 +9745,7 @@ window.saveOrderModification = async function() {
         sched.instructions = document.getElementById('mod-instr').value;
         const monitoringConfig = collectMonitoringScheduleConfig('mod', sched.memberId);
         if (monitoringConfig.error) {
+            Object.assign(sched, beforeModification);
             await appAlert(monitoringConfig.error);
             return;
         }
@@ -9574,34 +9759,42 @@ window.saveOrderModification = async function() {
         sched.monitoringReminderNote = monitoringConfig.note;
         sched.monitoringReminderSchedule = monitoringConfig.schedule;
         sched.monitoringHoldRule = monitoringConfig.holdRule;
-        const linkTargetIds = selectedOptionValues(document.getElementById('mod-link-target'));
+        const modLinkPanel = document.getElementById('mod-link-target');
+        const linksEdited = modLinkPanel?.dataset.linksEdited === 'true';
+        const linkTargetIds = selectedOptionValues(modLinkPanel);
         const linkMode = document.getElementById('mod-link-mode')?.value || '';
         const targetChoice = scheduleLinkChoicesForModifier(sched).find(choice => choice.id === linkTargetIds[0]);
-        if (linkTargetIds.length > 0 && !linkMode) {
-            await appAlert('Choose what the medication link means: must take together or choose only one.');
-            return;
-        }
-        sched.linkMode = linkMode;
-        sched.linkTargetIds = linkMode ? linkTargetIds : [];
-        sched.linkTargetId = linkMode ? (linkTargetIds[0] || '') : '';
-        sched.linkRules = linkRulesFromTargets(linkTargetIds, linkMode);
-        sched.linkGroup = linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
-        if (linkMode && linkTargetIds.length === 0) {
-            await appAlert('Select the medication this one is linked to.');
-            return;
+        if (linksEdited) {
+            if (linkTargetIds.length > 0 && !['together', 'choose-one'].includes(linkMode)) {
+                Object.assign(sched, beforeModification);
+                await appAlert('Choose what the medication link means: must take together or choose only one.');
+                return;
+            }
+            if (['together', 'choose-one'].includes(linkMode) && linkTargetIds.length === 0) {
+                Object.assign(sched, beforeModification);
+                await appAlert('Select the medication this one is linked to.');
+                return;
+            }
+            removeScheduleLinkReferences(sched.id);
+            sched.linkMode = ['together', 'choose-one'].includes(linkMode) ? linkMode : '';
+            sched.linkTargetIds = sched.linkMode ? linkTargetIds : [];
+            sched.linkTargetId = sched.linkMode ? (linkTargetIds[0] || '') : '';
+            sched.linkRules = linkRulesFromTargets(linkTargetIds, sched.linkMode);
+            sched.linkGroup = sched.linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
         }
         sched.qodStart = frequencyDetails.timingFreq === 'QOD' ? (document.getElementById('mod-qod-start-date').value || sched.startDate) : "";
         sched.isOneTime = frequencyDetails.timingFreq === 'ONCE' || (sched.startDate === sched.endDate && sched.endDate !== "Ongoing");
         sched.status = '';
         sched.completedAt = '';
-        const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === sched.memberId);
+        const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === sched.memberId && !isScheduleArchived(candidate));
         const linkedSchedulesUpdated = [];
-        linkedSchedulesFor(sched, linkedModificationCandidates).forEach(linkedSchedule => {
-            if (linkedSchedule.id !== sched.id) {
-                applyLinkedScheduleTiming(sched, linkedSchedule);
-                linkedSchedulesUpdated.push(linkedSchedule);
-            }
+        linkedTogetherSchedules(sched, linkedModificationCandidates).forEach(linkedSchedule => {
+            const linkedBefore = cloneScheduleSnapshot(linkedSchedule);
+            applyLinkedScheduleTiming(sched, linkedSchedule);
+            applyScheduleDraftToOrderSetItem({ ...linkedSchedule, modifySourceId: linkedSchedule.id }, linkedSchedule, linkedBefore);
+            linkedSchedulesUpdated.push({ schedule: linkedSchedule, before: linkedBefore });
         });
+        applyScheduleDraftToOrderSetItem({ ...sched, modifySourceId: sched.id }, sched, beforeModification);
         const med = db.inventory.find(item => item.id === sched.medId);
         const member = db.family.find(item => item.id === sched.memberId);
         addAudit('Medication modified', med?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | ${formatFrequency(sched)} ${getScheduleTimes(sched).join(', ') || 'PRN'}`, {
@@ -9610,7 +9803,16 @@ window.saveOrderModification = async function() {
             memberId: sched.memberId
         });
         createCareRemindersForSchedule(sched);
-        linkedSchedulesUpdated.forEach(linkedSchedule => createCareRemindersForSchedule(linkedSchedule));
+        linkedSchedulesUpdated.forEach(entry => {
+            createCareRemindersForSchedule(entry.schedule);
+            const linkedMed = db.inventory.find(item => item.id === entry.schedule.medId);
+            addAudit('Linked medication timing modified', linkedMed?.name || 'Medication', `${member ? memberDisplayName(member) : 'Unknown member'} | moved with ${med?.name || 'linked order'} | ${formatFrequency(entry.schedule)} ${getScheduleTimes(entry.schedule).join(', ') || 'PRN'}`, {
+                scheduleId: entry.schedule.id,
+                medId: entry.schedule.medId,
+                memberId: entry.schedule.memberId,
+                linkedSourceScheduleId: sched.id
+            });
+        });
         const profileWasOpen = document.getElementById('member-modal')?.style.display === 'flex' && currentEditingMemberId === sched.memberId;
         if (profileWasOpen) captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
         await sync();
@@ -9622,7 +9824,7 @@ window.saveOrderModification = async function() {
             renderMemberCalendar(currentEditingMemberId);
             renderMemberMedicationTimelines();
         }
-        await promptReprintLabelsForModifiedSchedules([{ schedule: sched, before: beforeModification }]);
+        await promptReprintLabelsForModifiedSchedules([{ schedule: sched, before: beforeModification }, ...linkedSchedulesUpdated]);
     }
 };
 
@@ -14424,8 +14626,7 @@ function expandPrepackRowsWithTogetherLinks(rows, selection = {}) {
             ));
         }
         const candidates = candidateByMember.get(memberId);
-        linkedSchedulesFor(row.schedule, candidates)
-            .filter(linked => scheduleLinkModeBetween(row.schedule, linked) === 'together')
+        linkedTogetherSchedules(row.schedule, candidates)
             .forEach(linked => {
                 const linkedMed = db.inventory.find(item => item.id === linked.medId);
                 const linkedInstance = matchingPrepackInstance(linked, row.instance, excludedInstances);
@@ -18019,7 +18220,7 @@ function upsertScheduleInstanceOverride(schedule, originalDate, originalTime, ne
     if (!schedule || !originalDate || !originalTime || !newDate || !newTime) return null;
     const originalKey = scheduleInstanceKey(schedule.id, originalDate, originalTime);
     const targetKey = scheduleInstanceKey(schedule.id, newDate, newTime);
-    if (originalKey === targetKey) {
+    if (originalKey === targetKey && !futureDoseShiftForOriginal(schedule, originalDate, originalTime)) {
         removeScheduleInstanceOverride(schedule, originalKey);
         return null;
     }
@@ -18038,6 +18239,29 @@ function upsertScheduleInstanceOverride(schedule, originalDate, originalTime, ne
     };
     schedule.instanceOverrides.push(override);
     return override;
+}
+
+function upsertFutureDoseShift(schedule, originalDate, originalTime, newDate, newTime, note = '') {
+    const originalWhen = dateTimeFromParts(originalDate, originalTime);
+    const newWhen = dateTimeFromParts(newDate, newTime);
+    if (!schedule || !originalWhen || !newWhen) return null;
+    const effectiveKey = `${originalDate}|${originalTime}`;
+    const shift = {
+        id: `future-retime-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        effectiveOriginalDate: originalDate,
+        effectiveOriginalTime: originalTime,
+        effectiveOriginalKey: scheduleInstanceKey(schedule.id, originalDate, originalTime),
+        offsetMinutes: Math.round((newWhen - originalWhen) / 60000),
+        newDate,
+        newTime,
+        reason: note || '',
+        createdAt: new Date().toISOString()
+    };
+    schedule.futureDoseShifts = normalizedFutureDoseShifts(schedule)
+        .filter(item => `${item.effectiveOriginalDate}|${item.effectiveOriginalTime}` < effectiveKey);
+    if (shift.offsetMinutes !== 0) schedule.futureDoseShifts.push(shift);
+    removeScheduleInstanceOverride(schedule, shift.effectiveOriginalKey);
+    return shift.offsetMinutes !== 0 ? shift : null;
 }
 
 function retimeTargetConflicts(schedule, originalDate, originalTime, newDate, newTime, allowScheduleConflict = false) {
@@ -18064,7 +18288,7 @@ function retimeDosePreviewHtml(schedule, originalDate, originalTime, newDate, ne
     if (!schedule || !newDate || !newTime) return '<div class="interval-preview-empty">Choose a new date and time.</div>';
     const originalText = `${originalDate} ${originalTime}`;
     const newText = `${newDate} ${newTime}`;
-    if (applyScope !== 'future' || scheduleTimingFrequency(schedule) !== 'QXH') {
+    if (applyScope !== 'future') {
         const originalKey = scheduleInstanceKey(schedule.id, originalDate, originalTime);
         const sameDayOtherDoses = getScheduleInstancesForDate(schedule, newDate)
             .filter(instance => (instance.originalKey || instance.key) !== originalKey)
@@ -18074,23 +18298,26 @@ function retimeDosePreviewHtml(schedule, originalDate, originalTime, newDate, ne
             : '';
         return `<div class="form-help">Single-dose move: ${escapeHtml(originalText)} becomes ${escapeHtml(newText)}. The rest of the schedule is unchanged.</div>${extraDoseNote}`;
     }
-    const temp = {
-        ...schedule,
-        rollingAnchorDate: newDate,
-        rollingAnchorTime: newTime,
-        excludedInstances: Array.from(new Set([...(schedule.excludedInstances || []), scheduleInstanceKey(schedule.id, originalDate, originalTime)])),
-        instanceOverrides: [
-            ...normalizedScheduleInstanceOverrides(schedule).filter(item => item.originalKey !== scheduleInstanceKey(schedule.id, originalDate, originalTime)),
-            { originalDate, originalTime, originalKey: scheduleInstanceKey(schedule.id, originalDate, originalTime), date: newDate, time: newTime }
-        ]
-    };
-    const through = dateKeyPlusDays(newDate, 3) || newDate;
+    const isQxh = scheduleTimingFrequency(schedule) === 'QXH';
+    const temp = cloneScheduleSnapshot(schedule);
+    if (isQxh) {
+        temp.rollingAnchorDate = newDate;
+        temp.rollingAnchorTime = newTime;
+        temp.excludedInstances = Array.from(new Set([...(temp.excludedInstances || []), scheduleInstanceKey(temp.id, originalDate, originalTime)]));
+        temp.instanceOverrides = [
+            ...normalizedScheduleInstanceOverrides(temp).filter(item => item.originalKey !== scheduleInstanceKey(temp.id, originalDate, originalTime)),
+            { originalDate, originalTime, originalKey: scheduleInstanceKey(temp.id, originalDate, originalTime), date: newDate, time: newTime }
+        ];
+    } else {
+        upsertFutureDoseShift(temp, originalDate, originalTime, newDate, newTime);
+    }
+    const through = dateKeyPlusDays(newDate, isQxh ? 3 : 14) || newDate;
     const rows = getScheduleInstancesInRange(temp, newDate, through)
-        .slice(0, 16)
+        .slice(0, isQxh ? 16 : 12)
         .map(instance => `<tr><td>${escapeHtml(instance.date)}</td><td>${escapeHtml(instance.time)}${instance.retimed ? ' *' : ''}</td></tr>`)
         .join('');
     return `<table class="interval-preview-table">
-        <thead><tr><th>Date</th><th>Future qXh dose times</th></tr></thead>
+        <thead><tr><th>Date</th><th>${isQxh ? 'Future qXh dose times' : 'Rescheduled future doses'}</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="2">No future doses in preview window.</td></tr>'}</tbody>
     </table>`;
 }
@@ -18130,13 +18357,19 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
         await window.editAdministration(existing.id);
         return;
     }
-    const beforeRetime = {
-        ...schedule,
-        excludedInstances: Array.isArray(schedule.excludedInstances) ? [...schedule.excludedInstances] : [],
-        instanceOverrides: normalizedScheduleInstanceOverrides(schedule).map(item => ({ ...item }))
-    };
+    const linkedTimingSchedules = linkedTogetherSchedules(
+        schedule,
+        db.schedules.filter(item => item.memberId === schedule.memberId && !isScheduleArchived(item))
+    );
+    const timingGroup = [schedule, ...linkedTimingSchedules];
+    const beforeRetimes = new Map(timingGroup.map(item => [item.id, cloneScheduleSnapshot(item)]));
     const isQxh = scheduleTimingFrequency(schedule) === 'QXH';
+    const canMoveFuture = !['ONCE', 'PRN'].includes(scheduleTimingFrequency(schedule));
+    const linkedImpact = linkedTimingSchedules.length
+        ? `<div class="linked-timing-impact" style="margin-bottom:8px;"><strong>Linked dose:</strong> This also moves ${escapeHtml(linkedTimingSchedules.map(item => db.inventory.find(linkedMed => linkedMed.id === item.medId)?.name || 'linked medication').join(', '))}. Must-take-together doses stay on the same date and time.</div>`
+        : '';
     const result = await showActionModal(`Retime Dose: ${med.name}`, `
+        ${linkedImpact}
         <div class="sunken-panel" style="padding:6px; background:white; font-size:11px; margin-bottom:8px;">
             Scheduled dose: <strong>${escapeHtml(originalDate)} ${escapeHtml(originalTime)}</strong>${currentDate !== originalDate || currentTime !== originalTime ? `<br>Current retimed dose: <strong>${escapeHtml(currentDate)} ${escapeHtml(currentTime)}</strong>` : ''}
         </div>
@@ -18150,9 +18383,9 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
                 <strong>Move only this dose</strong>
                 <span>This one administration moves. The rest of the schedule stays exactly as-is.</span>
             </button>
-            ${isQxh ? `<button type="button" class="retime-choice-button future" data-scope="future" onclick="selectRetimeScope('future','${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')">
-                <strong>Move qXh dose and adjust future times</strong>
-                <span>This dose moves and the interval pattern continues from the new time.</span>
+            ${canMoveFuture ? `<button type="button" class="retime-choice-button future" data-scope="future" onclick="selectRetimeScope('future','${escapeHtml(schedule.id)}','${escapeHtml(originalDate)}','${escapeHtml(originalTime)}')">
+                <strong>${isQxh ? 'Move qXh dose and adjust future times' : 'Reschedule this and all future doses'}</strong>
+                <span>${isQxh ? 'This dose moves and the interval pattern continues from the new time.' : 'Earlier doses stay unchanged. This dose and the remaining repeating pattern move together.'}</span>
             </button>` : ''}
         </div>
         <div class="field-row-stacked" style="margin-top:8px;">
@@ -18176,17 +18409,48 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
     }
     const applyScope = result.applyScope || 'single';
     if (applyScope === 'future' && !isDateInsideScheduleWindow(schedule, newDate)) {
-        await appAlert('A forward qXh schedule adjustment must stay inside the medication therapy window. Use Move only this dose for a one-time move beyond that window.');
+        await appAlert('A future schedule adjustment must stay inside the medication therapy window. Use Move only this dose for a one-time move beyond that window.');
         return;
     }
-    const allowScheduleConflict = applyScope === 'future' && isQxh;
-    if (retimeTargetConflicts(schedule, originalDate, originalTime, newDate, newTime, allowScheduleConflict)) {
-        await appAlert('Another scheduled or documented dose already exists at the new date/time. Choose a different time or edit the existing documentation.');
+    const unalignedLinkedSchedule = linkedTimingSchedules.find(linkedSchedule =>
+        !getScheduleInstancesForDate(linkedSchedule, currentDate).some(instance => instance.time === currentTime)
+    );
+    if (unalignedLinkedSchedule) {
+        const linkedMed = db.inventory.find(item => item.id === unalignedLinkedSchedule.medId);
+        await appAlert(`${linkedMed?.name || 'A linked medication'} does not have a matching ${currentDate} ${currentTime} dose. Modify the linked schedule group first so its dates and times align.`, 'Linked Timing Mismatch');
         return;
     }
-    if (applyScope === 'future' && isQxh) {
+    const documentedLinkedSchedule = linkedTimingSchedules.find(linkedSchedule => {
+        const linkedKey = scheduleInstanceKey(linkedSchedule.id, currentDate, currentTime);
+        return !!findHistoryForScheduleInstance(linkedSchedule, { date: currentDate, time: currentTime, key: linkedKey });
+    });
+    if (documentedLinkedSchedule) {
+        const linkedMed = db.inventory.find(item => item.id === documentedLinkedSchedule.medId);
+        await appAlert(`${linkedMed?.name || 'A linked medication'} already has documentation for ${currentDate} ${currentTime}. Edit that documentation or unlink the orders before retiming this group.`, 'Linked Dose Already Documented');
+        return;
+    }
+    const allowScheduleConflict = applyScope === 'future';
+    const conflictingSchedule = timingGroup.find(item => retimeTargetConflicts(item, originalDate, originalTime, newDate, newTime, allowScheduleConflict));
+    if (conflictingSchedule) {
+        const conflictMed = db.inventory.find(item => item.id === conflictingSchedule.medId);
+        await appAlert(`${conflictMed?.name || 'A linked medication'} already has a scheduled or documented dose at the new date/time. Choose a different time or edit the existing documentation.`);
+        return;
+    }
+    if (applyScope === 'future' && !isQxh) {
+        const patternConflict = timingGroup.find(item => {
+            const preview = cloneScheduleSnapshot(item);
+            upsertFutureDoseShift(preview, originalDate, originalTime, newDate, newTime, result.note || '');
+            return getScheduleInstancesForDate(preview, newDate).filter(instance => instance.time === newTime).length > 1;
+        });
+        if (patternConflict) {
+            const conflictMed = db.inventory.find(item => item.id === patternConflict.medId);
+            await appAlert(`${conflictMed?.name || 'A linked medication'} would have two doses at ${newDate} ${newTime}. Choose another time or move only this dose.`);
+            return;
+        }
+    }
+    if (applyScope === 'future') {
         if (db.history.some(entry => {
-            if (entry.scheduleId !== schedule.id || !entry.scheduleInstanceKey) return false;
+            if (!timingGroup.some(item => item.id === entry.scheduleId) || !entry.scheduleInstanceKey) return false;
             const entryParts = {
                 date: entry.scheduledDate || historyEntryDateTime(entry).date,
                 time: entry.scheduledTime || historyEntryDateTime(entry).time
@@ -18195,29 +18459,44 @@ window.retimeScheduleInstance = async function(scheduleId, originalDate, origina
             const original = dateTimeFromParts(originalDate, originalTime);
             return entryWhen && original && entryWhen > original;
         })) {
-            if (!await appConfirm('Some later qXh doses are already documented. Adjusting the future interval can make those existing records look off-pattern. Continue?', 'Adjust qXh Future Times')) return;
+            if (!await appConfirm(`Some later doses are already documented. Rescheduling the future pattern can make those existing records look off-pattern. Continue?`, 'Reschedule Future Doses')) return;
         }
+    }
+    if (applyScope === 'future' && isQxh) {
         const original = dateTimeFromParts(originalDate, originalTime);
         const next = dateTimeFromParts(newDate, newTime);
         if (!original || !next) {
             await appAlert('Choose a valid date and time for the qXh schedule adjustment.');
             return;
         }
-        schedule.rollingAnchorDate = newDate;
-        schedule.rollingAnchorTime = newTime;
+        timingGroup.forEach(item => {
+            item.rollingAnchorDate = newDate;
+            item.rollingAnchorTime = newTime;
+        });
     }
-    const override = upsertScheduleInstanceOverride(schedule, originalDate, originalTime, newDate, newTime, result.note || '');
-    addAudit('Dose retimed', med.name, `${memberDisplayName(db.family.find(member => member.id === schedule.memberId))} | ${originalDate} ${originalTime} -> ${newDate} ${newTime}${applyScope === 'future' && isQxh ? ' | qXh future interval adjusted' : ' | single dose only'}${result.note ? ` | ${result.note}` : ''}`, {
-        scheduleId: schedule.id,
-        medId: schedule.medId,
-        memberId: schedule.memberId,
-        instanceOverrideId: override?.id || ''
+    const memberName = memberDisplayName(db.family.find(member => member.id === schedule.memberId));
+    const modified = timingGroup.map(item => {
+        const override = applyScope === 'future' && !isQxh
+            ? upsertFutureDoseShift(item, originalDate, originalTime, newDate, newTime, result.note || '')
+            : upsertScheduleInstanceOverride(item, originalDate, originalTime, newDate, newTime, result.note || '');
+        const itemMed = db.inventory.find(candidate => candidate.id === item.medId);
+        const scopeText = applyScope === 'future'
+            ? (isQxh ? 'qXh future interval adjusted' : 'this and all future doses rescheduled')
+            : 'single dose only';
+        addAudit(item.id === schedule.id ? 'Dose retimed' : 'Linked dose retimed', itemMed?.name || 'Medication', `${memberName} | ${originalDate} ${originalTime} -> ${newDate} ${newTime} | ${scopeText}${item.id === schedule.id ? '' : ` | linked with ${med.name}`}${result.note ? ` | ${result.note}` : ''}`, {
+            scheduleId: item.id,
+            medId: item.medId,
+            memberId: item.memberId,
+            linkedSourceScheduleId: item.id === schedule.id ? '' : schedule.id,
+            instanceOverrideId: override?.id || ''
+        });
+        return { before: beforeRetimes.get(item.id), schedule: item };
     });
     await sync();
     renderCalendar();
     refreshOpenMemberMedicationViews(schedule.memberId);
-    if (newDate >= localDateKey() || (applyScope === 'future' && isQxh)) {
-        await promptReprintLabelsForModifiedSchedules([{ before: beforeRetime, schedule }]);
+    if (newDate >= localDateKey() || applyScope === 'future') {
+        await promptReprintLabelsForModifiedSchedules(modified);
     }
 };
 
@@ -18243,7 +18522,7 @@ window.openDoseInstanceActions = async function(scheduleId, scheduledDate, sched
             <button type="button" onclick="this.closest('#action-modal-body').dataset.action='document'; document.getElementById('action-modal-ok')?.click()">Document dose status</button>
             <button type="button" onclick="this.closest('#action-modal-body').dataset.action='retime'; document.getElementById('action-modal-ok')?.click()">Retime / reschedule this dose</button>
         </div>
-        <div class="form-help">Retime moves only this dose unless you explicitly apply a qXh timing change forward.</div>
+        <div class="form-help">Move one dose without changing the pattern, or explicitly reschedule the selected dose and all future doses for a recurring order.</div>
     `, false, body => body.dataset.action || null);
     if (result === 'retime') await window.retimeScheduleInstance(scheduleId, originalDate || scheduledDate, originalTime || scheduledTime, scheduledDate, scheduledTime);
     else if (result === 'document') await window.documentScheduleInstance(scheduleId, scheduledDate, scheduledTime);
@@ -20550,6 +20829,7 @@ function scheduleSummaryLine(schedule) {
         html: `<span class="pending-order-title">${changeIcon}${escapeHtml(med?.name || 'Unknown medication')} <em>${escapeHtml(med ? formatMedStrength(med) : '')}</em></span>
             <span class="pending-order-chips">
                 ${schedule.modifySourceId ? '<span class="pending-modify-chip">Modify existing order</span>' : ''}
+                ${schedule.autoLinkedTiming ? '<span class="pending-link-chip">Moves with linked timing group</span>' : ''}
                 ${schedule.reorderSourceId ? '<span class="pending-reorder-chip">New independent reorder</span>' : ''}
                 <span>${escapeHtml(qty)}</span>
                 ${dose ? `<span>Dose ${escapeHtml(dose)}</span>` : ''}
@@ -20688,9 +20968,16 @@ window.clearPendingScheduleOrders = async function() {
     refreshOpenMemberMedicationViews(currentEditingMemberId);
 };
 
-window.removePendingScheduleOrder = function(index) {
+window.removePendingScheduleOrder = async function(index) {
     if (index < 0 || index >= pendingScheduleOrders.length) return;
-    const [removed] = pendingScheduleOrders.splice(index, 1);
+    const candidate = pendingScheduleOrders[index];
+    const batchId = candidate?.linkedChangeSetId || '';
+    const batch = batchId ? pendingScheduleOrders.filter(order => order.linkedChangeSetId === batchId) : [];
+    if (batch.length > 1 && !await appConfirm(`This timing change includes ${batch.length} must-take-together medications. Remove the entire linked timing change from the worklist?`, 'Remove Linked Timing Change')) return;
+    const removed = candidate;
+    pendingScheduleOrders = batch.length > 1
+        ? pendingScheduleOrders.filter(order => order.linkedChangeSetId !== batchId)
+        : pendingScheduleOrders.filter((_, orderIndex) => orderIndex !== index);
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(removed?.memberId || currentEditingMemberId);
     refreshOpenMemberMedicationViews(removed?.memberId || currentEditingMemberId);
@@ -20773,6 +21060,7 @@ function setMemberMedicationWorkPanelOpen(open) {
     const modal = document.getElementById('member-modal');
     const profileWindow = modal?.querySelector('.member-profile-window');
     if (!body || !dock) return;
+    if (open && window.matchMedia?.('(max-width: 760px)').matches) hideProgressNoteSidePanel(true, true);
     if (profileWindow && dock.parentElement !== profileWindow) profileWindow.appendChild(dock);
     body.classList.toggle('order-work-open', Boolean(open));
     modal?.classList.toggle('order-dock-open', Boolean(open));
@@ -20841,15 +21129,74 @@ function scheduleDraftFromExisting(schedule, mode = 'modify') {
         draft.orderSetId = '';
         draft.orderSetName = '';
         draft.rowId = '';
+        draft.linkGroup = '';
+        draft.linkMode = '';
+        draft.linkTargetIds = [];
+        draft.linkTargetId = '';
+        draft.linkRules = [];
         draft.linkTargetRowIds = [];
         draft.linkTargetRowId = '';
     }
     return draft;
 }
 
+function stageLinkedTimingDrafts(primaryDraft) {
+    if (!primaryDraft?.modifySourceId) return [];
+    const source = db.schedules.find(schedule => schedule.id === primaryDraft.modifySourceId);
+    if (!source) return [];
+    const previousBatchId = primaryDraft.linkedChangeSetId || '';
+    const committed = db.schedules.filter(schedule => schedule.memberId === source.memberId && !isScheduleArchived(schedule));
+    const pendingCreates = pendingScheduleOrders.filter(order => order.memberId === source.memberId && !order.modifySourceId);
+    const previewSource = { ...primaryDraft, id: source.id };
+    const candidates = [
+        ...committed.map(schedule => schedule.id === source.id ? previewSource : schedule),
+        ...pendingCreates
+    ];
+    const linkedTargets = linkedTogetherSchedules(previewSource, candidates);
+    if (!linkedTargets.length) {
+        if (previousBatchId) {
+            pendingScheduleOrders = pendingScheduleOrders.filter(order =>
+                order.id === primaryDraft.id || order.linkedChangeSetId !== previousBatchId || !order.autoLinkedTiming
+            );
+        }
+        delete primaryDraft.linkedChangeSetId;
+        delete primaryDraft.linkedTimingSourceId;
+        delete primaryDraft.autoLinkedTiming;
+        return [];
+    }
+    const batchId = primaryDraft.linkedChangeSetId || `linked-timing-${source.id}-${Date.now()}`;
+    primaryDraft.linkedChangeSetId = batchId;
+    primaryDraft.linkedTimingSourceId = source.id;
+    primaryDraft.autoLinkedTiming = false;
+    const staged = [];
+    linkedTargets.forEach(target => {
+        let draft;
+        if (target.modifySourceId || (!db.schedules.some(schedule => schedule.id === target.id) && pendingScheduleOrders.includes(target))) {
+            draft = target;
+        } else {
+            draft = pendingScheduleOrders.find(order => order.modifySourceId === target.id);
+            if (!draft) {
+                draft = scheduleDraftFromExisting(target, 'modify');
+                pendingScheduleOrders.push(draft);
+            }
+        }
+        if (!draft || draft.id === primaryDraft.id) return;
+        applyLinkedScheduleTiming(primaryDraft, draft);
+        draft.linkedChangeSetId = batchId;
+        draft.linkedTimingSourceId = source.id;
+        draft.autoLinkedTiming = true;
+        staged.push(draft);
+    });
+    const stagedIds = new Set(staged.map(draft => draft.id));
+    pendingScheduleOrders = pendingScheduleOrders.filter(order =>
+        order.id === primaryDraft.id || order.linkedChangeSetId !== batchId || !order.autoLinkedTiming || stagedIds.has(order.id)
+    );
+    return staged;
+}
+
 function applyScheduleDraftToExisting(draft, target) {
     if (!draft || !target) return null;
-    const before = { ...target };
+    const before = cloneScheduleSnapshot(target);
     Object.assign(target, {
         medId: draft.medId,
         doseQty: draft.doseQty,
@@ -20906,9 +21253,15 @@ function applyScheduleDraftToOrderSetItem(draft, targetSchedule, beforeSchedule 
     const scheduleToRowId = new Map(db.schedules
         .filter(schedule => schedule.orderSetId === set.id && schedule.rowId)
         .map(schedule => [schedule.id, schedule.rowId]));
-    const linkedRowIds = uniqueValues((draft.linkTargetIds || [])
-        .map(scheduleId => scheduleToRowId.get(scheduleId))
-        .filter(Boolean));
+    const linkedRowRules = canonicalTargetLinkRules(draft)
+        .map(rule => ({ targetRowId: scheduleToRowId.get(rule.targetId) || '', mode: rule.mode || '' }))
+        .filter(rule => rule.targetRowId);
+    scheduleLinkRules(draft)
+        .filter(rule => rule.targetRowId && !rule.targetId)
+        .forEach(rule => linkedRowRules.push({ targetRowId: rule.targetRowId, mode: rule.mode || '' }));
+    const uniqueRowRules = Array.from(new Map(linkedRowRules.map(rule => [`${rule.targetRowId}|${rule.mode}`, rule])).values());
+    const linkedRowIds = uniqueValues(uniqueRowRules.map(rule => rule.targetRowId));
+    const linkedRowModes = uniqueValues(uniqueRowRules.map(rule => rule.mode));
     Object.assign(item, {
         medId: draft.medId,
         doseQty: draft.doseQty,
@@ -20929,11 +21282,11 @@ function applyScheduleDraftToOrderSetItem(draft, targetSchedule, beforeSchedule 
         startTime: draft.startTime || (draft.times || [])[0] || '',
         indication: draft.indication || '',
         instructions: draft.instructions || '',
-        linkGroup: draft.linkGroup || '',
-        linkMode: draft.linkMode || '',
-        linkTargetRowIds: linkedRowIds.length ? linkedRowIds : (draft.linkTargetRowIds || item.linkTargetRowIds || []),
-        linkTargetRowId: linkedRowIds[0] || draft.linkTargetRowId || item.linkTargetRowId || '',
-        linkRules: linkedRowIds.length ? linkedRowIds.map(targetRowId => ({ targetRowId, mode: draft.linkMode || '' })) : (draft.linkRules || item.linkRules || [])
+        linkGroup: uniqueRowRules.length ? (draft.linkGroup || linkGroupFromTarget([item.rowId || '', ...linkedRowIds].filter(Boolean).sort()[0])) : '',
+        linkMode: linkedRowModes.length === 1 ? linkedRowModes[0] : '',
+        linkTargetRowIds: linkedRowIds,
+        linkTargetRowId: linkedRowIds[0] || '',
+        linkRules: uniqueRowRules
     });
     set.updatedAt = new Date().toISOString();
 }
@@ -21002,7 +21355,11 @@ async function previewModifiedMedicationLabels(memberId, entries, startDate, end
 
 async function promptReprintLabelsForModifiedSchedules(modified = []) {
     const byMember = new Map();
+    const seenScheduleIds = new Set();
     modified.forEach(entry => {
+        const scheduleId = entry.schedule?.id || entry.after?.id || '';
+        if (scheduleId && seenScheduleIds.has(scheduleId)) return;
+        if (scheduleId) seenScheduleIds.add(scheduleId);
         const memberId = entry.schedule?.memberId || entry.after?.memberId;
         if (!memberId) return;
         if (!byMember.has(memberId)) byMember.set(memberId, []);
@@ -21028,6 +21385,14 @@ async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {
         await appAlert('Check at least one pending order to sign.');
         return;
     }
+    const selectedSet = new Set(selectedIds);
+    const linkedBatchIds = new Set(pendingScheduleOrders
+        .filter(order => selectedSet.has(order.id) && order.linkedChangeSetId)
+        .map(order => order.linkedChangeSetId));
+    pendingScheduleOrders.forEach(order => {
+        if (order.linkedChangeSetId && linkedBatchIds.has(order.linkedChangeSetId)) selectedSet.add(order.id);
+    });
+    selectedIds = [...selectedSet];
     const selected = pendingScheduleOrders.filter(order => selectedIds.includes(order.id));
     for (const order of selected) {
         const allowed = await confirmAllergyOverrideForSchedule(order);
@@ -21042,26 +21407,26 @@ async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {
     for (const order of modifyOrders) {
         const target = db.schedules.find(schedule => schedule.id === order.modifySourceId);
         if (!target) continue;
-        const mappedTargets = uniqueValues(order.linkTargetIds?.length ? order.linkTargetIds : (order.linkTargetId ? [order.linkTargetId] : []))
-            .map(targetId => idMap.get(targetId) || targetId);
+        const mappedLinkState = remappedScheduleLinkState({ ...order, id: target.id }, idMap);
         const orderForApply = {
             ...order,
-            linkTargetIds: mappedTargets,
-            linkTargetId: mappedTargets[0] || '',
-            linkRules: linkRulesFromTargets(mappedTargets, order.linkMode || ''),
-            linkGroup: order.linkMode && mappedTargets[0] ? linkGroupFromTarget(mappedTargets[0]) : ''
+            ...mappedLinkState
         };
+        const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === target.memberId && !isScheduleArchived(candidate));
+        const timingPreview = { ...target, ...orderForApply, id: target.id };
+        const linkedTimingTargets = linkedTogetherSchedules(
+            timingPreview,
+            linkedModificationCandidates.map(candidate => candidate.id === target.id ? timingPreview : candidate)
+        );
         removeScheduleLinkReferences(target.id);
         const before = applyScheduleDraftToExisting(orderForApply, target);
         applyScheduleDraftToOrderSetItem(orderForApply, target, before);
-        const linkedModificationCandidates = db.schedules.filter(candidate => candidate.memberId === target.memberId);
         const linkedSchedulesUpdated = [];
-        linkedSchedulesFor(target, linkedModificationCandidates).forEach(linkedSchedule => {
-            if (linkedSchedule.id !== target.id && schedulesLinkedByMode(target, linkedSchedule, 'together')) {
-                const linkedBefore = { ...linkedSchedule };
-                applyLinkedScheduleTiming(target, linkedSchedule);
-                linkedSchedulesUpdated.push({ schedule: linkedSchedule, before: linkedBefore });
-            }
+        linkedTimingTargets.forEach(linkedSchedule => {
+            const linkedBefore = cloneScheduleSnapshot(linkedSchedule);
+            applyLinkedScheduleTiming(target, linkedSchedule);
+            applyScheduleDraftToOrderSetItem({ ...linkedSchedule, modifySourceId: linkedSchedule.id }, linkedSchedule, linkedBefore);
+            linkedSchedulesUpdated.push({ schedule: linkedSchedule, before: linkedBefore });
         });
         createCareRemindersForSchedule(target);
         linkedSchedulesUpdated.forEach(entry => createCareRemindersForSchedule(entry.schedule));
@@ -21078,18 +21443,14 @@ async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {
     }
     createOrders.forEach(order => {
         const newId = idMap.get(order.id);
-        const mappedTargets = uniqueValues(order.linkTargetIds?.length ? order.linkTargetIds : (order.linkTargetId ? [order.linkTargetId] : []))
-            .map(targetId => idMap.get(targetId) || targetId);
+        const mappedLinkState = remappedScheduleLinkState({ ...order, id: newId }, idMap);
         const finalOrder = {
             ...order,
             id: newId,
             orderSetId: '',
             orderSetName: '',
             rowId: '',
-            linkTargetIds: mappedTargets,
-            linkTargetId: mappedTargets[0] || '',
-            linkRules: linkRulesFromTargets(mappedTargets, order.linkMode || ''),
-            linkGroup: order.linkMode && mappedTargets[0] ? linkGroupFromTarget(mappedTargets[0]) : ''
+            ...mappedLinkState
         };
         db.schedules.push(finalOrder);
         createCareRemindersForSchedule(finalOrder);
@@ -21728,9 +22089,21 @@ window.openProfileScheduleLinkPicker = async function() {
     ].filter(Boolean));
     const choices = scheduleLinkChoices(memberId, body.querySelector('[name="pendingOrderId"]')?.value || '')
         .filter(choice => !excludeIds.has(choice.id));
-    const selected = await chooseLinkedMedicationsChild('Choose Linked Medications', choices, selectedOptionValues(panel).filter(value => !excludeIds.has(value)));
+    const previous = selectedOptionValues(panel).filter(value => !excludeIds.has(value)).sort();
+    const selected = await chooseLinkedMedicationsChild('Choose Linked Medications', choices, previous);
     if (selected === null) return;
     renderLinkChoicePanel(panel, choices, selected, 'openProfileScheduleLinkPicker()');
+    if (JSON.stringify(previous) !== JSON.stringify([...selected].sort())) {
+        const edited = body.querySelector('[name="linksEdited"]');
+        if (edited) edited.value = 'yes';
+    }
+};
+
+window.markProfileScheduleLinksEdited = function() {
+    const body = document.getElementById('action-modal-body');
+    const edited = body?.querySelector('[name="linksEdited"]');
+    if (edited) edited.value = 'yes';
+    renderProfileScheduleLinkOptions();
 };
 
 window.updateProfileScheduleComposer = function() {
@@ -21903,15 +22276,33 @@ function collectProfileScheduleComposer(body, memberId) {
         return false;
     }
     const selectedLinkTargetIds = selectedOptionValues(body.querySelector('[data-profile-schedule-link-target]'));
-    const linkMode = body.querySelector('[name="linkMode"]')?.value || '';
-    const linkTargetIds = linkMode ? selectedLinkTargetIds : [];
+    const selectedLinkMode = body.querySelector('[name="linkMode"]')?.value || '';
+    const linksEdited = body.querySelector('[name="linksEdited"]')?.value === 'yes';
+    const preserveExistingLinks = !!modifySourceId && !linksEdited;
+    let preservedLinkState = {};
+    if (preserveExistingLinks) {
+        try {
+            preservedLinkState = JSON.parse(body.querySelector('[name="preservedLinkState"]')?.value || '{}');
+        } catch (_error) {
+            preservedLinkState = {};
+        }
+    }
+    const linkMode = preserveExistingLinks ? (preservedLinkState.linkMode || '') : selectedLinkMode;
+    const linkRules = preserveExistingLinks
+        ? (Array.isArray(preservedLinkState.linkRules) ? preservedLinkState.linkRules : [])
+        : linkRulesFromTargets(selectedLinkTargetIds, selectedLinkMode);
+    const linkTargetIds = preserveExistingLinks
+        ? uniqueValues(preservedLinkState.linkTargetIds || linkRules.map(rule => rule.targetId))
+        : (['together', 'choose-one'].includes(selectedLinkMode) ? selectedLinkTargetIds : []);
     const targetChoice = scheduleLinkChoices(memberId).find(choice => choice.id === linkTargetIds[0]);
-    const linkGroup = linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
-    if (selectedLinkTargetIds.length > 0 && !linkMode) {
+    const linkGroup = preserveExistingLinks
+        ? (preservedLinkState.linkGroup || '')
+        : (linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '');
+    if (!preserveExistingLinks && selectedLinkTargetIds.length > 0 && !['together', 'choose-one'].includes(selectedLinkMode)) {
         appAlert('Choose what the medication link means: must take together or choose only one.');
         return false;
     }
-    if (linkMode && linkTargetIds.length === 0) {
+    if (!preserveExistingLinks && ['together', 'choose-one'].includes(selectedLinkMode) && linkTargetIds.length === 0) {
         appAlert('Select the medication this one is linked to.');
         return false;
     }
@@ -21930,7 +22321,8 @@ function collectProfileScheduleComposer(body, memberId) {
         linkMode,
         linkTargetIds,
         linkTargetId: linkTargetIds[0] || '',
-        linkRules: linkRulesFromTargets(linkTargetIds, linkMode),
+        linkRules,
+        linksEdited,
         qodStart: freq === 'QOD' ? startDate : '',
         times: freq === 'QXH'
             ? generateIntervalTimes(times[0], intervalHours)
@@ -21958,7 +22350,7 @@ function collectProfileScheduleComposer(body, memberId) {
         appAlert('End date cannot be before start date.');
         return false;
     }
-    if (linkMode === 'together') {
+    if (linkMode === 'together' && !modifySourceId) {
         const allChoices = [...db.schedules, ...pendingScheduleOrders];
         const mismatchedTarget = linkTargetIds
             .map(targetId => allChoices.find(choice => choice.id === targetId))
@@ -21974,6 +22366,12 @@ function collectProfileScheduleComposer(body, memberId) {
     );
     if (existingPendingIndex >= 0) pendingScheduleOrders[existingPendingIndex] = { ...pendingScheduleOrders[existingPendingIndex], ...schedule };
     else pendingScheduleOrders.push(schedule);
+    const storedSchedule = pendingScheduleOrders.find(order =>
+        (pendingOrderId && order.id === pendingOrderId) ||
+        (modifySourceId && order.modifySourceId === modifySourceId) ||
+        order.id === schedule.id
+    );
+    if (storedSchedule) stageLinkedTimingDrafts(storedSchedule);
     renderPendingScheduleOrders();
     renderMemberOrderWorklist(memberId);
     refreshOpenMemberMedicationViews(memberId);
@@ -21985,16 +22383,40 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
     if (!member) return appAlert('Save this member before scheduling medications.');
     const today = localDateKey();
     const composerTitle = existingOrder ? `Modify Medication - ${memberDisplayName(member)}` : `New Medication - ${memberDisplayName(member)}`;
+    const sourceSchedule = existingOrder?.modifySourceId
+        ? db.schedules.find(schedule => schedule.id === existingOrder.modifySourceId)
+        : null;
+    const existingLinkStateSource = existingOrder || sourceSchedule || {};
+    const existingLinkRules = canonicalTargetLinkRules(existingLinkStateSource);
+    const existingLinkTargetIds = uniqueValues([
+        ...(existingLinkStateSource.linkTargetIds || []),
+        existingLinkStateSource.linkTargetId || '',
+        ...existingLinkRules.map(rule => rule.targetId)
+    ]);
+    const existingLinkModes = uniqueValues(existingLinkRules.map(rule => rule.mode));
+    const composerLinkMode = existingLinkModes.length > 1
+        ? 'mixed'
+        : (existingLinkStateSource.linkMode || existingLinkModes[0] || '');
+    const preservedLinkState = JSON.stringify({
+        linkGroup: existingLinkStateSource.linkGroup || '',
+        linkMode: existingLinkStateSource.linkMode || (existingLinkModes.length === 1 ? existingLinkModes[0] : ''),
+        linkTargetIds: existingLinkTargetIds,
+        linkRules: existingLinkRules
+    });
+    const linkedImpact = sourceSchedule ? linkedTimingImpactHtml(sourceSchedule) : '';
     const modalPromise = showActionModal(composerTitle, `
         <div data-action-modal-size="wide" class="profile-schedule-composer">
             <input type="hidden" name="pendingOrderId" value="${escapeHtml(existingOrder?.id || '')}">
             <input type="hidden" name="modifySourceId" value="${escapeHtml(existingOrder?.modifySourceId || '')}">
             <input type="hidden" name="reorderSourceId" value="${escapeHtml(existingOrder?.reorderSourceId || '')}">
             <input type="hidden" name="memberId" value="${escapeHtml(memberId)}">
+            <input type="hidden" name="linksEdited" value="${existingOrder?.linksEdited ? 'yes' : 'no'}">
+            <input type="hidden" name="preservedLinkState" value="${escapeHtml(preservedLinkState)}">
             <div class="profile-schedule-composer-banner">
                 <strong>${existingOrder ? 'Modify scheduled medication' : 'New medication schedule'}</strong>
                 <span>Review the order here, then add it to the worklist. The profile changes only after Approve Changes.</span>
             </div>
+            ${linkedImpact ? `<div class="linked-timing-impact">${linkedImpact}</div>` : ''}
             <div class="profile-schedule-form">
                 <fieldset class="profile-schedule-medication-card">
                     <legend>Medication</legend>
@@ -22048,10 +22470,11 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
                     <legend>Linked Orders</legend>
                     <div class="profile-schedule-link-grid">
                         <label>Link meaning
-                            <select name="linkMode" onchange="renderProfileScheduleLinkOptions()">
-                                <option value="" ${!existingOrder?.linkMode ? 'selected' : ''}>No link</option>
-                                <option value="together" ${existingOrder?.linkMode === 'together' ? 'selected' : ''}>Must take together</option>
-                                <option value="choose-one" ${existingOrder?.linkMode === 'choose-one' ? 'selected' : ''}>Choose only one</option>
+                            <select name="linkMode" onchange="markProfileScheduleLinksEdited()">
+                                <option value="" ${!composerLinkMode ? 'selected' : ''}>No link</option>
+                                <option value="mixed" ${composerLinkMode === 'mixed' ? 'selected' : ''} disabled>Mixed link meanings</option>
+                                <option value="together" ${composerLinkMode === 'together' ? 'selected' : ''}>Must take together</option>
+                                <option value="choose-one" ${composerLinkMode === 'choose-one' ? 'selected' : ''}>Choose only one</option>
                             </select>
                         </label>
                         <div>
@@ -22070,7 +22493,7 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
     `, existingOrder ? 'Update Worklist' : 'Add to Worklist', body => collectProfileScheduleComposer(body, memberId));
     window.renderProfileScheduleComposerTimes();
     window.syncProfileCustomScheduleTimes();
-    window.renderProfileScheduleLinkOptions(existingOrder?.linkTargetIds?.length ? existingOrder.linkTargetIds : (existingOrder?.linkTargetId || ''));
+    window.renderProfileScheduleLinkOptions(existingLinkTargetIds);
     if (existingOrder) {
         const body = document.getElementById('action-modal-body');
         const existingTimes = scheduleTimingFrequency(existingOrder) === 'QXH'

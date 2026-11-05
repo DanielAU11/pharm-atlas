@@ -1,7 +1,7 @@
 # PharmAtlas
 
 ![Status](https://img.shields.io/badge/status-active-008000)
-![Platform](https://img.shields.io/badge/platform-Windows%20Desktop-0078d7)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20iOS%20%7C%20iPadOS-0078d7)
 ![Style](https://img.shields.io/badge/style-Windows%2098-000080)
 ![Care](https://img.shields.io/badge/focus-medication%20organization-b00000)
 
@@ -20,7 +20,7 @@ PharmAtlas helps users organize the practical details that make medication routi
 - Print medication labels, inventory labels, daily labels, regimen labels, and prepack labels.
 - Verify prepacks by scanning QR/barcodes or marking items prepacked manually.
 - Restore accidental prepack removals from automatic safety backups; restored items return as not yet prepacked so inventory can be verified again.
-- Document past doses from active or completed schedules, retime single doses, or shift future every-X-hours schedules only when the user explicitly chooses that option.
+- Document past doses from active or completed schedules, retime a single dose, or explicitly reschedule that dose and all future occurrences for recurring orders, including every-other-day and every-X-hours schedules.
 - Track inventory quantities, low-stock alerts, expiration dates, storage, control level, prescriber, assignment, notes, photos, and multiple barcode aliases per item.
 - Create and edit a master formulary, generate formulary PDFs, create named inventory orders, edit active orders, print order PDFs, and receive orders by manual entry or scanning.
 - Monitor blood pressure, heart rate, glucose, weight, temperature, INR, drug levels, and other custom therapeutic labs.
@@ -33,7 +33,7 @@ PharmAtlas helps users organize the practical details that make medication routi
 
 Supported frequencies include one-time, QD, BID, TID, QID, nightly, PRN, every other day, once weekly, every X weeks, X times per week, once monthly, and every X hours.
 
-Every X hours orders include future time previews and can adjust future scheduled times after late or early administrations only when the user explicitly chooses to shift the future pattern. Single-dose retiming keeps the rest of the schedule unchanged and prompts users to reprint affected future labels when needed.
+Recurring orders include future time previews. A user can move only one dose or explicitly reschedule that dose and all future occurrences; every-other-day cadence and every-X-hours spacing are preserved. Single-dose retiming keeps the rest of the schedule unchanged, and affected prepacks prompt for updated labels.
 
 Member profiles include an Epic-inspired medication work side panel for staging new medications, regimen assignments, monitoring reminders, modifications, reorders, and discontinuations. Changes are applied together with Approve Changes and refresh live in the open profile.
 
@@ -104,6 +104,31 @@ The Windows installer is created under:
 
 ```text
 out/make/squirrel.windows/x64/
+```
+
+## iPhone And iPad
+
+PharmAtlas includes a Capacitor iOS project with an adaptive phone/tablet interface and IndexedDB-backed local persistence. Build the mobile web bundle and synchronize it into Xcode with:
+
+```powershell
+npm run cap:sync
+```
+
+The native project is in `ios/App/App.xcworkspace`. App Store metadata, privacy language, screenshot requirements, and the Xcode publishing walkthrough are in `docs/app-store/`.
+
+## Verification
+
+Run the repeatable synthetic-data demo to exercise the major workspaces, future-dose retiming, linked schedules, barcode rendering, button wiring, and mobile persistence:
+
+```powershell
+npm run test:demo
+```
+
+Generate App Store-ready iPhone and iPad screenshots with:
+
+```powershell
+npm run screenshots:iphone
+npm run screenshots:ipad
 ```
 
 ## Project Files

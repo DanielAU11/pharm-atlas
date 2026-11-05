@@ -4,10 +4,11 @@ This project now has a Capacitor path beside the Electron desktop app.
 
 ## What Changed
 
-- `mobile-api.js` provides a browser/mobile replacement for Electron's `window.api`.
+- `mobile-api.js` provides a browser/mobile replacement for Electron's `window.api`, with IndexedDB persistence and local-storage migration/fallback.
 - `capacitor.config.json` points Capacitor at the generated `www` mobile bundle.
-- `scripts/build-mobile.js` copies the web app files into `www`.
+- `scripts/build-mobile.js` copies the web app and offline Windows 98/barcode assets into `www`.
 - `ios/` is the generated Xcode project.
+- iPhone uses focused full-screen work sheets for medication work and progress notes; iPad and desktop retain denser layouts where space permits.
 
 ## Windows Commands
 
@@ -37,13 +38,14 @@ Then in Xcode:
 
 ## Current Mobile Limitations
 
-The first mobile adapter uses browser storage so the UI can run in Capacitor quickly.
-Before App Store submission, replace or improve:
+The mobile adapter now stores the database in IndexedDB, migrates older local-storage data, supports JSON backup/restore, and keeps the core medication, linked-order, regimen, monitoring, inventory, prepack, and member workflows in the Capacitor bundle.
+
+Before App Store submission, still replace or improve:
 
 - PDF generation/export with native share/print behavior.
 - Local notifications with Capacitor Local Notifications.
-- Image storage with Capacitor Filesystem or SQLite/blob storage.
+- Optional native Filesystem/SQLite storage if datasets outgrow IndexedDB.
 - Privacy policy, medical disclaimer, and data deletion/export screens.
-- Responsive mobile polish for iPhone-sized screens.
+- App Store screenshots, accessibility review, and physical-device regression testing.
 
 The Electron desktop app still uses `main.js` and `preload.js`.

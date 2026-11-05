@@ -4,11 +4,17 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const outDir = path.join(root, 'www');
 const files = [
-  'index.html',
-  'style.css',
-  'renderer.js',
-  'mobile-api.js',
-  'vendor/qrcode.js'
+  ['index.html', 'index.html'],
+  ['style.css', 'style.css'],
+  ['renderer.js', 'renderer.js'],
+  ['mobile-api.js', 'mobile-api.js'],
+  ['vendor/qrcode.js', 'vendor/qrcode.js'],
+  ['node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js'],
+  ['node_modules/98.css/dist/98.css', 'vendor/98.css'],
+  ['node_modules/98.css/dist/ms_sans_serif.woff', 'vendor/ms_sans_serif.woff'],
+  ['node_modules/98.css/dist/ms_sans_serif.woff2', 'vendor/ms_sans_serif.woff2'],
+  ['node_modules/98.css/dist/ms_sans_serif_bold.woff', 'vendor/ms_sans_serif_bold.woff'],
+  ['node_modules/98.css/dist/ms_sans_serif_bold.woff2', 'vendor/ms_sans_serif_bold.woff2']
 ];
 
 function emptyDir(dir) {
@@ -25,10 +31,16 @@ function emptyDir(dir) {
 
 emptyDir(outDir);
 
-for (const file of files) {
-  const destination = path.join(outDir, file);
+for (const [sourceFile, outputFile] of files) {
+  const destination = path.join(outDir, outputFile);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.copyFileSync(path.join(root, file), destination);
+  fs.copyFileSync(path.join(root, sourceFile), destination);
 }
+
+const mobileIndexPath = path.join(outDir, 'index.html');
+const mobileIndex = fs.readFileSync(mobileIndexPath, 'utf8')
+  .replace('https://unpkg.com/98.css', 'vendor/98.css')
+  .replace('node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js');
+fs.writeFileSync(mobileIndexPath, mobileIndex);
 
 console.log(`Mobile web build written to ${outDir}`);
