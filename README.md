@@ -15,7 +15,7 @@ PharmAtlas helps users organize the practical details that make medication routi
 
 - Schedule medications by member, dose, frequency, start date, end date, and administration time.
 - Build reusable regimens for grouped medications such as daily supplements, hypertension routines, rescue plans, or travel packs.
-- Link medications that must be taken together or where only one formulation should be selected.
+- Link orders with searchable And, Or, and Followed by relationships. Followed-by chains require a defined interval and reject circular links.
 - Track scheduled, administered, late, early, skipped, missed, refused, PRN, manual, supplemental, returned, and wasted administrations.
 - Print medication labels, inventory labels, daily labels, regimen labels, and prepack labels.
 - Verify prepacks by scanning QR/barcodes or marking items prepacked manually.
@@ -42,7 +42,7 @@ Member profiles include an Epic-inspired medication work side panel for staging 
 - Allergy and intolerance warnings before scheduling.
 - PRN maximum-dose checks with override comments.
 - Barcode conflict prevention so one code cannot quietly belong to multiple inventory items.
-- Linked-medication rules for "must take together" and "choose only one" situations.
+- Linked-order rules for And/take-together, Or/choose-one, and timed Followed by sequences, with cycle prevention.
 - Missed-dose dashboard and color-coded administration timelines.
 - Workflow Health Check for schedule links, inventory counts, duplicate barcodes, prepack label reprints, return/waste state, monitoring links, and unapproved staged medication work.
 
@@ -60,7 +60,7 @@ Prepack queues can be created for a date range, grouped by daytime or evening la
 
 ### Monitoring
 
-Vitals and therapeutic monitoring can be tracked over time with goals, notes, graphs, and PDF reports. Monitoring can be tied to a medication when adherence context matters.
+Vitals and therapeutic monitoring can be tracked over time with goals, notes, graphs, and PDF reports. Monitoring can be tied to a medication when adherence context matters. Custom parameters support task, numeric, yes/no, or text results; numeric parameters can define units, target ranges, critical limits, collection instructions, escalation guidance, and medication-hold prompts.
 
 ## Intended Use
 

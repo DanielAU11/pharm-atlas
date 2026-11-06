@@ -80,6 +80,34 @@ app.whenReady().then(async () => {
         primary.times = ['09:15']; primary.startTime = '09:15'; pendingScheduleOrders.push(primary);
         const linkedDrafts = stageLinkedTimingDrafts(primary);
 
+        const followedRules = linkRulesFromTargets(['sched-qod'], 'followed-by', { followDelayMinutes: 120 });
+        const followedByLogic = {
+            ruleStored: followedRules.length === 1 && followedRules[0].direction === 'before' && followedRules[0].followDelayMinutes === 120,
+            selfCycleBlocked: followedByWouldCreateCycle('sched-qod', 'sched-qod'),
+            criticalStatus: monitoringParameterNumericStatus({ targetLow: 2, targetHigh: 4, criticalLow: 1, criticalHigh: 5 }, 6).code === 'critical',
+            targetStatus: monitoringParameterNumericStatus({ targetLow: 2, targetHigh: 4, criticalLow: 1, criticalHigh: 5 }, 3).code === 'in-target'
+        };
+        const linkDialogPromise = chooseLinkedMedications('Link Orders Demo', scheduleLinkChoices('demo-member', 'sched-lisinopril'), [], {
+            mode: 'followed-by',
+            followDelayMinutes: 90,
+            currentLabel: scheduleMedicationLabel(db.schedules.find(item => item.id === 'sched-lisinopril'))
+        });
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const linkDialog = document.querySelector('#action-modal-body .link-orders-dialog');
+        const linkDialogUi = {
+            rendered: !!linkDialog,
+            relationshipButtons: linkDialog?.querySelectorAll('input[name="linkMode"]').length || 0,
+            searchInput: !!linkDialog?.querySelector('input[name="linkSearch"]'),
+            actualButtons: linkDialog?.querySelectorAll('button').length || 0,
+            overflow: linkDialog ? Math.max(0, linkDialog.scrollWidth - linkDialog.clientWidth) : 999
+        };
+        document.getElementById('action-modal-ok')?.click();
+        await new Promise(resolve => setTimeout(resolve, 20));
+        linkDialogUi.validationStayedOpen = document.getElementById('action-modal')?.style.display === 'flex';
+        linkDialogUi.validationMessage = (linkDialog?.querySelector('[data-link-order-error]')?.textContent || '').trim().length > 0;
+        document.getElementById('action-modal-cancel')?.click();
+        await linkDialogPromise;
+
         const tabs = ['dashboard','schedules','prepackage','order-sets','vitals','inventory','recipes','family','drug-info','help'];
         const panels = {};
         tabs.forEach(tab => {
@@ -145,6 +173,8 @@ app.whenReady().then(async () => {
             pastPreserved, qodFutureMoved,
             linkedDraftCount: linkedDrafts.length,
             linkedTimeAligned: linkedDrafts.every(item => item.times[0] === '09:15'),
+            followedByLogic,
+            linkDialogUi,
             panels,
             unresolvedButtons,
             inventoryRows: document.querySelectorAll('#inventory-table-body tr').length,
@@ -181,9 +211,19 @@ app.whenReady().then(async () => {
             await win.webContents.executeJavaScript(command);
             screenshots.push(await capture(win, name));
         }
+        await win.webContents.executeJavaScript(`void chooseLinkedMedications('Link Orders', scheduleLinkChoices('demo-member', 'sched-lisinopril'), [], { mode:'followed-by', followDelayMinutes:90, currentLabel:scheduleMedicationLabel(db.schedules.find(item => item.id === 'sched-lisinopril')) }); true;`);
+        screenshots.push(await capture(win, 'link-orders'));
+        await win.webContents.executeJavaScript(`document.getElementById('action-modal-cancel')?.click(); true;`);
+        await win.webContents.executeJavaScript(`void openMonitoringParameterTypeManager(); setTimeout(() => addMonitoringParameterTypeManagerRow(), 20); true;`);
+        await new Promise(resolve => setTimeout(resolve, 80));
+        screenshots.push(await capture(win, 'monitoring-types'));
+        await win.webContents.executeJavaScript(`document.getElementById('action-modal-cancel')?.click(); true;`);
     }
 
     const failed = !logic.pastPreserved || !logic.qodFutureMoved || !logic.linkedTimeAligned ||
+        Object.values(logic.followedByLogic || {}).some(value => !value) || !logic.linkDialogUi?.rendered ||
+        logic.linkDialogUi.relationshipButtons !== 3 || !logic.linkDialogUi.searchInput || logic.linkDialogUi.actualButtons < 2 || logic.linkDialogUi.overflow > 0 ||
+        !logic.linkDialogUi.validationStayedOpen || !logic.linkDialogUi.validationMessage ||
         Object.values(logic.panels).some(value => !value) || logic.unresolvedButtons.length > 0 ||
         logic.inventoryRows < 5 || logic.scheduleRows < 6 || logic.prepackReturnable < 1 ||
         !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || !logic.simplifiedMobileNavigation ||

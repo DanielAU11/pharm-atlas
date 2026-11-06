@@ -7,7 +7,7 @@
 - **Primary category:** Medical
 - **Secondary category:** Health & Fitness
 - **Bundle ID:** `com.pharmatlas.app`
-- **Version:** 1.2.1
+- **Version:** 1.3.0
 - **Support URL:** `https://github.com/DanielAU11/pharm-atlas/issues`
 - **Privacy URL:** `https://github.com/DanielAU11/pharm-atlas/blob/master/docs/app-store/PRIVACY_POLICY.md`
 
@@ -25,7 +25,7 @@ PharmAtlas is a private medication organization companion for individuals and ca
 
 Flexible scheduling supports daily, weekly, every-other-day, interval, PRN, and user-specified routines. Individual doses can be retimed without changing the rest of an order, or future doses can be rescheduled together when the routine changes.
 
-PharmAtlas also includes linked-order safeguards, inventory alerts, printable reports, medication adherence summaries, caregiver notes, monitoring reminders, and backup and restore. An optional QR-paired companion connection synchronizes changes directly with PharmAtlas Desktop while both apps are open on the same local network. The connection is encrypted and does not use a PharmAtlas cloud account.
+PharmAtlas also includes searchable linked-order workflows with And, Or, and Followed by relationships; configurable monitoring targets and critical-result guidance; inventory alerts; printable reports; medication adherence summaries; caregiver notes; monitoring reminders; and backup and restore. An optional QR-paired companion connection synchronizes changes directly with PharmAtlas Desktop while both apps are open on the same local network. The connection is encrypted and does not use a PharmAtlas cloud account.
 
 Data is stored on the device. Information leaves the device only when the user deliberately exports, shares, emails, backs up, stores files in a synchronized location, or enables local companion sync. Reminders are generated locally by iOS and do not use email.
 

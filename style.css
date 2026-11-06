@@ -4098,6 +4098,10 @@ button {
     width: min(1180px, calc(100vw - 26px));
 }
 
+.action-modal-window-wide:has(.link-orders-dialog) {
+    width: min(840px, calc(100vw - 26px));
+}
+
 .return-prepack-modal {
     min-width: min(1580px, calc(100vw - 44px));
     max-width: 100%;
@@ -6721,6 +6725,14 @@ button {
     gap: 8px;
 }
 
+.monitoring-type-error {
+    padding: 6px;
+    border: 1px solid #b00000;
+    background: #ffe8e8;
+    color: #b00000;
+    font-weight: bold;
+}
+
 .monitoring-type-defaults {
     display: flex;
     flex-wrap: wrap;
@@ -6735,7 +6747,7 @@ button {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    max-height: 360px;
+    max-height: 430px;
     overflow: auto;
     padding: 5px;
     border: 2px inset #ffffff;
@@ -6743,13 +6755,43 @@ button {
 }
 
 .monitoring-type-manager-row {
-    display: grid;
-    grid-template-columns: minmax(180px, 1.2fr) 64px minmax(150px, 0.9fr) 60px 128px minmax(150px, 0.9fr) 75px auto;
-    gap: 6px;
-    align-items: end;
-    padding: 5px;
+    display: block;
+    padding: 7px;
     border-bottom: 1px dotted #a0a0a0;
     background: #fbfbff;
+}
+
+.monitoring-type-main-grid,
+.monitoring-type-result-grid,
+.monitoring-type-safety-grid {
+    display: grid;
+    gap: 6px;
+    align-items: end;
+}
+
+.monitoring-type-main-grid {
+    grid-template-columns: minmax(180px, 1.4fr) 65px minmax(155px, 1fr) 65px 28px;
+}
+
+.monitoring-type-result-grid {
+    grid-template-columns: minmax(145px, 1.1fr) 90px repeat(4, minmax(92px, 0.7fr));
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dotted #b0b0b0;
+}
+
+.monitoring-type-safety-grid {
+    grid-template-columns: minmax(160px, 0.8fr) minmax(140px, 0.8fr) minmax(220px, 1.2fr) minmax(220px, 1.2fr);
+    margin-top: 6px;
+}
+
+.monitoring-type-remove {
+    min-width: 26px;
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    color: #b00000;
+    font-weight: bold;
 }
 
 .monitoring-type-manager-row input,
@@ -6793,10 +6835,46 @@ button {
     align-items: center;
     gap: 5px;
     width: max-content;
-    max-width: 128px;
+    max-width: none;
     padding: 2px 5px;
     border: 2px outset #ffffff;
     background: #fff7f7;
+}
+
+.monitoring-instruction-banner {
+    margin: 7px 0;
+    padding: 6px;
+    border-left: 5px solid #008080;
+    background: #e8ffff;
+    color: #004848;
+}
+
+.monitoring-range-hint {
+    padding: 2px 5px;
+    border: 1px solid #808080;
+    background: #e8ffe8;
+    color: #005000;
+    font-weight: bold;
+}
+
+@media (max-width: 980px) {
+    .monitoring-type-main-grid,
+    .monitoring-type-result-grid,
+    .monitoring-type-safety-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .monitoring-type-remove {
+        justify-self: end;
+    }
+}
+
+@media (max-width: 760px) {
+    .monitoring-type-main-grid,
+    .monitoring-type-result-grid,
+    .monitoring-type-safety-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .monitoring-type-manager-row .monitoring-type-hold-toggle input[type="checkbox"] {
@@ -6812,6 +6890,11 @@ button {
     height: 13px;
     margin: 0;
     flex: 0 0 auto;
+}
+
+.monitoring-type-manager-row .monitoring-numeric-hidden,
+.monitoring-type-manager-row .monitoring-type-hold-toggle.monitoring-numeric-hidden {
+    display: none !important;
 }
 
 .linked-med-badge {
@@ -6893,6 +6976,15 @@ button {
     color: #b45f00;
 }
 
+.link-choice-relation {
+    flex: 0 0 auto;
+    padding: 1px 4px;
+    border: 1px solid #000080;
+    background: #e4edff;
+    color: #000080;
+    font-weight: bold;
+}
+
 .link-choice-button {
     min-width: 64px;
     padding-left: 8px;
@@ -6909,6 +7001,144 @@ button {
     max-height: 260px;
     overflow-y: auto;
     padding: 5px;
+}
+
+.link-orders-dialog {
+    width: min(760px, calc(100vw - 90px));
+    min-width: 0;
+}
+
+.link-current-order {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #3e3500;
+    color: #ffffff;
+}
+
+.link-current-order span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.link-order-error {
+    margin-bottom: 7px;
+    padding: 6px;
+    border: 1px solid #b00000;
+    background: #ffe8e8;
+    color: #b00000;
+    font-weight: bold;
+}
+
+.link-type-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.link-type-choice {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 5px;
+    align-items: start;
+    min-width: 0;
+    padding: 7px;
+    border: 2px outset #ffffff;
+    background: #f7f7e8;
+    cursor: pointer;
+}
+
+.link-type-choice.selected,
+.link-type-choice:has(input:checked) {
+    border-style: inset;
+    background: #dff0ff;
+    color: #000080;
+}
+
+.link-type-choice input[type="radio"] {
+    position: static !important;
+    width: 13px !important;
+    height: 13px !important;
+    margin: 1px 0 0 !important;
+    appearance: auto !important;
+}
+
+.link-type-choice span,
+.link-type-choice small {
+    display: block;
+    min-width: 0;
+}
+
+.link-type-choice small {
+    margin-top: 2px;
+    color: #404040;
+    font-weight: normal;
+    line-height: 1.2;
+}
+
+.link-follow-delay {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 7px 0;
+    padding: 7px;
+    border-left: 5px solid #b00000;
+    background: #fff1d2;
+}
+
+.link-follow-delay label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.link-follow-delay input {
+    width: 70px;
+}
+
+.link-order-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 5px;
+    margin-bottom: 6px;
+}
+
+.link-order-search-row input {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+    .link-orders-dialog {
+        width: min(100%, calc(100vw - 36px));
+    }
+
+    .link-type-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .link-current-order {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
+
+    .link-follow-delay {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .link-order-search-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .link-order-search-row button:last-child {
+        grid-column: 1 / -1;
+    }
 }
 
 .link-picker-item {

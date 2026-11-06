@@ -1949,6 +1949,14 @@ function ensureReminderTypes() {
             icon: String(type.icon || type.label?.slice(0, 2) || 'MP').slice(0, 4).toUpperCase(),
             color: type.color || '#f3f3ff',
             custom: type.custom !== false,
+            resultType: ['number', 'yes-no', 'text', 'task'].includes(type.resultType) ? type.resultType : (type.holdCapability?.enabled ? 'number' : 'task'),
+            unit: String(type.unit || type.holdCapability?.unit || ''),
+            targetLow: type.targetLow === '' || type.targetLow === null || type.targetLow === undefined ? '' : parseAmount(type.targetLow, ''),
+            targetHigh: type.targetHigh === '' || type.targetHigh === null || type.targetHigh === undefined ? '' : parseAmount(type.targetHigh, ''),
+            criticalLow: type.criticalLow === '' || type.criticalLow === null || type.criticalLow === undefined ? '' : parseAmount(type.criticalLow, ''),
+            criticalHigh: type.criticalHigh === '' || type.criticalHigh === null || type.criticalHigh === undefined ? '' : parseAmount(type.criticalHigh, ''),
+            instructions: String(type.instructions || ''),
+            escalation: String(type.escalation || ''),
             holdCapability: type.holdCapability && type.holdCapability.enabled ? {
                 enabled: true,
                 metricLabel: String(type.holdCapability.metricLabel || type.label || 'value'),
@@ -1979,7 +1987,11 @@ function monitoringProfileParameterType(profile) {
         medId: profile.medId || '',
         goalLow: profile.goalLow,
         goalHigh: profile.goalHigh,
-        unit: profile.unit || 'value'
+        criticalLow: profile.criticalLow,
+        criticalHigh: profile.criticalHigh,
+        unit: profile.unit || 'value',
+        instructions: profile.instructions || profile.notes || '',
+        escalation: profile.escalation || ''
     };
 }
 
@@ -2479,13 +2491,13 @@ function renderMonitoringParameterTypeSelect(prefix = 'm', selected = '', member
     if (!types.some(type => type.id === current)) select.value = 'bp';
 }
 
-window.openMonitoringParameterTypeManager = async function() {
-    const customTypes = ensureReminderTypes();
-    const rows = customTypes.map(type => `
-        <div class="monitoring-type-manager-row" data-type-id="${escapeHtml(type.id)}">
+function monitoringTypeManagerRowHtml(type = {}) {
+    const numericClass = type.resultType === 'number' ? '' : 'monitoring-numeric-hidden';
+    return `<div class="monitoring-type-manager-row" data-type-id="${escapeHtml(type.id || '')}">
+        <div class="monitoring-type-main-grid">
             <label><span>Name</span><input name="label" type="text" value="${escapeHtml(type.label)}" placeholder="e.g. Check peak flow"></label>
             <label><span>Icon</span><input name="icon" type="text" value="${escapeHtml(type.icon)}" maxlength="4" placeholder="PF"></label>
-            <label><span>Type</span><select name="vitalType">
+            <label><span>Category</span><select name="vitalType">
                     <option value="custom" ${type.vitalType === 'custom' ? 'selected' : ''}>Custom / task only</option>
                     <option value="bp" ${type.vitalType === 'bp' ? 'selected' : ''}>Blood pressure / HR</option>
                     <option value="weight" ${type.vitalType === 'weight' ? 'selected' : ''}>Weight</option>
@@ -2494,24 +2506,60 @@ window.openMonitoringParameterTypeManager = async function() {
                     <option value="lab" ${type.vitalType === 'lab' ? 'selected' : ''}>Medication/lab monitoring</option>
                 </select></label>
             <label><span>Color</span><input name="color" type="color" value="${escapeHtml(type.color || '#f3f3ff')}"></label>
-            <label class="monitoring-type-hold-toggle"><input name="holdEnabled" type="checkbox" ${type.holdCapability?.enabled ? 'checked' : ''}> Can hold meds</label>
-            <label><span>Hold value</span><input name="holdMetricLabel" type="text" value="${escapeHtml(type.holdCapability?.metricLabel || '')}" placeholder="e.g. Peak flow"></label>
-            <label><span>Unit</span><input name="holdUnit" type="text" value="${escapeHtml(type.holdCapability?.unit || '')}" placeholder="L/min"></label>
-            <button type="button" onclick="this.closest('.monitoring-type-manager-row').remove()">Remove</button>
-        </div>`).join('');
+            <button type="button" class="monitoring-type-remove" title="Remove parameter" onclick="this.closest('.monitoring-type-manager-row').remove()">X</button>
+        </div>
+        <div class="monitoring-type-result-grid">
+            <label><span>Result format</span><select name="resultType" onchange="updateMonitoringTypeManagerRow(this)">
+                <option value="task" ${(!type.resultType || type.resultType === 'task') ? 'selected' : ''}>Completed task / note</option>
+                <option value="number" ${type.resultType === 'number' ? 'selected' : ''}>Numeric value</option>
+                <option value="yes-no" ${type.resultType === 'yes-no' ? 'selected' : ''}>Yes / No</option>
+                <option value="text" ${type.resultType === 'text' ? 'selected' : ''}>Text result</option>
+            </select></label>
+            <label data-numeric-field class="${numericClass}"><span>Unit</span><input name="unit" type="text" value="${escapeHtml(type.unit || type.holdCapability?.unit || '')}" placeholder="e.g. mg/dL"></label>
+            <label data-numeric-field class="${numericClass}"><span>Target low</span><input name="targetLow" type="number" step="any" value="${escapeHtml(type.targetLow ?? '')}" placeholder="optional"></label>
+            <label data-numeric-field class="${numericClass}"><span>Target high</span><input name="targetHigh" type="number" step="any" value="${escapeHtml(type.targetHigh ?? '')}" placeholder="optional"></label>
+            <label data-numeric-field class="${numericClass}"><span>Critical below</span><input name="criticalLow" type="number" step="any" value="${escapeHtml(type.criticalLow ?? '')}" placeholder="optional"></label>
+            <label data-numeric-field class="${numericClass}"><span>Critical above</span><input name="criticalHigh" type="number" step="any" value="${escapeHtml(type.criticalHigh ?? '')}" placeholder="optional"></label>
+        </div>
+        <div class="monitoring-type-safety-grid">
+            <label class="monitoring-type-hold-toggle ${numericClass}" data-numeric-field><input name="holdEnabled" type="checkbox" ${type.holdCapability?.enabled ? 'checked' : ''}> Can prompt medication hold</label>
+            <label data-numeric-field class="${numericClass}"><span>Hold value name</span><input name="holdMetricLabel" type="text" value="${escapeHtml(type.holdCapability?.metricLabel || '')}" placeholder="e.g. Peak flow"></label>
+            <label><span>How to measure / prepare</span><input name="instructions" type="text" value="${escapeHtml(type.instructions || '')}" placeholder="e.g. Before breakfast; seated for 5 minutes"></label>
+            <label><span>If critical / follow-up</span><input name="escalation" type="text" value="${escapeHtml(type.escalation || '')}" placeholder="e.g. Recheck and contact provider"></label>
+        </div>
+    </div>`;
+}
+
+window.updateMonitoringTypeManagerRow = function(input) {
+    const row = input?.closest('.monitoring-type-manager-row');
+    if (!row) return;
+    const numeric = row.querySelector('[name="resultType"]')?.value === 'number';
+    row.querySelectorAll('[data-numeric-field]').forEach(field => field.classList.toggle('monitoring-numeric-hidden', !numeric));
+};
+
+window.openMonitoringParameterTypeManager = async function() {
+    const customTypes = ensureReminderTypes();
+    const rows = customTypes.map(type => monitoringTypeManagerRowHtml(type)).join('');
     const result = await showActionModal('Create/Edit Monitoring Parameter Types', `
         <div data-action-modal-size="wide" class="monitoring-type-manager">
             <div class="monitoring-type-defaults">
                 <strong>Built-in types:</strong>
                 ${Object.values(defaultCareReminderTypes).map(type => `<span class="monitoring-parameter-chip selected" style="--parameter-color:${escapeHtml(type.color)};"><span class="monitoring-parameter-icon">${escapeHtml(type.icon)}</span>${escapeHtml(type.label)}</span>`).join('')}
             </div>
-            <div class="form-help">Create reusable reminders such as check INR, apply wound photo, call pharmacy, check peak flow, draw lithium level, or any custom monitoring task. If a custom type can hold meds, PharmAtlas asks for a numeric value when it is documented and can use that value in medication hold prompts.</div>
+            <div class="form-help">Create reusable checks such as INR, peak flow, wound status, symptoms, or medication levels. Keep simple tasks as Completed task / note. Numeric checks can show target and critical status and can optionally prompt a medication hold.</div>
+            <div data-monitoring-type-error class="monitoring-type-error" style="display:none;"></div>
             <div id="monitoring-type-manager-rows" class="monitoring-type-manager-rows">${rows || '<div class="empty-state">No custom parameter types yet.</div>'}</div>
             <button type="button" onclick="addMonitoringParameterTypeManagerRow()">+ Add Type</button>
         </div>
-    `, 'Save Types', body => Array.from(body.querySelectorAll('.monitoring-type-manager-row')).map(row => {
+    `, 'Save Types', body => {
+        const types = Array.from(body.querySelectorAll('.monitoring-type-manager-row')).map(row => {
         const label = row.querySelector('input[name="label"]')?.value.trim() || '';
         const existingId = row.dataset.typeId || '';
+        const resultType = row.querySelector('select[name="resultType"]')?.value || 'task';
+        const readOptionalNumber = name => {
+            const raw = row.querySelector(`[name="${name}"]`)?.value.trim() || '';
+            return raw === '' ? '' : parseAmount(raw, NaN);
+        };
         return {
             id: existingId || `custom_${Date.now()}_${Math.random().toString(16).slice(2)}`,
             label,
@@ -2519,14 +2567,38 @@ window.openMonitoringParameterTypeManager = async function() {
             icon: (row.querySelector('input[name="icon"]')?.value.trim() || label.slice(0, 2) || 'MP').slice(0, 4).toUpperCase(),
             vitalType: row.querySelector('select[name="vitalType"]')?.value || 'custom',
             color: row.querySelector('input[name="color"]')?.value || '#f3f3ff',
-            holdCapability: row.querySelector('input[name="holdEnabled"]')?.checked ? {
+            resultType,
+            unit: row.querySelector('input[name="unit"]')?.value.trim() || '',
+            targetLow: readOptionalNumber('targetLow'),
+            targetHigh: readOptionalNumber('targetHigh'),
+            criticalLow: readOptionalNumber('criticalLow'),
+            criticalHigh: readOptionalNumber('criticalHigh'),
+            instructions: row.querySelector('input[name="instructions"]')?.value.trim() || '',
+            escalation: row.querySelector('input[name="escalation"]')?.value.trim() || '',
+            holdCapability: resultType === 'number' && row.querySelector('input[name="holdEnabled"]')?.checked ? {
                 enabled: true,
                 metricLabel: row.querySelector('input[name="holdMetricLabel"]')?.value.trim() || label,
-                unit: row.querySelector('input[name="holdUnit"]')?.value.trim() || ''
+                unit: row.querySelector('input[name="unit"]')?.value.trim() || ''
             } : null,
             custom: true
         };
-    }).filter(type => type.label));
+        }).filter(type => type.label);
+        const invalid = types.find(type => {
+            const pairs = [[type.targetLow, type.targetHigh], [type.criticalLow, type.criticalHigh]];
+            return pairs.some(([low, high]) => low !== '' && high !== '' && (!Number.isFinite(low) || !Number.isFinite(high) || high <= low))
+                || [type.targetLow, type.targetHigh, type.criticalLow, type.criticalHigh].some(value => value !== '' && !Number.isFinite(value));
+        });
+        if (invalid) {
+            const error = body.querySelector('[data-monitoring-type-error]');
+            if (error) {
+                error.textContent = `${invalid.label}: enter valid ranges. Each high value must be greater than its low value.`;
+                error.style.display = '';
+                error.scrollIntoView({ block: 'nearest' });
+            }
+            return false;
+        }
+        return types;
+    });
     if (!result) return;
     db.reminderTypes = result;
     await sync();
@@ -2542,24 +2614,12 @@ window.addMonitoringParameterTypeManagerRow = function() {
     if (!container) return;
     if (container.querySelector('.empty-state')) container.innerHTML = '';
     const row = document.createElement('div');
-    row.className = 'monitoring-type-manager-row';
-    row.innerHTML = `
-        <label><span>Name</span><input name="label" type="text" placeholder="e.g. Check INR"></label>
-        <label><span>Icon</span><input name="icon" type="text" maxlength="4" placeholder="INR"></label>
-        <label><span>Type</span><select name="vitalType">
-                <option value="custom">Custom / task only</option>
-                <option value="bp">Blood pressure / HR</option>
-                <option value="weight">Weight</option>
-                <option value="glucose">Blood glucose</option>
-                <option value="temperature">Temperature</option>
-                <option value="lab">Medication/lab monitoring</option>
-            </select></label>
-        <label><span>Color</span><input name="color" type="color" value="#f3f3ff"></label>
-        <label class="monitoring-type-hold-toggle"><input name="holdEnabled" type="checkbox"> Can hold meds</label>
-        <label><span>Hold value</span><input name="holdMetricLabel" type="text" placeholder="e.g. Peak flow"></label>
-        <label><span>Unit</span><input name="holdUnit" type="text" placeholder="L/min"></label>
-        <button type="button" onclick="this.closest('.monitoring-type-manager-row').remove()">Remove</button>`;
-    container.appendChild(row);
+    row.innerHTML = monitoringTypeManagerRowHtml();
+    const built = row.firstElementChild;
+    if (built) {
+        container.appendChild(built);
+        updateMonitoringTypeManagerRow(built.querySelector('[name="resultType"]'));
+    }
 };
 
 function scheduleReminderTemplate(schedule, type, source = {}) {
@@ -3098,7 +3158,7 @@ function careReminderLogFieldsHtml(reminder, targetType, now = new Date()) {
     } else if (targetType === 'med-monitor') {
         const profile = monitoringProfileById(member, String(reminder.type || '').slice('monitor:'.length));
         fields = profile
-            ? `<div class="field-row" style="margin-top:8px;">
+            ? `${profile.instructions ? `<div class="monitoring-instruction-banner"><strong>Collection instructions:</strong> ${escapeHtml(profile.instructions)}</div>` : ''}<div class="field-row" style="margin-top:8px;">
                     <label>${escapeHtml(profile.labName)}:</label><input name="monitorValue" type="number" step="any" style="width:90px;">
                     <span>${escapeHtml(profile.unit || 'value')}</span>
                     <span class="form-help">${escapeHtml(monitoringGoalText(profile))}</span>
@@ -3162,9 +3222,46 @@ function buildCareReminderReading(reminder, targetType, result) {
         reading.monitorUnit = profile.unit;
         reading.goalLow = profile.goalLow;
         reading.goalHigh = profile.goalHigh;
+        reading.criticalLow = profile.criticalLow;
+        reading.criticalHigh = profile.criticalHigh;
+        reading.providerId = profile.providerId || '';
         reading.medId = profile.medId || '';
+        const status = monitoringParameterNumericStatus({
+            targetLow: profile.goalLow,
+            targetHigh: profile.goalHigh,
+            criticalLow: profile.criticalLow,
+            criticalHigh: profile.criticalHigh
+        }, monitorValue);
+        reading.resultStatus = status.code;
+        reading.resultStatusLabel = status.label;
     }
     return { reading };
+}
+
+function monitoringParameterNumericStatus(parameterType, value) {
+    if (!Number.isFinite(value)) return { code: 'not-evaluated', label: 'Not evaluated', critical: false };
+    const criticalLow = parseAmount(parameterType?.criticalLow, NaN);
+    const criticalHigh = parseAmount(parameterType?.criticalHigh, NaN);
+    const targetLow = parseAmount(parameterType?.targetLow, NaN);
+    const targetHigh = parseAmount(parameterType?.targetHigh, NaN);
+    if ((Number.isFinite(criticalLow) && value < criticalLow) || (Number.isFinite(criticalHigh) && value > criticalHigh)) {
+        return { code: 'critical', label: 'Critical', critical: true };
+    }
+    if ((Number.isFinite(targetLow) && value < targetLow) || (Number.isFinite(targetHigh) && value > targetHigh)) {
+        return { code: 'outside-target', label: 'Outside target', critical: false };
+    }
+    if ([targetLow, targetHigh].some(Number.isFinite)) return { code: 'in-target', label: 'In target', critical: false };
+    return { code: 'documented', label: 'Documented', critical: false };
+}
+
+function monitoringParameterRangeText(parameterType) {
+    const low = parseAmount(parameterType?.targetLow, NaN);
+    const high = parseAmount(parameterType?.targetHigh, NaN);
+    const unit = parameterType?.unit || '';
+    if (Number.isFinite(low) && Number.isFinite(high)) return `Target ${formatAmount(low)}-${formatAmount(high)}${unit ? ` ${unit}` : ''}`;
+    if (Number.isFinite(low)) return `Target at or above ${formatAmount(low)}${unit ? ` ${unit}` : ''}`;
+    if (Number.isFinite(high)) return `Target at or below ${formatAmount(high)}${unit ? ` ${unit}` : ''}`;
+    return '';
 }
 
 window.logCareReminderReading = async function(id, scheduledDate = '', scheduledTime = '') {
@@ -3174,28 +3271,39 @@ window.logCareReminderReading = async function(id, scheduledDate = '', scheduled
     if (!['bp', 'weight', 'glucose', 'temperature', 'med-monitor'].includes(targetType)) {
         const parameterType = monitoringParameterTypeById(reminder.type, reminder.memberId);
         const holdCap = parameterType.holdCapability;
+        const resultType = parameterType.resultType || (holdCap?.enabled ? 'number' : 'task');
+        const rangeText = monitoringParameterRangeText(parameterType);
         const now = new Date();
         const result = await showActionModal(`Document ${careReminderTypeLabel(reminder.type, reminder.memberId)}`, `
             <div class="field-row">
                 <label>Date:</label><input name="date" type="date" value="${escapeHtml(localDateKey(now))}">
                 <label>Time:</label><input name="time" type="time" value="${escapeHtml(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`)}">
             </div>
-            ${holdCap?.enabled ? `<div class="field-row" style="margin-top:8px;">
-                <label>${escapeHtml(holdCap.metricLabel || parameterType.label || 'Value')}:</label>
+            ${parameterType.instructions ? `<div class="monitoring-instruction-banner"><strong>How to monitor:</strong> ${escapeHtml(parameterType.instructions)}</div>` : ''}
+            ${resultType === 'number' ? `<div class="field-row" style="margin-top:8px;">
+                <label>${escapeHtml(holdCap?.metricLabel || parameterType.label || 'Value')}:</label>
                 <input name="customValue" type="number" step="any" style="width:90px;">
-                <span>${escapeHtml(holdCap.unit || '')}</span>
+                <span>${escapeHtml(parameterType.unit || holdCap?.unit || '')}</span>
+                ${rangeText ? `<span class="monitoring-range-hint">${escapeHtml(rangeText)}</span>` : ''}
             </div>` : ''}
+            ${resultType === 'yes-no' ? `<div class="field-row" style="margin-top:8px;"><label>Result:</label><select name="customChoice"><option value="yes">Yes</option><option value="no">No</option></select></div>` : ''}
+            ${resultType === 'text' ? `<div class="field-row-stacked" style="margin-top:8px;"><label>Result:</label><input name="customText" type="text" placeholder="Enter result"></div>` : ''}
             <div class="field-row-stacked" style="margin-top:8px;">
                 <label>Note:</label>
                 <textarea name="notes" rows="3" style="width:100%; resize:none;" placeholder="Optional note, result, or follow-up">${escapeHtml(reminder.note || '')}</textarea>
             </div>
         `, 'Save Log');
         if (!result) return;
-        const customValue = holdCap?.enabled ? parseAmount(result.customValue, NaN) : 1;
-        if (holdCap?.enabled && !Number.isFinite(customValue)) {
-            await appAlert(`Enter a numeric value for ${holdCap.metricLabel || parameterType.label}.`);
+        const customValue = resultType === 'number' ? parseAmount(result.customValue, NaN) : 1;
+        if (resultType === 'number' && !Number.isFinite(customValue)) {
+            await appAlert(`Enter a numeric value for ${holdCap?.metricLabel || parameterType.label}.`);
             return;
         }
+        if (resultType === 'text' && !String(result.customText || '').trim()) {
+            await appAlert('Enter the monitoring result.');
+            return;
+        }
+        const status = resultType === 'number' ? monitoringParameterNumericStatus(parameterType, customValue) : { code: 'documented', label: 'Documented', critical: false };
         db.vitals.push({
             id: `vital_${Date.now()}_${Math.random().toString(16).slice(2)}`,
             memberId: reminder.memberId,
@@ -3208,13 +3316,19 @@ window.logCareReminderReading = async function(id, scheduledDate = '', scheduled
             sourceReminderScheduledDate: scheduledDate || '',
             sourceReminderScheduledTime: scheduledTime || '',
             value: customValue,
-            valueLabel: holdCap?.metricLabel || '',
-            valueUnit: holdCap?.unit || '',
+            textValue: resultType === 'yes-no' ? (result.customChoice || 'yes') : (resultType === 'text' ? String(result.customText || '').trim() : ''),
+            valueLabel: holdCap?.metricLabel || parameterType.label || '',
+            valueUnit: parameterType.unit || holdCap?.unit || '',
+            resultStatus: status.code,
+            resultStatusLabel: status.label,
             notes: result.notes || ''
         });
         addAudit('Monitoring parameter documented', careReminderTypeLabel(reminder.type, reminder.memberId), `${result.date || localDateKey(now)} ${result.time || ''}`);
         await sync();
         refreshMonitoringAfterLog(reminder.memberId);
+        if (status.critical) {
+            await appAlert(`${parameterType.label}: ${status.label}.${parameterType.escalation ? ` ${parameterType.escalation}` : ' Recheck the result and follow the documented clinical plan.'}`, 'Critical Monitoring Result');
+        }
         return;
     }
     const now = new Date();
@@ -3231,6 +3345,11 @@ window.logCareReminderReading = async function(id, scheduledDate = '', scheduled
     addAudit('Monitoring parameter documented', careReminderTypeLabel(reminder.type, reminder.memberId), `${built.reading.date} ${built.reading.time}`);
     await sync();
     refreshMonitoringAfterLog(reminder.memberId);
+    if (built.reading.resultStatus === 'critical') {
+        const member = db.family.find(item => item.id === reminder.memberId);
+        const profile = monitoringProfileById(member, built.reading.monitoringId);
+        await appAlert(`${profile?.labName || 'Monitoring result'} is critical.${profile?.escalation ? ` ${profile.escalation}` : ' Recheck the result and follow the documented clinical plan.'}`, 'Critical Monitoring Result');
+    }
 };
 
 function careReminderReadingLoggedForInstance(reminder, date, time) {
@@ -4569,7 +4688,11 @@ function showChildActionModal(title, bodyHtml, confirmText = 'OK', collectFn = n
             modal.remove();
             resolve(value);
         };
-        ok.onclick = () => cleanup(collectFn ? collectFn(body) : collectNamedInputs(body));
+        ok.onclick = async () => {
+            const value = collectFn ? await collectFn(body) : collectNamedInputs(body);
+            if (value === false) return;
+            cleanup(value);
+        };
         cancel.onclick = () => cleanup(null);
         close.onclick = () => cleanup(null);
     });
@@ -7758,7 +7881,7 @@ function renderMemberMonitoringProfiles(memberId = currentEditingMemberId) {
         return `<div class="med-item-row" style="font-size:11px;">
             <span>
                 <strong>${linkedMed ? '<span class="monitoring-linked-symbol" title="Linked to inventory medication">&#128279;</span>' : ''}${escapeHtml(profile.labName)}</strong> - ${escapeHtml(profile.medicationName)}
-                <br><small>${escapeHtml(monitoringGoalText(profile))}${linkedMed ? ` | Linked to ${escapeHtml(linkedMed.name)} administrations` : ''}</small>
+                <br><small>${escapeHtml(monitoringGoalText(profile))}${profile.providerId ? ` | ${escapeHtml(prescriberNameById(profile.providerId))}` : ''}${linkedMed ? ` | Linked to ${escapeHtml(linkedMed.name)} administrations` : ''}</small>
             </span>
             <span>
                 <button type="button" onclick="editMemberMonitoringProfile('${escapeHtml(profile.id)}')">Edit</button>
@@ -7796,6 +7919,19 @@ async function openMemberMonitoringEditor(profile = null) {
             <label>Goal low (optional):</label><input name="goalLow" type="number" step="any" style="width:70px;" placeholder="optional" value="${escapeHtml(profile?.goalLow ?? '')}">
             <label>Goal high (optional):</label><input name="goalHigh" type="number" step="any" style="width:70px;" placeholder="optional" value="${escapeHtml(profile?.goalHigh ?? '')}">
         </div>
+        <div class="field-row" style="margin-top:6px;">
+            <label>Critical below:</label><input name="criticalLow" type="number" step="any" style="width:70px;" placeholder="optional" value="${escapeHtml(profile?.criticalLow ?? '')}">
+            <label>Critical above:</label><input name="criticalHigh" type="number" step="any" style="width:70px;" placeholder="optional" value="${escapeHtml(profile?.criticalHigh ?? '')}">
+            <label>Responsible provider:</label><select name="providerId" style="min-width:180px;">${prescriberOptionsHtml(profile?.providerId || '', currentEditingMemberId, true)}</select>
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px;">
+            <label>How / when to collect:</label>
+            <input name="instructions" type="text" style="width:100%;" placeholder="e.g. Trough level immediately before morning dose" value="${escapeHtml(profile?.instructions || '')}">
+        </div>
+        <div class="field-row-stacked" style="margin-top:6px;">
+            <label>Critical result follow-up:</label>
+            <input name="escalation" type="text" style="width:100%;" placeholder="e.g. Recheck and call prescribing provider" value="${escapeHtml(profile?.escalation || '')}">
+        </div>
         <div class="field-row-stacked" style="margin-top:6px;">
             <label>Monitoring notes:</label>
             <textarea name="notes" rows="2" style="width:100%; resize:none;" placeholder="Optional monitoring instructions">${escapeHtml(profile?.notes || '')}</textarea>
@@ -7810,14 +7946,21 @@ async function openMemberMonitoringEditor(profile = null) {
     const goalHighRaw = String(result.goalHigh ?? '').trim();
     const goalLow = goalLowRaw ? parseAmount(goalLowRaw, NaN) : '';
     const goalHigh = goalHighRaw ? parseAmount(goalHighRaw, NaN) : '';
+    const criticalLowRaw = String(result.criticalLow ?? '').trim();
+    const criticalHighRaw = String(result.criticalHigh ?? '').trim();
+    const criticalLow = criticalLowRaw ? parseAmount(criticalLowRaw, NaN) : '';
+    const criticalHigh = criticalHighRaw ? parseAmount(criticalHighRaw, NaN) : '';
     if (!medicationName || !labName) {
         await appAlert('Medication name and lab/level name are required.');
         return null;
     }
     const hasLow = goalLow !== '' && Number.isFinite(goalLow);
     const hasHigh = goalHigh !== '' && Number.isFinite(goalHigh);
-    if ((goalLowRaw && !hasLow) || (goalHighRaw && !hasHigh) || (hasLow && hasHigh && goalHigh <= goalLow)) {
-        await appAlert('Enter valid optional goals. If both are entered, the high value must be greater than the low value.');
+    const hasCriticalLow = criticalLow !== '' && Number.isFinite(criticalLow);
+    const hasCriticalHigh = criticalHigh !== '' && Number.isFinite(criticalHigh);
+    if ((goalLowRaw && !hasLow) || (goalHighRaw && !hasHigh) || (hasLow && hasHigh && goalHigh <= goalLow)
+        || (criticalLowRaw && !hasCriticalLow) || (criticalHighRaw && !hasCriticalHigh) || (hasCriticalLow && hasCriticalHigh && criticalHigh <= criticalLow)) {
+        await appAlert('Enter valid optional goal and critical ranges. Each high value must be greater than its low value.');
         return null;
     }
     return {
@@ -7829,6 +7972,11 @@ async function openMemberMonitoringEditor(profile = null) {
         unit: String(result.unit || '').trim() || 'value',
         goalLow,
         goalHigh,
+        criticalLow,
+        criticalHigh,
+        providerId: result.providerId || '',
+        instructions: String(result.instructions || '').trim(),
+        escalation: String(result.escalation || '').trim(),
         notes: String(result.notes || '').trim()
     };
 }
@@ -8246,9 +8394,16 @@ function uniqueValues(values) {
     return Array.from(new Set((values || []).filter(Boolean)));
 }
 
-function linkRulesFromTargets(targetIds, mode) {
+function linkRulesFromTargets(targetIds, mode, options = {}) {
+    const followDelayMinutes = mode === 'followed-by'
+        ? Math.max(1, parseInt(options.followDelayMinutes, 10) || 0)
+        : 0;
     return mode
-        ? uniqueValues(targetIds).map(targetId => ({ targetId, mode }))
+        ? uniqueValues(targetIds).map(targetId => ({
+            targetId,
+            mode,
+            ...(mode === 'followed-by' ? { direction: 'before', followDelayMinutes } : {})
+        }))
         : [];
 }
 
@@ -8258,7 +8413,12 @@ function canonicalTargetLinkRules(schedule) {
         if (!rule.targetId) return;
         const existing = byTarget.get(rule.targetId);
         if (!existing || (!existing.mode && rule.mode)) {
-            byTarget.set(rule.targetId, { targetId: rule.targetId, mode: rule.mode || '' });
+            byTarget.set(rule.targetId, {
+                targetId: rule.targetId,
+                mode: rule.mode || '',
+                direction: rule.direction || '',
+                followDelayMinutes: Math.max(0, parseInt(rule.followDelayMinutes, 10) || 0)
+            });
         }
     });
     return Array.from(byTarget.values());
@@ -8267,7 +8427,9 @@ function canonicalTargetLinkRules(schedule) {
 function remappedScheduleLinkState(schedule, idMap = new Map()) {
     const rules = canonicalTargetLinkRules(schedule).map(rule => ({
         targetId: idMap.get(rule.targetId) || rule.targetId,
-        mode: rule.mode || ''
+        mode: rule.mode || '',
+        direction: rule.direction || '',
+        followDelayMinutes: Math.max(0, parseInt(rule.followDelayMinutes, 10) || 0)
     }));
     const targetIds = uniqueValues(rules.map(rule => rule.targetId));
     const modes = uniqueValues(rules.map(rule => rule.mode));
@@ -8289,7 +8451,9 @@ function scheduleLinkRules(schedule) {
                 rules.push({
                     targetId: rule.targetId || '',
                     targetRowId: rule.targetRowId || '',
-                    mode: rule.mode || schedule.linkMode || ''
+                    mode: rule.mode || schedule.linkMode || '',
+                    direction: rule.direction || '',
+                    followDelayMinutes: Math.max(0, parseInt(rule.followDelayMinutes, 10) || 0)
                 });
             }
         });
@@ -8312,7 +8476,7 @@ function scheduleLinkRules(schedule) {
     }
     const seen = new Set();
     return rules.filter(rule => {
-        const key = `${rule.targetId || ''}|${rule.targetRowId || ''}|${rule.mode || ''}`;
+        const key = `${rule.targetId || ''}|${rule.targetRowId || ''}|${rule.mode || ''}|${rule.direction || ''}|${rule.followDelayMinutes || 0}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -8344,6 +8508,50 @@ function scheduleLinkModeBetween(a, b) {
         return a.linkMode || b.linkMode || 'together';
     }
     return '';
+}
+
+function scheduleLinkRuleBetween(source, target) {
+    return scheduleLinkRules(source).find(rule => scheduleRuleTargets(rule, target, source))
+        || scheduleLinkRules(target).find(rule => scheduleRuleTargets(rule, source, target))
+        || null;
+}
+
+function followedByRelationshipBetween(a, b) {
+    const fromA = scheduleLinkRules(a).find(rule => scheduleRuleTargets(rule, b, a) && rule.mode === 'followed-by');
+    if (fromA) {
+        return {
+            predecessor: fromA.direction === 'after' ? b : a,
+            successor: fromA.direction === 'after' ? a : b,
+            followDelayMinutes: Math.max(1, parseInt(fromA.followDelayMinutes, 10) || 1)
+        };
+    }
+    const fromB = scheduleLinkRules(b).find(rule => scheduleRuleTargets(rule, a, b) && rule.mode === 'followed-by');
+    if (!fromB) return null;
+    return {
+        predecessor: fromB.direction === 'after' ? a : b,
+        successor: fromB.direction === 'after' ? b : a,
+        followDelayMinutes: Math.max(1, parseInt(fromB.followDelayMinutes, 10) || 1)
+    };
+}
+
+function followedByWouldCreateCycle(sourceId, targetId, candidates = null) {
+    if (!sourceId || !targetId || sourceId === targetId) return true;
+    const pool = candidates || [...db.schedules, ...pendingScheduleOrders];
+    const byId = new Map(pool.filter(Boolean).map(item => [item.id, item]));
+    const visited = new Set();
+    const queue = [targetId];
+    while (queue.length) {
+        const currentId = queue.shift();
+        if (currentId === sourceId) return true;
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
+        const current = byId.get(currentId);
+        if (!current) continue;
+        scheduleLinkRules(current)
+            .filter(rule => rule.mode === 'followed-by' && rule.direction !== 'after' && rule.targetId)
+            .forEach(rule => queue.push(rule.targetId));
+    }
+    return false;
 }
 
 function directScheduleLinkModeBetween(a, b) {
@@ -8435,68 +8643,136 @@ function scheduleLinkChoicesForModifier(schedule) {
     return [...activeChoices, ...linkedArchivedChoices];
 }
 
-function renderLinkChoicePanel(panel, choices, selected = [], pickerAction = '') {
+function renderLinkChoicePanel(panel, choices, selected = [], pickerAction = '', mode = '') {
     if (!panel) return;
     const choiceIds = new Set(choices.map(choice => choice.id));
     const selectedValues = uniqueValues(Array.isArray(selected) ? selected : (selected ? [selected] : []))
         .filter(value => choiceIds.has(value));
     panel.dataset.values = selectedValues.join(',');
     const selectedChoices = choices.filter(choice => selectedValues.includes(choice.id));
+    const effectiveMode = mode || panel.dataset.linkMode || '';
+    panel.dataset.linkMode = effectiveMode;
     const summary = selectedChoices.length
-        ? selectedChoices.map(choice => `<span class="link-choice-chip ${choice.isPending ? 'pending-link-choice' : ''}">${escapeHtml(choice.label)}</span>`).join('')
+        ? `<span class="link-choice-relation">${escapeHtml(linkModeLabel(effectiveMode))}</span>${selectedChoices.map(choice => `<span class="link-choice-chip ${choice.isPending ? 'pending-link-choice' : ''}">${escapeHtml(choice.label)}</span>`).join('')}`
         : '<span class="link-choice-empty">No linked medication</span>';
     const disabled = choices.length === 0 ? 'disabled' : '';
     panel.innerHTML = `
         <div class="link-choice-summary">${summary}</div>
-        <button type="button" class="link-choice-button" ${disabled} onclick="event.stopPropagation(); ${pickerAction}">Choose...</button>
+        <button type="button" class="link-choice-button" ${disabled} onclick="event.stopPropagation(); ${pickerAction}">Link Orders...</button>
     `;
 }
 
-async function chooseLinkedMedications(title, choices, selectedValues) {
-    if (choices.length === 0) {
-        await appAlert('There are no other medications available to link.');
-        return null;
-    }
-    const selected = new Set(uniqueValues(selectedValues));
-    const result = await showActionModal(title, `
-        <div class="form-help" style="margin-bottom:6px;">Check each medication that should be linked.</div>
-        <div class="sunken-panel link-picker-list">
-            ${choices.map((choice, index) => {
-                const inputId = `link-picker-${index}`;
-                return `<div class="link-picker-item ${choice.isPending ? 'pending-link-choice' : ''}" onclick="toggleLinkPickerCheckbox('${inputId}')">
-                    <input id="${inputId}" name="linkIds" type="checkbox" value="${escapeHtml(choice.id)}" ${selected.has(choice.id) ? 'checked' : ''} onclick="event.stopPropagation(); updateLinkPickerRow(this);">
-                    <span class="link-picker-check" aria-hidden="true"></span>
-                    <label for="${inputId}" onclick="event.stopPropagation();">${escapeHtml(choice.label)}</label>
-                </div>`;
-            }).join('')}
-        </div>
-    `, 'Apply');
-    if (!result) return null;
-    return result.linkIds || [];
+function linkRelationshipOptionsHtml(selectedMode = '') {
+    const modes = [
+        ['together', 'And', 'Both orders are due and move together.'],
+        ['choose-one', 'Or', 'Only one linked alternative is documented.'],
+        ['followed-by', 'Followed by', 'The selected order follows this order after a defined interval.']
+    ];
+    return modes.map(([value, label, detail]) => `<label class="link-type-choice ${selectedMode === value ? 'selected' : ''}">
+        <input name="linkMode" type="radio" value="${value}" ${selectedMode === value ? 'checked' : ''} onchange="updateLinkOrderDialog()">
+        <span><strong>${label}</strong><small>${detail}</small></span>
+    </label>`).join('');
 }
 
-async function chooseLinkedMedicationsChild(title, choices, selectedValues) {
+function linkOrderDialogHtml(choices, selectedValues, options = {}) {
+    const selected = new Set(uniqueValues(selectedValues));
+    const selectedMode = options.mode || 'together';
+    const delayMinutes = Math.max(1, parseInt(options.followDelayMinutes, 10) || 30);
+    const delayUnit = delayMinutes % 1440 === 0 ? 'days' : (delayMinutes % 60 === 0 ? 'hours' : 'minutes');
+    const delayAmount = delayUnit === 'days' ? delayMinutes / 1440 : (delayUnit === 'hours' ? delayMinutes / 60 : delayMinutes);
+    return `<div data-action-modal-size="wide" class="link-orders-dialog">
+        ${options.currentLabel ? `<div class="link-current-order"><strong>Current order</strong><span>${escapeHtml(options.currentLabel)}</span></div>` : ''}
+        <div data-link-order-error class="link-order-error" style="display:none;"></div>
+        <fieldset class="link-type-fieldset"><legend>Select link type</legend><div class="link-type-grid">${linkRelationshipOptionsHtml(selectedMode)}</div></fieldset>
+        <div data-follow-delay class="link-follow-delay" style="${selectedMode === 'followed-by' ? '' : 'display:none;'}">
+            <strong>Follow interval</strong>
+            <label>Selected order starts <input name="followDelayAmount" type="number" min="1" step="1" value="${escapeHtml(delayAmount)}">
+                <select name="followDelayUnit"><option value="minutes" ${delayUnit === 'minutes' ? 'selected' : ''}>minutes</option><option value="hours" ${delayUnit === 'hours' ? 'selected' : ''}>hours</option><option value="days" ${delayUnit === 'days' ? 'selected' : ''}>days</option></select> after this order</label>
+        </div>
+        <fieldset><legend>Select existing order</legend>
+            <div class="link-order-search-row"><input name="linkSearch" type="search" placeholder="Search medication, strength, frequency, or time" oninput="filterLinkOrderChoices(this.value)"><button type="button" onclick="filterLinkOrderChoices(this.previousElementSibling.value)">Search</button><button type="button" onclick="clearLinkOrderSelection()">Clear</button></div>
+            <div class="sunken-panel link-picker-list">
+                ${choices.map((choice, index) => {
+                    const inputId = `${options.child ? 'profile-' : ''}link-picker-${index}`;
+                    return `<div class="link-picker-item ${choice.isPending ? 'pending-link-choice' : ''}" data-link-search="${escapeHtml(choice.label.toLowerCase())}" onclick="toggleLinkPickerCheckbox('${inputId}')">
+                        <input id="${inputId}" name="linkIds" type="checkbox" value="${escapeHtml(choice.id)}" ${selected.has(choice.id) ? 'checked' : ''} onclick="event.stopPropagation(); updateLinkPickerRow(this);">
+                        <span class="link-picker-check" aria-hidden="true"></span>
+                        <label for="${inputId}" onclick="event.stopPropagation();">${escapeHtml(choice.label)}</label>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="form-help">Pending orders remain available here. Followed-by links accept one next order; And/Or links may include multiple orders.</div>
+        </fieldset>
+    </div>`;
+}
+
+function collectLinkOrderDialog(body) {
+    const showError = message => {
+        const error = body.querySelector('[data-link-order-error]');
+        if (error) {
+            error.textContent = message;
+            error.style.display = '';
+            error.scrollIntoView({ block: 'nearest' });
+        }
+        return false;
+    };
+    const mode = body.querySelector('input[name="linkMode"]:checked')?.value || '';
+    const linkIds = Array.from(body.querySelectorAll('input[name="linkIds"]:checked')).map(input => input.value);
+    if (!mode) return showError('Choose And, Or, or Followed by.');
+    if (!linkIds.length) return showError('Select at least one order to link.');
+    if (mode === 'followed-by' && linkIds.length !== 1) return showError('Followed by links require exactly one next order.');
+    const amount = parseInt(body.querySelector('[name="followDelayAmount"]')?.value, 10);
+    const unit = body.querySelector('[name="followDelayUnit"]')?.value || 'minutes';
+    if (mode === 'followed-by' && (!Number.isInteger(amount) || amount < 1)) return showError('Enter how long after this order the selected order should follow.');
+    const multiplier = unit === 'days' ? 1440 : (unit === 'hours' ? 60 : 1);
+    return { linkIds, linkMode: mode, followDelayMinutes: mode === 'followed-by' ? amount * multiplier : 0 };
+}
+
+async function chooseLinkedMedications(title, choices, selectedValues, options = {}) {
     if (choices.length === 0) {
         await appAlert('There are no other medications available to link.');
         return null;
     }
-    const selected = new Set(uniqueValues(selectedValues));
-    const result = await showChildActionModal(title, `
-        <div class="form-help" style="margin-bottom:6px;">Check each medication that should be linked to this order.</div>
-        <div class="sunken-panel link-picker-list">
-            ${choices.map((choice, index) => {
-                const inputId = `profile-link-picker-${index}`;
-                return `<div class="link-picker-item ${choice.isPending ? 'pending-link-choice' : ''}" onclick="toggleLinkPickerCheckbox('${inputId}')">
-                    <input id="${inputId}" name="linkIds" type="checkbox" value="${escapeHtml(choice.id)}" ${selected.has(choice.id) ? 'checked' : ''} onclick="event.stopPropagation(); updateLinkPickerRow(this);">
-                    <span class="link-picker-check" aria-hidden="true"></span>
-                    <label for="${inputId}" onclick="event.stopPropagation();">${escapeHtml(choice.label)}</label>
-                </div>`;
-            }).join('')}
-        </div>
-    `, 'Apply');
-    if (!result) return null;
-    return result.linkIds || [];
+    return showActionModal(title, linkOrderDialogHtml(choices, selectedValues, options), 'Accept', collectLinkOrderDialog);
 }
+
+async function chooseLinkedMedicationsChild(title, choices, selectedValues, options = {}) {
+    if (choices.length === 0) {
+        await appAlert('There are no other medications available to link.');
+        return null;
+    }
+    return showChildActionModal(title, linkOrderDialogHtml(choices, selectedValues, { ...options, child: true }), 'Accept', collectLinkOrderDialog);
+}
+
+window.filterLinkOrderChoices = function(query = '') {
+    const body = document.querySelector('.child-action-modal .link-orders-dialog') || document.querySelector('#action-modal-body .link-orders-dialog');
+    if (!body) return;
+    const search = String(query || '').trim().toLowerCase();
+    body.querySelectorAll('.link-picker-item').forEach(row => {
+        row.style.display = !search || (row.dataset.linkSearch || '').includes(search) ? '' : 'none';
+    });
+};
+
+window.clearLinkOrderSelection = function() {
+    const body = document.querySelector('.child-action-modal .link-orders-dialog') || document.querySelector('#action-modal-body .link-orders-dialog');
+    body?.querySelectorAll('input[name="linkIds"]:checked').forEach(input => {
+        input.checked = false;
+        updateLinkPickerRow(input);
+    });
+};
+
+window.updateLinkOrderDialog = function() {
+    const body = document.querySelector('.child-action-modal .link-orders-dialog') || document.querySelector('#action-modal-body .link-orders-dialog');
+    if (!body) return;
+    const mode = body.querySelector('input[name="linkMode"]:checked')?.value || '';
+    body.querySelectorAll('.link-type-choice').forEach(choice => choice.classList.toggle('selected', !!choice.querySelector('input:checked')));
+    const delay = body.querySelector('[data-follow-delay]');
+    if (delay) delay.style.display = mode === 'followed-by' ? '' : 'none';
+    if (mode === 'followed-by') {
+        const checked = Array.from(body.querySelectorAll('input[name="linkIds"]:checked'));
+        checked.slice(1).forEach(input => { input.checked = false; updateLinkPickerRow(input); });
+    }
+};
 
 window.updateLinkPickerRow = function(input) {
     input?.closest('.link-picker-item')?.classList.toggle('checked', !!input.checked);
@@ -8506,6 +8782,15 @@ window.toggleLinkPickerCheckbox = function(inputId) {
     const input = document.getElementById(inputId);
     if (!input) return;
     input.checked = !input.checked;
+    const body = input.closest('.link-orders-dialog');
+    const followedBy = body?.querySelector('input[name="linkMode"]:checked')?.value === 'followed-by';
+    if (input.checked && followedBy) {
+        body.querySelectorAll('input[name="linkIds"]:checked').forEach(other => {
+            if (other === input) return;
+            other.checked = false;
+            updateLinkPickerRow(other);
+        });
+    }
     updateLinkPickerRow(input);
 };
 
@@ -8515,7 +8800,8 @@ window.renderScheduleLinkOptions = function(selected = '') {
     const memberId = document.getElementById('select-member')?.value || '';
     const selectedValues = Array.isArray(selected) ? selected : (selected ? [selected] : selectedOptionValues(panel));
     const choices = scheduleLinkChoices(memberId);
-    renderLinkChoicePanel(panel, choices, selectedValues, 'openScheduleLinkPicker()');
+    const mode = document.getElementById('sched-link-mode')?.value || panel.dataset.linkMode || '';
+    renderLinkChoicePanel(panel, choices, selectedValues, 'openScheduleLinkPicker()', mode);
 };
 
 window.openScheduleLinkPicker = async function() {
@@ -8523,9 +8809,17 @@ window.openScheduleLinkPicker = async function() {
     if (!panel) return;
     const memberId = document.getElementById('select-member')?.value || '';
     const choices = scheduleLinkChoices(memberId);
-    const selected = await chooseLinkedMedications('Choose Linked Medications', choices, selectedOptionValues(panel));
-    if (selected === null) return;
-    renderScheduleLinkOptions(selected);
+    const modeSelect = document.getElementById('sched-link-mode');
+    const result = await chooseLinkedMedications('Link Orders', choices, selectedOptionValues(panel), {
+        mode: modeSelect?.value || panel.dataset.linkMode || 'together',
+        followDelayMinutes: panel.dataset.followDelayMinutes,
+        currentLabel: 'Medication order being scheduled'
+    });
+    if (!result) return;
+    if (modeSelect) modeSelect.value = result.linkMode;
+    panel.dataset.linkMode = result.linkMode;
+    panel.dataset.followDelayMinutes = String(result.followDelayMinutes || 0);
+    renderScheduleLinkOptions(result.linkIds);
 };
 
 window.openModifierLinkPicker = async function() {
@@ -8534,10 +8828,18 @@ window.openModifierLinkPicker = async function() {
     const schedule = db.schedules.find(item => item.id === (panel.dataset.excludeId || ''));
     const choices = schedule ? scheduleLinkChoicesForModifier(schedule) : scheduleLinkChoices(panel.dataset.memberId || '', panel.dataset.excludeId || '');
     const previous = selectedOptionValues(panel).sort();
-    const selected = await chooseLinkedMedications('Choose Linked Medications', choices, previous);
-    if (selected === null) return;
-    renderLinkChoicePanel(panel, choices, selected, 'openModifierLinkPicker()');
-    if (JSON.stringify(previous) !== JSON.stringify([...selected].sort())) panel.dataset.linksEdited = 'true';
+    const modeSelect = document.getElementById('mod-link-mode');
+    const result = await chooseLinkedMedications('Link Orders', choices, previous, {
+        mode: modeSelect?.value || panel.dataset.linkMode || 'together',
+        followDelayMinutes: panel.dataset.followDelayMinutes,
+        currentLabel: scheduleMedicationLabel(schedule)
+    });
+    if (!result) return;
+    if (modeSelect) modeSelect.value = result.linkMode;
+    panel.dataset.linkMode = result.linkMode;
+    panel.dataset.followDelayMinutes = String(result.followDelayMinutes || 0);
+    renderLinkChoicePanel(panel, choices, result.linkIds, 'openModifierLinkPicker()', result.linkMode);
+    if (JSON.stringify(previous) !== JSON.stringify([...result.linkIds].sort()) || result.linkMode !== (schedule?.linkMode || '')) panel.dataset.linksEdited = 'true';
     renderModifierLinkedTimingImpact();
 };
 
@@ -8555,13 +8857,13 @@ window.renderModifierLinkedTimingImpact = function() {
     const panel = document.getElementById('mod-link-target');
     const linksEdited = panel?.dataset.linksEdited === 'true';
     const mode = document.getElementById('mod-link-mode')?.value || '';
-    const targetIds = ['together', 'choose-one'].includes(mode) ? selectedOptionValues(panel) : [];
+    const targetIds = ['together', 'choose-one', 'followed-by'].includes(mode) ? selectedOptionValues(panel) : [];
     const preview = linksEdited ? {
         ...schedule,
         linkMode: mode,
         linkTargetIds: targetIds,
         linkTargetId: targetIds[0] || '',
-        linkRules: linkRulesFromTargets(targetIds, mode)
+        linkRules: linkRulesFromTargets(targetIds, mode, { followDelayMinutes: panel?.dataset.followDelayMinutes })
     } : schedule;
     const candidates = db.schedules
         .filter(item => item.memberId === schedule.memberId)
@@ -8616,7 +8918,17 @@ function linkedTimingImpactHtml(schedule, candidates = null) {
 }
 
 function linkModeLabel(mode) {
-    return mode === 'choose-one' ? 'choose one' : 'together';
+    if (mode === 'choose-one') return 'Or';
+    if (mode === 'followed-by') return 'Followed by';
+    if (mode === 'together') return 'And';
+    return 'Linked';
+}
+
+function linkModeLabelForPair(schedule, linked) {
+    const mode = scheduleLinkModeBetween(schedule, linked);
+    if (mode !== 'followed-by') return linkModeLabel(mode);
+    const relationship = followedByRelationshipBetween(schedule, linked);
+    return relationship?.predecessor?.id === schedule.id ? 'Followed by' : 'Follows';
 }
 
 function linkedBadgeHtml(schedule, candidates = null) {
@@ -8631,7 +8943,7 @@ function linkedDetailsHtml(schedule, candidates = null) {
     return `<details class="linked-med-details" onclick="event.stopPropagation()">
         <summary>${linkedBadgeHtml(schedule, candidates)} Linked medication${linked.length === 1 ? '' : 's'}</summary>
         <div class="linked-med-list">
-            ${linked.map(item => `<div><strong>${escapeHtml(linkModeLabel(scheduleLinkModeBetween(schedule, item)))}</strong>: ${escapeHtml(scheduleMedicationLabel(item))}</div>`).join('')}
+            ${linked.map(item => `<div><strong>${escapeHtml(linkModeLabelForPair(schedule, item))}</strong>: ${escapeHtml(scheduleMedicationLabel(item))}</div>`).join('')}
         </div>
     </details>`;
 }
@@ -8706,8 +9018,16 @@ function normalizeScheduleLinkRelationships() {
             if (!target || target.id === source.id || target.memberId !== source.memberId || !rule.mode) return;
             const ids = [source.id, target.id].sort();
             const key = ids.join('|');
-            if (!pairs.has(key)) pairs.set(key, { ids, modes: new Set() });
-            pairs.get(key).modes.add(rule.mode);
+            if (!pairs.has(key)) pairs.set(key, { ids, modes: new Set(), followedBy: null });
+            const pair = pairs.get(key);
+            pair.modes.add(rule.mode);
+            if (rule.mode === 'followed-by' && !pair.followedBy) {
+                pair.followedBy = {
+                    predecessorId: rule.direction === 'after' ? target.id : source.id,
+                    successorId: rule.direction === 'after' ? source.id : target.id,
+                    followDelayMinutes: Math.max(1, parseInt(rule.followDelayMinutes, 10) || 1)
+                };
+            }
         });
     });
     schedules.forEach(schedule => {
@@ -8716,8 +9036,20 @@ function normalizeScheduleLinkRelationships() {
         pairs.forEach(pair => {
             if (!pair.ids.includes(schedule.id)) return;
             const pairModes = [...pair.modes];
-            const resolvedMode = pairModes.includes('together') ? 'together' : pairModes[0];
-            idRules.push({ targetId: pair.ids.find(id => id !== schedule.id), mode: resolvedMode });
+            const resolvedMode = pairModes.includes('together')
+                ? 'together'
+                : (pairModes.includes('followed-by') ? 'followed-by' : pairModes[0]);
+            const targetId = pair.ids.find(id => id !== schedule.id);
+            if (resolvedMode === 'followed-by' && pair.followedBy) {
+                idRules.push({
+                    targetId,
+                    mode: resolvedMode,
+                    direction: schedule.id === pair.followedBy.predecessorId ? 'before' : 'after',
+                    followDelayMinutes: pair.followedBy.followDelayMinutes
+                });
+            } else {
+                idRules.push({ targetId, mode: resolvedMode });
+            }
         });
         schedule.linkRules = [...rowRules, ...idRules];
         schedule.linkTargetIds = idRules.map(rule => rule.targetId);
@@ -8726,9 +9058,11 @@ function normalizeScheduleLinkRelationships() {
         if (idRules.length) {
             schedule.linkMode = modes.length === 1 ? modes[0] : '';
             schedule.linkGroup = linkGroupFromTarget([schedule.id, ...schedule.linkTargetIds].sort()[0]);
+            schedule.linkFollowDelayMinutes = Math.max(0, parseInt(idRules.find(rule => rule.mode === 'followed-by')?.followDelayMinutes, 10) || 0);
         } else if (!rowRules.length) {
             schedule.linkMode = '';
             schedule.linkGroup = '';
+            schedule.linkFollowDelayMinutes = 0;
         }
     });
     schedules.forEach(schedule => {
@@ -9739,6 +10073,9 @@ window.openOrderModifier = function(scheduleId) {
         sched,
         db.schedules.filter(candidate => candidate.memberId === sched.memberId && candidate.id !== sched.id)
     );
+    const currentLinkedModes = uniqueValues(currentLinkedSchedules.map(linked => scheduleLinkModeBetween(sched, linked)));
+    const currentLinkMode = currentLinkedModes.length > 1 ? 'mixed' : (sched.linkMode || currentLinkedModes[0] || '');
+    document.getElementById('mod-link-mode').value = currentLinkMode;
     if (modLinkTarget) {
         const choices = scheduleLinkChoicesForModifier(sched);
         const selectedLinks = new Set(uniqueValues([
@@ -9753,12 +10090,10 @@ window.openOrderModifier = function(scheduleId) {
         modLinkTarget.dataset.memberId = sched.memberId;
         modLinkTarget.dataset.excludeId = sched.id;
         modLinkTarget.dataset.linksEdited = 'false';
-        renderLinkChoicePanel(modLinkTarget, choices, selected, 'openModifierLinkPicker()');
+        const followedRule = scheduleLinkRules(sched).find(rule => rule.mode === 'followed-by');
+        modLinkTarget.dataset.followDelayMinutes = String(followedRule?.followDelayMinutes || 0);
+        renderLinkChoicePanel(modLinkTarget, choices, selected, 'openModifierLinkPicker()', currentLinkMode);
     }
-    const currentLinkedModes = uniqueValues(currentLinkedSchedules.map(linked => scheduleLinkModeBetween(sched, linked)));
-    document.getElementById('mod-link-mode').value = currentLinkedModes.length > 1
-        ? 'mixed'
-        : (sched.linkMode || currentLinkedModes[0] || '');
     if (scheduleTimingFrequency(sched) !== 'CUSTOM') document.getElementById('mod-custom-schedule').innerHTML = '';
     renderFrequencyControls(
         'mod',
@@ -9860,23 +10195,33 @@ window.saveOrderModification = async function() {
         const linksEdited = modLinkPanel?.dataset.linksEdited === 'true';
         const linkTargetIds = selectedOptionValues(modLinkPanel);
         const linkMode = document.getElementById('mod-link-mode')?.value || '';
+        const validLinkModes = ['together', 'choose-one', 'followed-by'];
+        const followDelayMinutes = linkMode === 'followed-by'
+            ? Math.max(1, parseInt(modLinkPanel?.dataset.followDelayMinutes, 10) || 0)
+            : 0;
         const targetChoice = scheduleLinkChoicesForModifier(sched).find(choice => choice.id === linkTargetIds[0]);
         if (linksEdited) {
-            if (linkTargetIds.length > 0 && !['together', 'choose-one'].includes(linkMode)) {
+            if (linkTargetIds.length > 0 && !validLinkModes.includes(linkMode)) {
                 Object.assign(sched, beforeModification);
-                await appAlert('Choose what the medication link means: must take together or choose only one.');
+                await appAlert('Choose what the medication link means: And, Or, or Followed by.');
                 return;
             }
-            if (['together', 'choose-one'].includes(linkMode) && linkTargetIds.length === 0) {
+            if (validLinkModes.includes(linkMode) && linkTargetIds.length === 0) {
                 Object.assign(sched, beforeModification);
                 await appAlert('Select the medication this one is linked to.');
                 return;
             }
+            if (linkMode === 'followed-by' && (linkTargetIds.length !== 1 || !followDelayMinutes || followedByWouldCreateCycle(sched.id, linkTargetIds[0]))) {
+                Object.assign(sched, beforeModification);
+                await appAlert('Followed by requires one next order, a valid follow interval, and a chain without circular links.');
+                return;
+            }
             removeScheduleLinkReferences(sched.id);
-            sched.linkMode = ['together', 'choose-one'].includes(linkMode) ? linkMode : '';
+            sched.linkMode = validLinkModes.includes(linkMode) ? linkMode : '';
             sched.linkTargetIds = sched.linkMode ? linkTargetIds : [];
             sched.linkTargetId = sched.linkMode ? (linkTargetIds[0] || '') : '';
-            sched.linkRules = linkRulesFromTargets(linkTargetIds, sched.linkMode);
+            sched.linkRules = linkRulesFromTargets(linkTargetIds, sched.linkMode, { followDelayMinutes });
+            sched.linkFollowDelayMinutes = followDelayMinutes;
             sched.linkGroup = sched.linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
         }
         sched.qodStart = frequencyDetails.timingFreq === 'QOD' ? (document.getElementById('mod-qod-start-date').value || sched.startDate) : "";
@@ -11420,7 +11765,7 @@ function orderSetRowPreviewItem(row, index) {
         instructions: row.querySelector('.os-instructions')?.value.trim() || '',
         instances: regimenReportInstancesForSchedule(reportSchedule, header.startDate, header.endDate, index),
         linkText: linkMode && linkTargets.length
-            ? `${linkMode === 'together' ? 'Take together with' : 'Choose only one from'}: ${linkTargets.join(', ')}`
+            ? `${linkMode === 'together' ? 'Take together with' : (linkMode === 'followed-by' ? 'Followed by' : 'Choose only one from')}: ${linkTargets.join(', ')}`
             : ''
     };
 }
@@ -11713,6 +12058,7 @@ window.addOrderSetMedicationRow = function(item = null) {
     row.dataset.rowId = item?.rowId || `osrow_${++orderSetRowCounter}`;
     row.dataset.linkTargetRowId = item?.linkTargetRowId || '';
     row.dataset.linkTargetRowIds = uniqueValues(item?.linkTargetRowIds?.length ? item.linkTargetRowIds : (item?.linkTargetRowId ? [item.linkTargetRowId] : [])).join(',');
+    row.dataset.followDelayMinutes = String(item?.linkFollowDelayMinutes || scheduleLinkRules(item).find(rule => rule.mode === 'followed-by')?.followDelayMinutes || 0);
     row.innerHTML = `
         <div class="regimen-med-row-title">
             <span class="regimen-med-row-badge">${escapeHtml(selectedMed?.name ? selectedMed.name.charAt(0).toUpperCase() : '+')}</span>
@@ -11773,8 +12119,9 @@ window.addOrderSetMedicationRow = function(item = null) {
             <label>Meaning:</label>
             <select class="os-link-mode">
                 <option value="" ${!item?.linkMode ? 'selected' : ''}>None</option>
-                <option value="together" ${item?.linkMode === 'together' ? 'selected' : ''}>Must take together</option>
-                <option value="choose-one" ${item?.linkMode === 'choose-one' ? 'selected' : ''}>Choose only one</option>
+                <option value="together" ${item?.linkMode === 'together' ? 'selected' : ''}>And - take together</option>
+                <option value="choose-one" ${item?.linkMode === 'choose-one' ? 'selected' : ''}>Or - choose one</option>
+                <option value="followed-by" ${item?.linkMode === 'followed-by' ? 'selected' : ''}>Followed by</option>
             </select>
         </div>
         <div class="regimen-notes-grid">
@@ -11829,7 +12176,8 @@ function renderOrderSetLinkOptions() {
         const choices = rows
             .filter(candidate => candidate !== row)
             .map(candidate => ({ id: candidate.dataset.rowId, label: orderSetRowLabel(candidate) }));
-        renderLinkChoicePanel(panel, choices, selected, `openOrderSetLinkPicker('${row.dataset.rowId}')`);
+        const mode = row.querySelector('.os-link-mode')?.value || panel.dataset.linkMode || '';
+        renderLinkChoicePanel(panel, choices, selected, `openOrderSetLinkPicker('${row.dataset.rowId}')`, mode);
     });
 }
 
@@ -11841,10 +12189,22 @@ window.openOrderSetLinkPicker = async function(rowId) {
     const choices = rows
         .filter(candidate => candidate !== row)
         .map(candidate => ({ id: candidate.dataset.rowId, label: orderSetRowLabel(candidate) }));
-    const selected = await chooseLinkedMedications('Choose Linked Regimen Medications', choices, selectedOptionValues(row.querySelector('.os-link-target')));
-    if (selected === null) return;
-    row.dataset.linkTargetRowIds = selected.join(',');
-    row.dataset.linkTargetRowId = selected[0] || '';
+    const panel = row.querySelector('.os-link-target');
+    const modeSelect = row.querySelector('.os-link-mode');
+    const result = await chooseLinkedMedications('Link Regimen Orders', choices, selectedOptionValues(panel), {
+        mode: modeSelect?.value || panel?.dataset.linkMode || 'together',
+        followDelayMinutes: panel?.dataset.followDelayMinutes,
+        currentLabel: orderSetRowLabel(row)
+    });
+    if (!result) return;
+    row.dataset.linkTargetRowIds = result.linkIds.join(',');
+    row.dataset.linkTargetRowId = result.linkIds[0] || '';
+    row.dataset.followDelayMinutes = String(result.followDelayMinutes || 0);
+    if (panel) {
+        panel.dataset.linkMode = result.linkMode;
+        panel.dataset.followDelayMinutes = String(result.followDelayMinutes || 0);
+    }
+    if (modeSelect) modeSelect.value = result.linkMode;
     renderOrderSetLinkOptions();
     renderOrderSetBuilderSummary();
 };
@@ -12022,13 +12382,25 @@ function collectOrderSetItem(row) {
     }
     const selectedLinkTargetRowIds = selectedOptionValues(row.querySelector('.os-link-target'));
     const linkMode = row.querySelector('.os-link-mode')?.value || '';
+    const validLinkModes = ['together', 'choose-one', 'followed-by'];
+    const followDelayMinutes = linkMode === 'followed-by'
+        ? Math.max(1, parseInt(row.dataset.followDelayMinutes || row.querySelector('.os-link-target')?.dataset.followDelayMinutes, 10) || 0)
+        : 0;
     const linkTargetRowIds = linkMode ? selectedLinkTargetRowIds : [];
-    if (selectedLinkTargetRowIds.length > 0 && !linkMode) {
-        return { error: "Choose what the regimen medication link means: must take together or choose only one." };
+    if (selectedLinkTargetRowIds.length > 0 && !validLinkModes.includes(linkMode)) {
+        return { error: "Choose what the regimen medication link means: And, Or, or Followed by." };
     }
     if (linkMode && linkTargetRowIds.length === 0) {
         return { error: "Linked regimen medications need another medication selected." };
     }
+    if (linkMode === 'followed-by' && (linkTargetRowIds.length !== 1 || !followDelayMinutes)) {
+        return { error: "Followed by requires one next regimen order and a valid follow interval." };
+    }
+    const linkRowRules = linkTargetRowIds.map(targetRowId => ({
+        targetRowId,
+        mode: linkMode,
+        ...(linkMode === 'followed-by' ? { direction: 'before', followDelayMinutes } : {})
+    }));
     if (timingFreq === 'QXH') {
         if (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24 || !rawTimes[0]) {
             return { error: "Every X Hours rows need a valid interval and start time." };
@@ -12054,7 +12426,8 @@ function collectOrderSetItem(row) {
             linkTargetRowId: linkTargetRowIds[0] || '',
             linkGroup: '',
             linkMode: row.querySelector('.os-link-mode')?.value || '',
-            linkRules: linkTargetRowIds.map(targetRowId => ({ targetRowId, mode: linkMode })),
+            linkRules: linkRowRules,
+            linkFollowDelayMinutes: followDelayMinutes,
             indication: row.querySelector('.os-indication')?.value.trim() || '',
             instructions: row.querySelector('.os-instructions').value
         };
@@ -12088,7 +12461,8 @@ function collectOrderSetItem(row) {
                 linkTargetRowId: linkTargetRowIds[0] || '',
                 linkGroup: '',
                 linkMode,
-                linkRules: linkTargetRowIds.map(targetRowId => ({ targetRowId, mode: linkMode })),
+                linkRules: linkRowRules,
+                linkFollowDelayMinutes: followDelayMinutes,
                 indication: row.querySelector('.os-indication')?.value.trim() || '',
                 instructions: row.querySelector('.os-instructions').value
             };
@@ -12130,7 +12504,8 @@ function collectOrderSetItem(row) {
         linkTargetRowId: linkTargetRowIds[0] || '',
         linkGroup: '',
         linkMode: row.querySelector('.os-link-mode')?.value || '',
-        linkRules: linkTargetRowIds.map(targetRowId => ({ targetRowId, mode: linkMode })),
+        linkRules: linkRowRules,
+        linkFollowDelayMinutes: followDelayMinutes,
         indication: row.querySelector('.os-indication')?.value.trim() || '',
         instructions: row.querySelector('.os-instructions').value
     };
@@ -12178,6 +12553,7 @@ function orderSetItemToSchedule(orderSet, item, index, existingSchedule = null) 
         linkTargetRowIds: item.linkTargetRowIds || (item.linkTargetRowId ? [item.linkTargetRowId] : []),
         linkTargetRowId: item.linkTargetRowId || '',
         linkRules: item.linkRules || [],
+        linkFollowDelayMinutes: Math.max(0, parseInt(item.linkFollowDelayMinutes, 10) || 0),
         monitoringHoldRule: orderSet.monitoringHoldRule || null,
         rollingAnchorDate: existingSchedule?.rollingAnchorDate || '',
         rollingAnchorTime: existingSchedule?.rollingAnchorTime || ''
@@ -12220,7 +12596,14 @@ function resolveOrderSetItemLinks(items) {
         const target = byRowId.get(item.linkTargetRowId);
         const group = `regimen-link-${target.rowId}`;
         item.linkGroup = group;
-        item.linkRules = item.linkTargetRowIds.map(targetRowId => ({ targetRowId, mode: item.linkMode }));
+        item.linkRules = item.linkTargetRowIds.map(targetRowId => ({
+            targetRowId,
+            mode: item.linkMode,
+            ...(item.linkMode === 'followed-by' ? {
+                direction: 'before',
+                followDelayMinutes: Math.max(1, parseInt(item.linkFollowDelayMinutes, 10) || 1)
+            } : {})
+        }));
     });
     return items;
 }
@@ -12529,7 +12912,7 @@ function regimenLinkedDetailsText(item, sourceItems) {
     if (!linked.length) return '';
     const modeText = item.linkMode === 'choose-one'
         ? 'Choose only one with'
-        : 'Take together with';
+        : (item.linkMode === 'followed-by' ? 'Followed by' : 'Take together with');
     const names = linked.map(linkedItem => {
         const med = db.inventory.find(candidate => candidate.id === linkedItem.medId);
         return med ? med.name : 'Linked medication';
@@ -17369,6 +17752,11 @@ function formatVitalReading(reading) {
         const profile = monitoringDetailsForReading(reading, member);
         return `${formatAmount(parseAmount(reading.monitorValue))} ${profile.unit || 'value'}`;
     }
+    if (reading.customReminderType) {
+        const numeric = parseAmount(reading.value, NaN);
+        const result = reading.textValue || (Number.isFinite(numeric) ? `${formatAmount(numeric)}${reading.valueUnit ? ` ${reading.valueUnit}` : ''}` : 'Completed');
+        return `${result}${reading.resultStatusLabel ? ` - ${reading.resultStatusLabel}` : ''}`;
+    }
     return '';
 }
 
@@ -17406,6 +17794,7 @@ function isVitalOutOfRange(reading, member) {
             (Number.isFinite(high) && value > high)
         );
     }
+    if (reading.customReminderType) return ['critical', 'outside-target'].includes(reading.resultStatus || '');
     return false;
 }
 
@@ -20803,10 +21192,16 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
     const selectedLinkTargetIds = selectedOptionValues(document.getElementById('sched-link-target'));
     const linkMode = document.getElementById('sched-link-mode')?.value || '';
     const linkTargetIds = linkMode ? selectedLinkTargetIds : [];
+    const validLinkModes = ['together', 'choose-one', 'followed-by'];
+    const followDelayMinutes = linkMode === 'followed-by'
+        ? Math.max(1, parseInt(document.getElementById('sched-link-target')?.dataset.followDelayMinutes, 10) || 0)
+        : 0;
     const targetChoice = scheduleLinkChoices(memberId).find(choice => choice.id === linkTargetIds[0]);
     const linkGroup = linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
-    if (selectedLinkTargetIds.length > 0 && !linkMode) return void appAlert("Choose what the medication link means: must take together or choose only one.");
+    if (selectedLinkTargetIds.length > 0 && !validLinkModes.includes(linkMode)) return void appAlert("Choose what the medication link means: And, Or, or Followed by.");
     if (linkMode && linkTargetIds.length === 0) return void appAlert("Select the medication this one is linked to.");
+    if (linkMode === 'followed-by' && (linkTargetIds.length !== 1 || !followDelayMinutes)) return void appAlert('Followed by requires one next order and a follow interval.');
+    if (linkMode === 'followed-by' && followedByWouldCreateCycle(id, linkTargetIds[0])) return void appAlert('This Followed by link would create a circular order chain. Choose a different next order.');
 
     const schedule = {
         id,
@@ -20823,7 +21218,8 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
         linkMode,
         linkTargetIds,
         linkTargetId: linkTargetIds[0] || '',
-        linkRules: linkRulesFromTargets(linkTargetIds, linkMode),
+        linkRules: linkRulesFromTargets(linkTargetIds, linkMode, { followDelayMinutes }),
+        linkFollowDelayMinutes: followDelayMinutes,
         qodStart: frequencyDetails.timingFreq === 'QOD' ? (document.getElementById('qod-start-date').value || startDate) : "",
         times: frequencyDetails.times,
         customTimesByWeekday: frequencyDetails.customTimesByWeekday || {},
@@ -20870,6 +21266,8 @@ function clearScheduleEntryFields() {
     const linkTarget = document.getElementById('sched-link-target');
     if (linkTarget) {
         linkTarget.dataset.values = '';
+        linkTarget.dataset.linkMode = '';
+        linkTarget.dataset.followDelayMinutes = '0';
         linkTarget.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
     }
     const linkMode = document.getElementById('sched-link-mode');
@@ -21322,6 +21720,7 @@ function applyScheduleDraftToExisting(draft, target) {
         linkTargetIds: draft.linkTargetIds || [],
         linkTargetId: draft.linkTargetId || '',
         linkRules: draft.linkRules || [],
+        linkFollowDelayMinutes: Math.max(0, parseInt(draft.linkFollowDelayMinutes, 10) || 0),
         monitoringReminders: draft.monitoringReminders || [],
         monitoringReminderNote: draft.monitoringReminderNote || '',
         monitoringReminderSchedule: draft.monitoringReminderSchedule || null,
@@ -21351,12 +21750,22 @@ function applyScheduleDraftToOrderSetItem(draft, targetSchedule, beforeSchedule 
         .filter(schedule => schedule.orderSetId === set.id && schedule.rowId)
         .map(schedule => [schedule.id, schedule.rowId]));
     const linkedRowRules = canonicalTargetLinkRules(draft)
-        .map(rule => ({ targetRowId: scheduleToRowId.get(rule.targetId) || '', mode: rule.mode || '' }))
+        .map(rule => ({
+            targetRowId: scheduleToRowId.get(rule.targetId) || '',
+            mode: rule.mode || '',
+            direction: rule.direction || '',
+            followDelayMinutes: Math.max(0, parseInt(rule.followDelayMinutes, 10) || 0)
+        }))
         .filter(rule => rule.targetRowId);
     scheduleLinkRules(draft)
         .filter(rule => rule.targetRowId && !rule.targetId)
-        .forEach(rule => linkedRowRules.push({ targetRowId: rule.targetRowId, mode: rule.mode || '' }));
-    const uniqueRowRules = Array.from(new Map(linkedRowRules.map(rule => [`${rule.targetRowId}|${rule.mode}`, rule])).values());
+        .forEach(rule => linkedRowRules.push({
+            targetRowId: rule.targetRowId,
+            mode: rule.mode || '',
+            direction: rule.direction || '',
+            followDelayMinutes: Math.max(0, parseInt(rule.followDelayMinutes, 10) || 0)
+        }));
+    const uniqueRowRules = Array.from(new Map(linkedRowRules.map(rule => [`${rule.targetRowId}|${rule.mode}|${rule.direction || ''}`, rule])).values());
     const linkedRowIds = uniqueValues(uniqueRowRules.map(rule => rule.targetRowId));
     const linkedRowModes = uniqueValues(uniqueRowRules.map(rule => rule.mode));
     Object.assign(item, {
@@ -21383,7 +21792,8 @@ function applyScheduleDraftToOrderSetItem(draft, targetSchedule, beforeSchedule 
         linkMode: linkedRowModes.length === 1 ? linkedRowModes[0] : '',
         linkTargetRowIds: linkedRowIds,
         linkTargetRowId: linkedRowIds[0] || '',
-        linkRules: uniqueRowRules
+        linkRules: uniqueRowRules,
+        linkFollowDelayMinutes: Math.max(0, parseInt(uniqueRowRules.find(rule => rule.mode === 'followed-by')?.followDelayMinutes, 10) || 0)
     });
     set.updatedAt = new Date().toISOString();
 }
@@ -22172,7 +22582,8 @@ window.renderProfileScheduleLinkOptions = function(selected = '') {
     ].filter(Boolean));
     const choices = scheduleLinkChoices(memberId, body.querySelector('[name="pendingOrderId"]')?.value || '')
         .filter(choice => !excludeIds.has(choice.id));
-    renderLinkChoicePanel(panel, choices, selectedValues.filter(value => !excludeIds.has(value)), 'openProfileScheduleLinkPicker()');
+    const mode = body.querySelector('[name="linkMode"]')?.value || panel.dataset.linkMode || '';
+    renderLinkChoicePanel(panel, choices, selectedValues.filter(value => !excludeIds.has(value)), 'openProfileScheduleLinkPicker()', mode);
 };
 
 window.openProfileScheduleLinkPicker = async function() {
@@ -22187,10 +22598,19 @@ window.openProfileScheduleLinkPicker = async function() {
     const choices = scheduleLinkChoices(memberId, body.querySelector('[name="pendingOrderId"]')?.value || '')
         .filter(choice => !excludeIds.has(choice.id));
     const previous = selectedOptionValues(panel).filter(value => !excludeIds.has(value)).sort();
-    const selected = await chooseLinkedMedicationsChild('Choose Linked Medications', choices, previous);
-    if (selected === null) return;
-    renderLinkChoicePanel(panel, choices, selected, 'openProfileScheduleLinkPicker()');
-    if (JSON.stringify(previous) !== JSON.stringify([...selected].sort())) {
+    const modeSelect = body.querySelector('[name="linkMode"]');
+    const sourceSchedule = db.schedules.find(item => item.id === (body.querySelector('[name="modifySourceId"]')?.value || ''));
+    const result = await chooseLinkedMedicationsChild('Link Orders', choices, previous, {
+        mode: modeSelect?.value || panel.dataset.linkMode || 'together',
+        followDelayMinutes: panel.dataset.followDelayMinutes,
+        currentLabel: sourceSchedule ? scheduleMedicationLabel(sourceSchedule) : 'Medication order being scheduled'
+    });
+    if (!result) return;
+    if (modeSelect) modeSelect.value = result.linkMode;
+    panel.dataset.linkMode = result.linkMode;
+    panel.dataset.followDelayMinutes = String(result.followDelayMinutes || 0);
+    renderLinkChoicePanel(panel, choices, result.linkIds, 'openProfileScheduleLinkPicker()', result.linkMode);
+    if (JSON.stringify(previous) !== JSON.stringify([...result.linkIds].sort()) || result.linkMode !== (sourceSchedule?.linkMode || '')) {
         const edited = body.querySelector('[name="linksEdited"]');
         if (edited) edited.value = 'yes';
     }
@@ -22374,6 +22794,11 @@ function collectProfileScheduleComposer(body, memberId) {
     }
     const selectedLinkTargetIds = selectedOptionValues(body.querySelector('[data-profile-schedule-link-target]'));
     const selectedLinkMode = body.querySelector('[name="linkMode"]')?.value || '';
+    const validLinkModes = ['together', 'choose-one', 'followed-by'];
+    const linkPanel = body.querySelector('[data-profile-schedule-link-target]');
+    const selectedFollowDelayMinutes = selectedLinkMode === 'followed-by'
+        ? Math.max(1, parseInt(linkPanel?.dataset.followDelayMinutes, 10) || 0)
+        : 0;
     const linksEdited = body.querySelector('[name="linksEdited"]')?.value === 'yes';
     const preserveExistingLinks = !!modifySourceId && !linksEdited;
     let preservedLinkState = {};
@@ -22387,20 +22812,24 @@ function collectProfileScheduleComposer(body, memberId) {
     const linkMode = preserveExistingLinks ? (preservedLinkState.linkMode || '') : selectedLinkMode;
     const linkRules = preserveExistingLinks
         ? (Array.isArray(preservedLinkState.linkRules) ? preservedLinkState.linkRules : [])
-        : linkRulesFromTargets(selectedLinkTargetIds, selectedLinkMode);
+        : linkRulesFromTargets(selectedLinkTargetIds, selectedLinkMode, { followDelayMinutes: selectedFollowDelayMinutes });
     const linkTargetIds = preserveExistingLinks
         ? uniqueValues(preservedLinkState.linkTargetIds || linkRules.map(rule => rule.targetId))
-        : (['together', 'choose-one'].includes(selectedLinkMode) ? selectedLinkTargetIds : []);
+        : (validLinkModes.includes(selectedLinkMode) ? selectedLinkTargetIds : []);
     const targetChoice = scheduleLinkChoices(memberId).find(choice => choice.id === linkTargetIds[0]);
     const linkGroup = preserveExistingLinks
         ? (preservedLinkState.linkGroup || '')
         : (linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '');
-    if (!preserveExistingLinks && selectedLinkTargetIds.length > 0 && !['together', 'choose-one'].includes(selectedLinkMode)) {
-        appAlert('Choose what the medication link means: must take together or choose only one.');
+    if (!preserveExistingLinks && selectedLinkTargetIds.length > 0 && !validLinkModes.includes(selectedLinkMode)) {
+        appAlert('Choose what the medication link means: And, Or, or Followed by.');
         return false;
     }
-    if (!preserveExistingLinks && ['together', 'choose-one'].includes(selectedLinkMode) && linkTargetIds.length === 0) {
+    if (!preserveExistingLinks && validLinkModes.includes(selectedLinkMode) && linkTargetIds.length === 0) {
         appAlert('Select the medication this one is linked to.');
+        return false;
+    }
+    if (!preserveExistingLinks && selectedLinkMode === 'followed-by' && (linkTargetIds.length !== 1 || !selectedFollowDelayMinutes || followedByWouldCreateCycle(pendingOrderId || `pending-link-${Date.now()}`, linkTargetIds[0]))) {
+        appAlert('Followed by requires one next order, a valid follow interval, and a chain without circular links.');
         return false;
     }
     const schedule = {
@@ -22419,6 +22848,9 @@ function collectProfileScheduleComposer(body, memberId) {
         linkTargetIds,
         linkTargetId: linkTargetIds[0] || '',
         linkRules,
+        linkFollowDelayMinutes: preserveExistingLinks
+            ? Math.max(0, parseInt(linkRules.find(rule => rule.mode === 'followed-by')?.followDelayMinutes, 10) || 0)
+            : selectedFollowDelayMinutes,
         linksEdited,
         qodStart: freq === 'QOD' ? startDate : '',
         times: freq === 'QXH'
@@ -22570,8 +23002,9 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
                             <select name="linkMode" onchange="markProfileScheduleLinksEdited()">
                                 <option value="" ${!composerLinkMode ? 'selected' : ''}>No link</option>
                                 <option value="mixed" ${composerLinkMode === 'mixed' ? 'selected' : ''} disabled>Mixed link meanings</option>
-                                <option value="together" ${composerLinkMode === 'together' ? 'selected' : ''}>Must take together</option>
-                                <option value="choose-one" ${composerLinkMode === 'choose-one' ? 'selected' : ''}>Choose only one</option>
+                                <option value="together" ${composerLinkMode === 'together' ? 'selected' : ''}>And - take together</option>
+                                <option value="choose-one" ${composerLinkMode === 'choose-one' ? 'selected' : ''}>Or - choose one</option>
+                                <option value="followed-by" ${composerLinkMode === 'followed-by' ? 'selected' : ''}>Followed by</option>
                             </select>
                         </label>
                         <div>
@@ -22591,6 +23024,9 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
     window.renderProfileScheduleComposerTimes();
     window.syncProfileCustomScheduleTimes();
     window.renderProfileScheduleLinkOptions(existingLinkTargetIds);
+    const composerLinkPanel = document.getElementById('action-modal-body')?.querySelector('[data-profile-schedule-link-target]');
+    const existingFollowRule = existingLinkRules.find(rule => rule.mode === 'followed-by');
+    if (composerLinkPanel) composerLinkPanel.dataset.followDelayMinutes = String(existingFollowRule?.followDelayMinutes || existingOrder?.linkFollowDelayMinutes || 0);
     if (existingOrder) {
         const body = document.getElementById('action-modal-body');
         const existingTimes = scheduleTimingFrequency(existingOrder) === 'QXH'
@@ -27568,6 +28004,7 @@ function linkedMedicationInstructionLines(schedules) {
 function linkedMedicationGroupNote(schedule, linkedSchedules) {
     const modes = linkedSchedules.map(linked => scheduleLinkModeBetween(schedule, linked)).filter(Boolean);
     if (modes.includes('together')) return 'Take together';
+    if (modes.includes('followed-by')) return 'Linked sequence';
     if (modes.includes('choose-one')) return 'Choose one linked medication';
     return 'Linked medications';
 }
