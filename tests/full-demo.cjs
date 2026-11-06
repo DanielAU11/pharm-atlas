@@ -106,6 +106,39 @@ app.whenReady().then(async () => {
         const saved = await window.api.save(db);
         const loaded = await window.api.load();
         const qr = medicationQrDataUrl('PA-DEMO-QR-CHECK');
+        const scheduleCountBeforeCheckboxAudit = db.schedules.length;
+        const checkboxTemplate = db.schedules.find(item => item.id === 'sched-lisinopril') || db.schedules[0];
+        for (let index = 0; index < 16; index += 1) {
+            db.schedules.push({
+                ...JSON.parse(JSON.stringify(checkboxTemplate)),
+                id: 'checkbox-layout-audit-' + index,
+                orderSetId: '',
+                orderSetName: '',
+                startDate: qod.startDate,
+                endDate: addDaysKey(qod.startDate, 30)
+            });
+        }
+        const checkboxPickerPromise = chooseDateRangeLabelSchedules(
+            checkboxTemplate.memberId,
+            qod.startDate,
+            addDaysKey(qod.startDate, 14)
+        );
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const checkboxList = document.querySelector('#action-modal-body .label-selection-list');
+        const checkboxInputs = [...(checkboxList?.querySelectorAll('input[type="checkbox"]') || [])];
+        const visibleFixedCheckboxes = checkboxInputs.filter(input => {
+            const style = getComputedStyle(input);
+            return Number(style.opacity || 0) > 0.01 && style.visibility !== 'hidden' && style.position === 'fixed';
+        });
+        const checkboxLayout = {
+            rendered: checkboxInputs.length >= 16,
+            scrollable: !!checkboxList && checkboxList.scrollHeight > checkboxList.clientHeight,
+            visibleFixedCount: visibleFixedCheckboxes.length,
+            contained: getComputedStyle(checkboxList).contain.includes('paint')
+        };
+        document.getElementById('action-modal-cancel')?.click();
+        await checkboxPickerPromise;
+        db.schedules.splice(scheduleCountBeforeCheckboxAudit);
         return {
             qodOriginalDates: originalDates.slice(0, 4).map(item => item.date + ' ' + item.time),
             qodAfterDates: afterDates.slice(0, 5).map(item => item.date + ' ' + item.time),
@@ -119,6 +152,7 @@ app.whenReady().then(async () => {
             prepackReturnable: returnablePrepackItems().length,
             barcodeRendered: typeof qr === 'string' && qr.startsWith('data:image/'),
             persistence: saved === true && loaded.family?.[0]?.id === 'demo-member',
+            checkboxLayout,
             mobileRuntime: document.documentElement.classList.contains('mobile-runtime'),
             mobileCompanionPanel: !!document.getElementById('mobile-companion-panel'),
             simplifiedMobileNavigation: document.getElementById('tab-prepackage')?.hidden === true && document.getElementById('tab-recipes')?.hidden === true,
@@ -153,6 +187,7 @@ app.whenReady().then(async () => {
         Object.values(logic.panels).some(value => !value) || logic.unresolvedButtons.length > 0 ||
         logic.inventoryRows < 5 || logic.scheduleRows < 6 || logic.prepackReturnable < 1 ||
         !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || !logic.simplifiedMobileNavigation ||
+        !logic.checkboxLayout?.rendered || !logic.checkboxLayout?.scrollable || !logic.checkboxLayout?.contained || logic.checkboxLayout?.visibleFixedCount > 0 ||
         logic.overflow > 0 || logic.renderErrors.length > 0 || errors.length > 0;
     process.stdout.write(JSON.stringify({ device, logic, screenshots, consoleErrors: errors }, null, 2));
     win.destroy();

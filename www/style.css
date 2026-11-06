@@ -613,6 +613,10 @@ button {
 
 .summary-option-row input[type="checkbox"] {
     display: block;
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     width: 13px !important;
     min-width: 13px !important;
     max-width: 13px !important;
@@ -845,6 +849,10 @@ button {
 
 .current-list-print-check-cell input[type="checkbox"] {
     display: block;
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     width: 13px !important;
     min-width: 13px !important;
     max-width: 13px !important;
@@ -916,6 +924,10 @@ button {
 
 .summary-column-chip input[type="checkbox"] {
     display: block;
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     flex: 0 0 13px;
     width: 13px !important;
     min-width: 13px !important;
@@ -1193,12 +1205,25 @@ button {
 
 .current-meds-discontinued-row > input[type="checkbox"] {
     grid-area: check;
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     width: 13px;
     min-width: 13px;
     height: 13px;
     margin-top: 4px;
     appearance: checkbox !important;
     -webkit-appearance: checkbox !important;
+}
+
+.current-meds-discontinued-row > input[type="checkbox"] + label {
+    margin-left: 0;
+}
+
+.current-meds-discontinued-row > input[type="checkbox"] + label::before,
+.current-meds-discontinued-row > input[type="checkbox"] + label::after {
+    content: none;
 }
 
 .current-meds-discontinued-row > .current-meds-builder-name {
@@ -4142,6 +4167,10 @@ button {
 
 .receive-order-line > input[name="receiveLine"] {
     grid-area: check;
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     margin-top: 2px;
     width: 13px !important;
     min-width: 13px !important;
@@ -5603,6 +5632,10 @@ button {
 }
 
 .monitoring-parameter-toggle-row input {
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     width: 13px;
     height: 13px;
     margin: 0;
@@ -7891,6 +7924,10 @@ button {
 .label-selection-list {
     max-height: 300px;
     overflow-y: auto;
+    position: relative;
+    contain: layout paint;
+    box-sizing: border-box;
+    width: 100%;
     padding: 6px;
     background: #ffffff;
 }
@@ -7905,6 +7942,34 @@ button {
     display: flex;
     align-items: center;
     min-height: 20px;
+}
+
+.label-selection-heading > input[type="checkbox"] {
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    flex: 0 0 13px;
+    width: 13px !important;
+    min-width: 13px !important;
+    height: 13px !important;
+    margin: 0 7px 0 5px;
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
+}
+
+.label-selection-heading > input[type="checkbox"] + label,
+.label-selection-item > input[type="checkbox"] + label {
+    min-width: 0;
+    margin-left: 0;
+    overflow-wrap: anywhere;
+}
+
+.label-selection-heading > input[type="checkbox"] + label::before,
+.label-selection-heading > input[type="checkbox"] + label::after,
+.label-selection-item > input[type="checkbox"] + label::before,
+.label-selection-item > input[type="checkbox"] + label::after {
+    content: none;
 }
 
 .label-selection-item {
@@ -7925,6 +7990,7 @@ button {
 }
 
 .label-selection-item input[type="checkbox"] {
+    position: static !important;
     flex: 0 0 13px;
     width: 13px !important;
     height: 13px !important;
@@ -7933,6 +7999,7 @@ button {
     -webkit-appearance: checkbox !important;
     opacity: 1 !important;
     visibility: visible !important;
+    pointer-events: auto !important;
 }
 
 .label-selection-item span {
@@ -7981,13 +8048,14 @@ button {
 }
 
 .prepack-reprint-list .label-selection-item input[type="checkbox"] {
-    position: absolute;
+    position: absolute !important;
     left: 8px;
     top: 9px;
     width: 14px !important;
     height: 14px !important;
     margin: 0;
-    opacity: 0;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 .prepack-reprint-list .label-selection-check {
@@ -10198,6 +10266,10 @@ button {
 }
 
 .custom-label-toggle input[type="checkbox"] {
+    position: static !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     flex: 0 0 13px;
     width: 13px !important;
     min-width: 13px !important;

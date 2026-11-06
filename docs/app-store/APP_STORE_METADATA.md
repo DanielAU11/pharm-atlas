@@ -7,7 +7,7 @@
 - **Primary category:** Medical
 - **Secondary category:** Health & Fitness
 - **Bundle ID:** `com.pharmatlas.app`
-- **Version:** 1.2.0
+- **Version:** 1.2.1
 - **Support URL:** `https://github.com/DanielAU11/pharm-atlas/issues`
 - **Privacy URL:** `https://github.com/DanielAU11/pharm-atlas/blob/master/docs/app-store/PRIVACY_POLICY.md`
 
