@@ -30,15 +30,16 @@ final class PharmAtlasLocalNetworkPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let timeoutMilliseconds = min(max(call.getInt("timeoutMs") ?? 30_000, 5_000), 60_000)
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
         let queue = DispatchQueue(label: "com.pharmatlas.local-network-probe", qos: .userInitiated)
         let completionLock = NSLock()
         var completed = false
+        var permissionState = "undetermined"
+        var connection: NWConnection?
+        var lastConnectionMessage: String?
+        let browser = NWBrowser(for: .bonjour(type: "_pharmatlas._tcp", domain: nil), using: .tcp)
 
-        func localNetworkDenied() -> Bool {
-            if #available(iOS 14.0, *) {
-                return connection.currentPath?.unsatisfiedReason == .localNetworkDenied
-            }
+        func errorIsPolicyDenied(_ error: NWError) -> Bool {
+            if case .dns(let code) = error { return code == -65_570 }
             return false
         }
 
@@ -50,29 +51,69 @@ final class PharmAtlasLocalNetworkPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             completed = true
             completionLock.unlock()
-            connection.stateUpdateHandler = nil
-            connection.cancel()
+            browser.stateUpdateHandler = nil
+            browser.cancel()
+            connection?.stateUpdateHandler = nil
+            connection?.cancel()
             var result: JSObject = ["status": status, "host": host, "port": portValue]
             if let message { result["message"] = message }
             DispatchQueue.main.async { call.resolve(result) }
         }
 
-        connection.stateUpdateHandler = { state in
+        func startConnection() {
+            connection?.stateUpdateHandler = nil
+            connection?.cancel()
+            let nextConnection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
+            connection = nextConnection
+            nextConnection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    finish("allowed")
+                case .waiting(let error):
+                    if #available(iOS 14.0, *), nextConnection.currentPath?.unsatisfiedReason == .localNetworkDenied {
+                        permissionState = "denied"
+                    }
+                    lastConnectionMessage = error.localizedDescription
+                case .failed(let error):
+                    if #available(iOS 14.0, *), nextConnection.currentPath?.unsatisfiedReason == .localNetworkDenied {
+                        permissionState = "denied"
+                    }
+                    lastConnectionMessage = error.localizedDescription
+                case .cancelled:
+                    break
+                default:
+                    break
+                }
+            }
+            nextConnection.start(queue: queue)
+        }
+
+        browser.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                finish("allowed")
+                permissionState = "allowed"
+                startConnection()
+            case .waiting(let error):
+                if errorIsPolicyDenied(error) { permissionState = "denied" }
             case .failed(let error):
-                finish(localNetworkDenied() ? "denied" : "unreachable", message: error.localizedDescription)
+                if errorIsPolicyDenied(error) { permissionState = "denied" }
+                else { lastConnectionMessage = error.localizedDescription }
             case .cancelled:
                 break
             default:
-                // Keep waiting while the Local Network permission sheet is visible.
                 break
             }
         }
-        connection.start(queue: queue)
+        browser.start(queue: queue)
+        startConnection()
         queue.asyncAfter(deadline: .now() + .milliseconds(timeoutMilliseconds)) {
-            finish(localNetworkDenied() ? "denied" : "timeout", message: "The desktop did not accept a local TCP connection before the permission check timed out.")
+            if permissionState == "denied" {
+                finish("denied", message: "iOS did not grant Local Network access.")
+            } else if permissionState == "allowed" {
+                finish("unreachable", message: lastConnectionMessage ?? "Local Network access is allowed, but the desktop did not accept the connection.")
+            } else {
+                finish("timeout", message: "iOS did not complete the Local Network permission request.")
+            }
         }
     }
 }

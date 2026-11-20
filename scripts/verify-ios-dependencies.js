@@ -83,14 +83,14 @@ if (!infoPlist.includes('<key>NSCameraUsageDescription</key>')) {
   failed = true;
 }
 
-if (!infoPlist.includes('<key>NSLocalNetworkUsageDescription</key>') || !infoPlist.includes('<key>NSAllowsLocalNetworking</key>')) {
+if (!infoPlist.includes('<key>NSLocalNetworkUsageDescription</key>') || !infoPlist.includes('<key>NSAllowsLocalNetworking</key>') || !infoPlist.includes('_pharmatlas._tcp')) {
   console.error('Info.plist is missing the local-network permission or transport entry required for desktop pairing.');
   failed = true;
 }
 
 const sceneDelegatePath = path.join(root, 'ios', 'App', 'App', 'SceneDelegate.swift');
 const sceneDelegate = fs.readFileSync(sceneDelegatePath, 'utf8');
-if (!mobileApi.includes("nativePlugin('CapacitorHttp')") || !mobileApi.includes("nativePlugin('PharmAtlasLocalNetwork')") || !mobileApi.includes('localNetworkJsonRequest') || !sceneDelegate.includes('NWConnection') || !sceneDelegate.includes('PharmAtlasBridgeViewController')) {
+if (!mobileApi.includes("nativePlugin('CapacitorHttp')") || !mobileApi.includes("nativePlugin('PharmAtlasLocalNetwork')") || !mobileApi.includes('localNetworkJsonRequest') || !sceneDelegate.includes('NWConnection') || !sceneDelegate.includes('NWBrowser') || !sceneDelegate.includes('PharmAtlasBridgeViewController')) {
   console.error('Pairing must use the native Network framework and CapacitorHttp so iOS can request and diagnose Local Network access.');
   failed = true;
 }

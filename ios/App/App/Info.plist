@@ -49,6 +49,10 @@
 	<string>PharmAtlas uses the camera to scan a pairing QR shown by the user's PharmAtlas desktop app.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PharmAtlas connects to the user's paired desktop on the same local network to synchronize medication records.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pharmatlas._tcp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
