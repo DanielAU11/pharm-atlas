@@ -16,10 +16,10 @@ Clone or pull the repository, then run:
 ```bash
 npm install
 npm run cap:sync
-open ios/App/App.xcworkspace
+npm run cap:open:ios
 ```
 
-Always open the workspace, not the `.xcodeproj`, so CocoaPods dependencies are included.
+PharmAtlas uses Capacitor's Swift Package Manager project. The native Xcode project is `ios/App/App.xcodeproj`; this repository does not use an `.xcworkspace`. You can also open it directly with `open ios/App/App.xcodeproj`.
 
 ## 3. Configure Signing
 
@@ -43,7 +43,7 @@ Always open the workspace, not the `.xcodeproj`, so CocoaPods dependencies are i
 
 The iOS Simulator and a physical iPhone can pair with PharmAtlas running on a Mac or Windows PC. Both endpoints must be awake, have PharmAtlas open, and be on the same private Wi-Fi/LAN. VPN client isolation and guest Wi-Fi commonly block local connections.
 
-1. On the Mac, pull the latest repository and run `npm install`, `npm run cap:sync`, then `open ios/App/App.xcworkspace`.
+1. On the Mac, pull the latest repository and run `npm install`, `npm run cap:sync`, then `npm run cap:open:ios`.
 2. Start the desktop endpoint. For an all-Mac Simulator test, open a second Terminal in the repository and run `npm start`. For a Windows-to-iPhone test, leave the installed Windows PharmAtlas app open.
 3. In the desktop app, choose **Device Sync**. Allow Electron/PharmAtlas through the macOS or Windows firewall for private networks. Keep the pairing window open.
 4. In Xcode, select an iPhone Simulator and press **Run**. On the PharmAtlas Dashboard, locate **iPhone Companion**.

@@ -120,7 +120,7 @@ Build the mobile web bundle and synchronize it into Xcode with:
 npm run cap:sync
 ```
 
-The native project is in `ios/App/App.xcworkspace`. App Store metadata, privacy language, screenshot requirements, and the Xcode publishing walkthrough are in `docs/app-store/`.
+The native Swift Package Manager project is `ios/App/App.xcodeproj`. Open it with `npm run cap:open:ios`. App Store metadata, privacy language, screenshot requirements, and the Xcode publishing walkthrough are in `docs/app-store/`.
 
 ## Verification
 
