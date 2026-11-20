@@ -9964,16 +9964,16 @@ window.openDesktopDeviceSync = async function() {
                     </select>
                 </label>` : ''}
                 <div class="sunken-panel device-sync-address">${escapeHtml(info.host)}:${escapeHtml(info.port)}</div>
-                <div class="cloud-sync-summary ${cloud?.enabled ? 'enabled' : ''}">
-                    <strong>${cloud?.enabled ? 'Encrypted remote sync enabled' : 'Away-from-home sync is off'}</strong>
+                <details class="cloud-sync-summary ${cloud?.enabled ? 'enabled' : ''}" ${cloud?.enabled ? 'open' : ''}>
+                    <summary>${cloud?.enabled ? 'Away-from-home sync is on' : 'Optional: sync when away from this desktop'}</summary>
                     <span>${cloud?.enabled
-                        ? `The relay stores ciphertext only. Phone changes can wait while this desktop is offline. Last sync: ${escapeHtml(cloud.lastSyncAt ? new Date(cloud.lastSyncAt).toLocaleString() : 'Not yet')}${cloud.lastError ? ` | ${escapeHtml(cloud.lastError)}` : ''}`
-                        : 'Enable an encrypted relay to document away from home or work without keeping this desktop online.'}</span>
+                        ? `Changes are encrypted before upload. Last sync: ${escapeHtml(cloud.lastSyncAt ? new Date(cloud.lastSyncAt).toLocaleString() : 'Not yet')}${cloud.lastError ? ` | ${escapeHtml(cloud.lastError)}` : ''}`
+                        : 'Nothing else is required for same-Wi-Fi pairing. Open this only if you need updates while the desktop is closed or on another network.'}</span>
                     <div class="field-row">
-                        <button type="button" onclick="openRemoteSyncSetup()"><span class="win98-icon icon-view"></span>${cloud?.enabled ? 'Remote Sync Settings' : 'Enable Remote Sync'}</button>
-                        ${cloud?.enabled ? '<button type="button" onclick="syncRemoteNow()"><span class="win98-icon icon-receive"></span>Sync Remote Now</button>' : ''}
+                        <button type="button" onclick="openRemoteSyncSetup()"><span class="win98-icon icon-view"></span>${cloud?.enabled ? 'Away Sync Settings' : 'Set Up Away Sync'}</button>
+                        ${cloud?.enabled ? '<button type="button" onclick="syncRemoteNow()"><span class="win98-icon icon-receive"></span>Sync Now</button>' : ''}
                     </div>
-                </div>
+                </details>
                 <details class="device-sync-manual-pairing">
                     <summary>Simulator / manual pairing</summary>
                     <p>Use this when the Xcode Simulator cannot scan the QR. Treat this text like a password.</p>
@@ -9995,20 +9995,27 @@ window.openDesktopDeviceSync = async function() {
 window.openRemoteSyncSetup = async function() {
     document.getElementById('action-modal-cancel')?.click();
     const status = await window.api.getCloudSyncStatus?.();
-    const result = await showActionModal('Encrypted Remote Sync', `
+    const result = await showActionModal('Optional Away Sync', `
         <div class="remote-sync-setup">
-            <p><b>How it works:</b> PharmAtlas encrypts the complete sync payload on your device. The relay receives an opaque encrypted envelope and cannot read medication or member information.</p>
-            <label>HTTPS relay address
-                <input name="relayUrl" type="url" required placeholder="https://your-pharmatlas-relay.example.workers.dev" value="${escapeHtml(status?.relayUrl || '')}">
+            <div class="sync-setup-choice">
+                <strong>Most people can skip this.</strong>
+                <span>Normal phone pairing and Sync Now work when the phone and desktop are on the same Wi-Fi and PharmAtlas is open.</span>
+            </div>
+            <p>Use Away Sync only when the phone must exchange updates while the desktop is closed or on another network. Medication data is encrypted on your device before it is sent.</p>
+            <label>Private sync service address
+                <input name="relayUrl" type="url" required placeholder="https://your-private-sync-service.example" value="${escapeHtml(status?.relayUrl || '')}">
             </label>
-            <div class="important-note">Use only a relay you control or a service covered by the privacy and regulatory agreements appropriate for your data. Enabling this changes the app's privacy disclosures. After setup, scan the newly generated pairing QR again.</div>
+            <details class="remote-sync-advanced-note">
+                <summary>Technical and privacy details</summary>
+                <div class="important-note">This feature requires a compatible HTTPS relay controlled by you or a service with privacy terms suitable for your data. The service stores an encrypted payload, not readable medication details. After setup, pair the phone again so it receives the Away Sync settings.</div>
+            </details>
             ${status?.enabled ? `<div class="sunken-panel remote-sync-status">Vault: ${escapeHtml(status.vaultId || '')}<br>Last sync: ${escapeHtml(status.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString() : 'Not yet')}${status.lastError ? `<br><span class="status-error">${escapeHtml(status.lastError)}</span>` : ''}</div><button type="button" onclick="disableRemoteSync()"><span class="win98-icon icon-clear"></span>Disable Remote Sync</button>` : ''}
         </div>
-    `, status?.enabled ? 'Verify & Save' : 'Enable');
+    `, status?.enabled ? 'Verify & Save' : 'Enable Away Sync');
     if (!result) return;
     try {
         await window.api.configureCloudSync?.(result.relayUrl);
-        await appAlert('Encrypted remote sync is ready. Re-open Device Sync and scan the new QR on the phone.', 'Remote Sync Ready');
+        await appAlert('Away Sync is ready. Re-open Device Sync and scan the new QR on the phone.', 'Away Sync Ready');
     } catch (error) {
         await appAlert(error.message || 'The encrypted relay could not be reached.', 'Remote Sync Setup Failed');
     }
@@ -10115,26 +10122,27 @@ function renderMemberPrnMedicationOrders(memberId) {
         if (!med) return '';
         const activeHold = activeMedicationHoldInfo(schedule);
         const held = !!activeHold?.active;
-        return `<div class="sunken-panel ${held ? 'member-med-held' : ''}" style="padding:5px; margin-bottom:5px; background:white; border:1px inset gray;">
-            <strong>${holdIndicatorHtml(schedule)}${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong>
-            ${set ? `<span class="form-help"> | Regimen: ${escapeHtml(set.name)}</span>` : ''}
-            <br><small>Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}${escapeHtml(prnLimitText(schedule))}${hasScheduledPrnReminders(schedule) ? ` | Frequency: ${escapeHtml(formatFrequency({ ...schedule, freq: schedule.prnScheduleFreq }))} ${escapeHtml(getScheduleTimes(schedule).join(', '))}` : ''}</small>
+        return `<div class="sunken-panel member-med-card ${held ? 'member-med-held' : ''}">
+            <div class="member-med-card-header"><strong>${holdIndicatorHtml(schedule)}${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}</strong></div>
+            <div class="member-med-card-meta">
+                <span><b>Dose:</b> ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))}</span>
+                <span><b>Qty:</b> ${escapeHtml(formatQtyForSchedule(schedule, med))}${escapeHtml(prnLimitText(schedule))}</span>
+                <span class="member-med-frequency"><b>Use:</b> As needed${hasScheduledPrnReminders(schedule) ? ` | Reminder: ${escapeHtml(formatFrequency({ ...schedule, freq: schedule.prnScheduleFreq }))} ${escapeHtml(getScheduleTimes(schedule).join(', '))}` : ''}${set ? ` | Regimen: ${escapeHtml(set.name)}` : ''}</span>
+            </div>
             ${linkedDetailsHtml(schedule, candidates)}
             <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
             <div class="member-med-actions">
-                <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
-                <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button onclick="event.stopPropagation(); administerDose('${escapeHtml(schedule.medId)}','${escapeHtml(schedule.id)}')">Administer</button>
+                ${set ? `<button onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit Regimen</button>` : `<button onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify</button>`}
+                <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
                 <button onclick="event.stopPropagation(); documentPastDose('${escapeHtml(schedule.id)}')">Past Dose</button>
+                <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${escapeHtml(schedule.id)}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                 <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${escapeHtml(schedule.id)}')">Waste</button>
                 <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Schedule Again</button>
                 ${containerOpenStatusButtonHtml(schedule, med)}
                 ${usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${escapeHtml(schedule.id)}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
-                ${set
-                    ? `<button onclick="event.stopPropagation(); editOrderSet('${escapeHtml(set.id)}')">Edit Regimen</button>`
-                    : `<button onclick="event.stopPropagation(); openOrderModifier('${escapeHtml(schedule.id)}')">Modify</button>
-                       <button onclick="event.stopPropagation(); deleteSchedule('${escapeHtml(schedule.id)}')">Discontinue</button>`}
+                ${set ? '' : `<button onclick="event.stopPropagation(); deleteSchedule('${escapeHtml(schedule.id)}')">Discontinue</button>`}
             </div>
         </div>`;
     }).join('');
@@ -10580,6 +10588,14 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                     event.stopPropagation();
                     window.printDateRangeLabels(m.id, startInput.value, endInput.value);
                 });
+                const createPrepackButton = document.createElement('button');
+                createPrepackButton.type = 'button';
+                createPrepackButton.innerHTML = '<span class="win98-icon icon-box"></span> Create Prepack';
+                createPrepackButton.title = 'Choose medications in this date range and add them to the prepack queue';
+                createPrepackButton.addEventListener('click', event => {
+                    event.stopPropagation();
+                    window.createDateRangePrepack(m.id, startInput.value, endInput.value);
+                });
                 const schedulePdfButton = document.createElement('button');
                 schedulePdfButton.type = 'button';
                 schedulePdfButton.innerText = 'Schedule PDF';
@@ -10596,10 +10612,12 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                 });
                 const reportTools = document.createElement('details');
                 reportTools.className = 'member-schedule-report-tools';
+                reportTools.open = !document.documentElement.classList.contains('mobile-runtime');
                 const reportSummary = document.createElement('summary');
                 reportSummary.innerHTML = '<span class="win98-icon icon-label"></span> Reports &amp; Labels';
                 const reportActions = document.createElement('div');
                 reportActions.className = 'member-schedule-report-actions';
+                reportActions.appendChild(createPrepackButton);
                 reportActions.appendChild(printButton);
                 reportActions.appendChild(schedulePdfButton);
                 reportActions.appendChild(emailSchedulePdfButton);
@@ -10648,7 +10666,13 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                     const med = db.inventory.find(inv => inv.id === schedule.medId);
                     const activeHold = activeMedicationHoldInfo(schedule);
                     const held = !!activeHold?.active;
-                    return `<div class="member-med-inline-row ${held ? 'member-med-held' : ''}" style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${holdIndicatorHtml(schedule)}${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : 'Unknown'} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med || {}))} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}${escapeHtml(prnLimitText(schedule))}${escapeHtml(scheduleExceptionText(schedule))}
+                    return `<div class="member-med-inline-row member-med-card ${held ? 'member-med-held' : ''}">
+                        <div class="member-med-card-header"><strong>${holdIndicatorHtml(schedule)}${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'}</strong></div>
+                        <div class="member-med-card-meta">
+                            <span><b>Dose:</b> ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : 'Unknown'}</span>
+                            <span><b>Qty:</b> ${escapeHtml(formatQtyForSchedule(schedule, med || {}))}</span>
+                            <span class="member-med-frequency"><b>Schedule:</b> ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}${escapeHtml(prnLimitText(schedule))}${escapeHtml(scheduleExceptionText(schedule))}</span>
+                        </div>
                         ${linkedDetailsHtml(schedule, setSchedules)}
                         <div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>
                         <div class="member-med-actions member-med-inline-actions">
@@ -10692,19 +10716,22 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                 const activeHold = activeMedicationHoldInfo(s);
                 const held = !!activeHold?.active;
                 const div = document.createElement('div');
-                div.className = `sunken-panel ${held ? 'member-med-held' : ''}`;
-                div.style.cssText = "padding:5px; margin-bottom:5px; cursor:pointer; background:white; border:1px inset gray;";
+                div.className = `sunken-panel member-med-card ${held ? 'member-med-held' : ''}`;
                 div.innerHTML = `
-                    <strong>${holdIndicatorHtml(s)}${med ? med.name : 'Unknown'} ${med ? formatMedStrength(med) : ''}</strong><br>
-                    <small>Dose: ${med ? escapeHtml(formatPrescribedDose(med, s.doseQty)) : 'Unknown'} | Qty: ${med ? escapeHtml(formatQtyForSchedule(s, med)) : escapeHtml(s.doseQty)} | ${escapeHtml(formatFrequency(s))} ${escapeHtml(getScheduleTimes(s).join(', ') || 'PRN')}${escapeHtml(prnLimitText(s))}${escapeHtml(scheduleExceptionText(s))}</small>
+                    <div class="member-med-card-header"><strong>${holdIndicatorHtml(s)}${med ? escapeHtml(med.name) : 'Unknown'} ${med ? escapeHtml(formatMedStrength(med)) : ''}</strong></div>
+                    <div class="member-med-card-meta">
+                        <span><b>Dose:</b> ${med ? escapeHtml(formatPrescribedDose(med, s.doseQty)) : 'Unknown'}</span>
+                        <span><b>Qty:</b> ${med ? escapeHtml(formatQtyForSchedule(s, med)) : escapeHtml(s.doseQty)}</span>
+                        <span class="member-med-frequency"><b>Schedule:</b> ${escapeHtml(formatFrequency(s))} ${escapeHtml(getScheduleTimes(s).join(', ') || 'PRN')}${escapeHtml(prnLimitText(s))}${escapeHtml(scheduleExceptionText(s))}</span>
+                    </div>
                     ${linkedDetailsHtml(s, memberActiveCandidates)}
                     <div class="member-med-timeline" data-schedule-id="${s.id}"></div>
                     <div class="member-med-actions">
-                        <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
-                        <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
-                        <button onclick="event.stopPropagation(); documentPastDose('${s.id}')">Past Dose</button>
                         <button onclick="event.stopPropagation(); openOrderModifier('${s.id}')">Modify</button>
+                        <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
+                        <button onclick="event.stopPropagation(); documentPastDose('${s.id}')">Past Dose</button>
+                        <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${s.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                         <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${s.id}')">Waste</button>
                         <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${s.id}')">&#8635; Schedule Again</button>
@@ -10713,7 +10740,6 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
                     </div>
                 `;
-                div.onclick = () => window.openOrderModifier(s.id);
                 if (activeMedsContainer) activeMedsContainer.appendChild(div);
             });
             if (activeMedsContainer && activeMedsContainer.children.length <= 2) {
@@ -31194,7 +31220,7 @@ async function chooseDateRangeLabelSchedules(memberId, startDate, endDate) {
     return new Set(selectedIds);
 }
 
-window.printDateRangeLabels = async function(memberId, startDate, endDate) {
+window.printDateRangeLabels = async function(memberId, startDate, endDate, options = {}) {
     const mem = db.family.find(f => f.id === memberId);
     if (!mem) return;
 
@@ -31271,18 +31297,35 @@ window.printDateRangeLabels = async function(memberId, startDate, endDate) {
     }
 
     if (labelCount > 0) {
-        previewLabelHtml(
-            labelsHtml,
-            buildPrepackDefinition(
-                memberId,
-                `Daily labels: ${localDateKey(start)} - ${localDateKey(end)}`,
-                prepackRows,
-                selectionForPreview
-            )
+        const prepackDefinition = buildPrepackDefinition(
+            memberId,
+            `Daily labels: ${localDateKey(start)} - ${localDateKey(end)}`,
+            prepackRows,
+            selectionForPreview
         );
+        if (options.scheduleOnly === true) {
+            if (matchingQueue) {
+                activePrepackQueueId = matchingQueue.id;
+                switchTab('prepackage');
+                await appAlert('A prepack for this medication selection and date range already exists. PharmAtlas opened the existing prepack so prepared, returned, and administered item history stays intact.', 'Existing Prepack Opened');
+                return matchingQueue;
+            }
+            pendingPrepackDefinition = prepackDefinition;
+            await window.schedulePendingPrepack();
+            return;
+        }
+        if (matchingQueue) {
+            prepackDefinition.existingQueueId = matchingQueue.id;
+            prepackDefinition.reprintedDates = prepackDefinition.days.map(day => day.date);
+        }
+        previewLabelHtml(labelsHtml, prepackDefinition);
     } else {
         void appAlert("No scheduled medications found for that date range.");
     }
+};
+
+window.createDateRangePrepack = async function(memberId, startDate, endDate) {
+    return window.printDateRangeLabels(memberId, startDate, endDate, { scheduleOnly: true });
 };
 
 window.printWeeklyLabels = function(memberId, daysOverride = 7) {

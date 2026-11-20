@@ -58,7 +58,10 @@ app.whenReady().then(async () => {
         const handle = modal.querySelector('.member-medication-work-handle');
         const body = modal.querySelector('.member-profile-body');
         const actions = modal.querySelector('.member-profile-save-actions');
+        const medCard = modal.querySelector('.member-med-card');
+        const medActions = medCard?.querySelector('.member-med-actions');
         const actionRect = actions.getBoundingClientRect();
+        const medCardRect = medCard?.getBoundingClientRect();
         const navRect = document.getElementById('mobile-bottom-nav').getBoundingClientRect();
         return {
             viewMode: memberScheduleViewMode(),
@@ -67,9 +70,13 @@ app.whenReady().then(async () => {
             handleCount: handle.querySelector('strong')?.textContent,
             bodyVisible: getComputedStyle(body).display !== 'none',
             reportsCollapsed: !modal.querySelector('.member-schedule-report-tools')?.open,
+            reportActionCount: modal.querySelectorAll('.member-schedule-report-actions button').length,
+            hasCreatePrepack: Array.from(modal.querySelectorAll('.member-schedule-report-actions button')).some(button => /create prepack/i.test(button.textContent)),
             pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
             memberActionsVisible: actionRect.top >= 0 && actionRect.bottom <= navRect.top + 1,
-            memberActionButtons: actions.querySelectorAll('button').length
+            memberActionButtons: actions.querySelectorAll('button').length,
+            medicationCardFits: !!medCardRect && medCardRect.left >= 0 && medCardRect.right <= innerWidth + 1,
+            medicationActionsCompact: !!medActions && getComputedStyle(medActions).flexWrap === 'nowrap' && medActions.scrollWidth >= medActions.clientWidth
         };
     })()`);
 
@@ -80,7 +87,11 @@ app.whenReady().then(async () => {
         const modal = document.getElementById('member-modal');
         const dock = modal.querySelector('.member-order-work-dock');
         const body = modal.querySelector('.member-profile-body');
+        const footer = dock.querySelector('.profile-orders-side-footer');
+        const saveActions = modal.querySelector('.member-profile-save-actions');
         const rect = dock.getBoundingClientRect();
+        const footerRect = footer.getBoundingClientRect();
+        const navRect = document.getElementById('mobile-bottom-nav').getBoundingClientRect();
         return {
             open: modal.classList.contains('order-dock-open'),
             bodyVisible: getComputedStyle(body).display !== 'none',
@@ -91,13 +102,24 @@ app.whenReady().then(async () => {
             dockRight: Math.round(rect.right),
             dockWidth: Math.round(rect.width),
             viewportWidth: innerWidth,
-            fitsViewport: rect.left >= 0 && rect.right <= innerWidth + 1
+            fitsViewport: rect.left >= 0 && rect.right <= innerWidth + 1,
+            footerVisible: footerRect.top >= rect.top && footerRect.bottom <= navRect.top + 1,
+            memberSaveHidden: getComputedStyle(saveActions).display === 'none'
         };
     })()`);
 
     await win.webContents.executeJavaScript(`closeMemberMedicationWorkPanel(); true;`);
     await pause(220);
     await capture(win, 'member-profile-work-closed-after-open');
+
+    await win.webContents.executeJavaScript(`(() => {
+        setMemberScheduleViewMode('timeline');
+        document.querySelector('#member-active-meds-list .member-med-card')?.scrollIntoView({ block: 'start' });
+        return true;
+    })()`);
+    await pause(120);
+    await capture(win, 'member-medication-cards');
+    await win.webContents.executeJavaScript(`setMemberScheduleViewMode('grid'); true;`);
 
     await win.webContents.executeJavaScript(`(async () => {
         const schedule = db.schedules.find(item => item.id === 'sched-lisinopril');
@@ -284,8 +306,8 @@ app.whenReady().then(async () => {
 
     const result = { closed, open, doseSheet, moreSheet, scheduleSteps, weekCalendar, monthCalendar, medicationSearch, regimenPlanner, regimenReview, bottomNavigation, consoleErrors: errors };
     const failed = closed.viewMode !== 'grid' || !closed.gridVisible || !closed.handleVisible || closed.handleCount !== '1' ||
-        !closed.bodyVisible || !closed.reportsCollapsed || closed.pageOverflow > 0 || !open.open || !open.bodyVisible || !open.dockVisible ||
-        open.dockWidth >= open.viewportWidth || !open.fitsViewport || !doseSheet.visible || !doseSheet.compact ||
+        !closed.bodyVisible || !closed.reportsCollapsed || closed.reportActionCount !== 4 || !closed.hasCreatePrepack || closed.pageOverflow > 0 || !closed.medicationCardFits || !closed.medicationActionsCompact || !open.open || !open.bodyVisible || !open.dockVisible ||
+        open.dockWidth >= open.viewportWidth || !open.fitsViewport || !open.footerVisible || !open.memberSaveHidden || !doseSheet.visible || !doseSheet.compact ||
         doseSheet.actions !== 2 || !moreSheet.visible || !moreSheet.compact || moreSheet.buttons !== 4 ||
         scheduleSteps.buttons !== 3 || scheduleSteps.selected !== 'timing' || scheduleSteps.activeGroups < 1 ||
         scheduleSteps.wrongGroups > 0 || scheduleSteps.pageOverflow > 0 || !closed.memberActionsVisible || closed.memberActionButtons !== 2 ||

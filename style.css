@@ -749,6 +749,48 @@ button {
     margin-top: 5px;
 }
 
+.member-med-card {
+    padding: 7px;
+    margin-bottom: 6px;
+    cursor: default;
+    background: #ffffff;
+    border: 1px inset #808080;
+    min-width: 0;
+}
+
+.member-med-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+}
+
+.member-med-card-header strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: #000080;
+}
+
+.member-med-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 10px;
+    margin-top: 3px;
+    color: #303030;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.member-med-card-meta span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.member-med-card-meta b {
+    color: #404040;
+}
+
 .today-primary-action {
     min-width: 86px;
     font-weight: bold;
@@ -4220,6 +4262,16 @@ button {
     background: #e2f5e2;
 }
 
+.cloud-sync-summary > summary {
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.cloud-sync-summary > span {
+    line-height: 1.35;
+}
+
 .cloud-sync-summary strong {
     color: #000080;
 }
@@ -4235,6 +4287,30 @@ button {
     gap: 4px;
     color: #000080;
     font-weight: bold;
+}
+
+.sync-setup-choice {
+    display: grid;
+    gap: 3px;
+    padding: 8px;
+    border: 2px outset #ffffff;
+    background: #eaf4ff;
+}
+
+.sync-setup-choice strong {
+    color: #004000;
+}
+
+.remote-sync-advanced-note {
+    padding: 6px;
+    border: 1px solid #808080;
+    background: #f5f5f5;
+}
+
+.remote-sync-advanced-note > summary {
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
 }
 
 .remote-sync-status {
@@ -13776,6 +13852,10 @@ button {
         font-weight: bold;
     }
 
+    .mobile-runtime #member-modal.order-dock-open .member-profile-save-actions {
+        display: none !important;
+    }
+
     .mobile-runtime .member-active-toolbar,
     .mobile-runtime .timeline-controls {
         display: grid !important;
@@ -13948,7 +14028,7 @@ button {
         z-index: 160;
         top: 28px;
         right: 4px;
-        bottom: 0;
+        bottom: calc(64px + env(safe-area-inset-bottom));
         left: auto;
         width: min(90vw, 410px) !important;
         height: auto !important;
@@ -14042,6 +14122,13 @@ button {
         z-index: 3;
     }
 
+    .mobile-runtime .member-order-work-dock .epic-side-titlebar strong {
+        min-width: 0;
+        font-size: 13px;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+
     .mobile-runtime .member-order-work-dock .epic-side-search-row,
     .mobile-runtime .member-order-work-dock .profile-orders-overview.compact {
         gap: 4px;
@@ -14065,6 +14152,80 @@ button {
         min-height: 42px;
         padding: 4px;
         white-space: normal;
+    }
+
+    .mobile-runtime .member-order-work-dock .profile-orders-side-footer {
+        grid-template-columns: minmax(0, 1fr) auto;
+        padding-bottom: calc(6px + env(safe-area-inset-bottom));
+    }
+
+    .mobile-runtime .member-order-work-dock .profile-orders-side-footer button {
+        min-width: 0;
+        min-height: 46px;
+        white-space: normal;
+    }
+
+    .mobile-runtime .member-med-card {
+        padding: 10px;
+        margin: 0 0 8px;
+        border-width: 2px;
+        border-color: #ffffff #808080 #808080 #ffffff;
+        box-shadow: none;
+    }
+
+    .mobile-runtime .member-med-card-header strong {
+        font-size: 14px;
+        line-height: 1.25;
+    }
+
+    .mobile-runtime .member-med-card-meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 10px;
+        margin: 6px 0 2px;
+        padding: 6px;
+        border: 1px solid #d0d0d0;
+        background: #f7f7f7;
+        font-size: 11px;
+    }
+
+    .mobile-runtime .member-med-card-meta .member-med-frequency {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-runtime .member-med-actions,
+    .mobile-runtime .member-regimen-actions,
+    .mobile-runtime .completed-med-actions {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        justify-content: flex-start;
+        gap: 4px;
+        width: 100%;
+        margin-top: 8px;
+        padding: 2px 0 5px;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        scroll-snap-type: x proximity;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .mobile-runtime .member-med-actions::-webkit-scrollbar,
+    .mobile-runtime .member-regimen-actions::-webkit-scrollbar,
+    .mobile-runtime .completed-med-actions::-webkit-scrollbar {
+        display: none;
+    }
+
+    .mobile-runtime .member-med-actions button,
+    .mobile-runtime .member-regimen-actions button,
+    .mobile-runtime .completed-med-actions button {
+        flex: 0 0 auto;
+        width: auto;
+        min-width: 88px;
+        min-height: 38px;
+        padding: 4px 8px;
+        scroll-snap-align: start;
+        white-space: nowrap;
     }
 
     /* Profile controls keep their meaning while using phone-width rows. */
@@ -14133,7 +14294,7 @@ button {
 
     .mobile-runtime .member-schedule-report-actions {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 4px;
         padding-top: 5px;
     }
