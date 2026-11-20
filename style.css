@@ -13620,7 +13620,7 @@ button {
         position: absolute !important;
         z-index: 160;
         top: 28px;
-        right: 0;
+        right: 4px;
         bottom: 0;
         left: auto;
         width: min(90vw, 410px) !important;
@@ -13634,14 +13634,14 @@ button {
         transform: translateX(calc(100% + 8px));
         visibility: hidden;
         pointer-events: none;
-        transition: transform 180ms ease-out, visibility 0s linear 180ms;
+        transition: none;
     }
 
     .mobile-runtime #member-modal.member-profile-workspace-shell.order-dock-open .member-order-work-dock {
         transform: translateX(0);
         visibility: visible;
         pointer-events: auto;
-        transition: transform 180ms ease-out;
+        transition: none;
     }
 
     .mobile-runtime .member-medication-work-handle {

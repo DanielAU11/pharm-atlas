@@ -217,6 +217,54 @@
         return JSON.parse(new TextDecoder().decode(plain));
     }
 
+    function isNativeAppleRuntime() {
+        return document.documentElement.classList.contains('ios-runtime')
+            && window.Capacitor?.isNativePlatform?.() === true;
+    }
+
+    async function localNetworkJsonRequest(url, options = {}) {
+        const method = options.method || 'GET';
+        const timeoutMs = Number(options.timeoutMs) || 7000;
+        const nativeHttp = isNativeAppleRuntime() ? nativePlugin('CapacitorHttp') : null;
+        if (nativeHttp?.request) {
+            const result = await nativeHttp.request({
+                url,
+                method,
+                headers: options.headers || {},
+                ...(options.body === undefined ? {} : { data: options.body }),
+                connectTimeout: timeoutMs,
+                readTimeout: timeoutMs,
+                responseType: 'json',
+                disableRedirects: true
+            });
+            let data = result?.data;
+            if (typeof data === 'string' && data) {
+                try { data = JSON.parse(data); } catch { data = {}; }
+            }
+            const status = Number(result?.status) || 0;
+            return { ok: status >= 200 && status < 300, status, data: data || {} };
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, {
+                method,
+                headers: options.headers || {},
+                body: options.body,
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            return {
+                ok: response.ok,
+                status: response.status,
+                data: await response.json().catch(() => ({}))
+            };
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     async function signedSyncRequest(action, payload) {
         const pairing = mobileSettings.pairing;
         if (!pairing) throw new Error('Pair this iPhone or iPad with the desktop first.');
@@ -230,10 +278,8 @@
             const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
             const signingText = ['POST', path, timestamp, nonce, body].join('\n');
             const signature = bytesToBase64Url(new Uint8Array(await crypto.subtle.sign('HMAC', keys.hmac, new TextEncoder().encode(signingText))));
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 7000);
             try {
-                const response = await fetch(`http://${host}:${pairing.port}${path}`, {
+                const response = await localNetworkJsonRequest(`http://${host}:${pairing.port}${path}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -242,9 +288,9 @@
                         'X-PharmAtlas-Signature': signature
                     },
                     body,
-                    signal: controller.signal
+                    timeoutMs: 9000
                 });
-                const responseBody = await response.json().catch(() => ({}));
+                const responseBody = response.data || {};
                 if (!response.ok) throw new Error(responseBody.error || `Desktop returned ${response.status}.`);
                 if (pairing.host !== host) {
                     pairing.host = host;
@@ -253,8 +299,6 @@
                 return decryptSyncValue(responseBody, keys.aes);
             } catch (error) {
                 lastError = error;
-            } finally {
-                clearTimeout(timeout);
             }
         }
         const addresses = hosts.map(host => `${host}:${pairing.port}`).join(', ');
@@ -566,40 +610,34 @@
     async function verifyDesktopReachable(pairing) {
         const hosts = syncHostCandidates(pairing);
         const tryHosts = () => Promise.all(hosts.map(async host => {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 6000);
                 try {
-                    const response = await fetch(`http://${host}:${pairing.port}/pharmatlas-sync/ping`, {
+                    const response = await localNetworkJsonRequest(`http://${host}:${pairing.port}/pharmatlas-sync/ping`, {
                         method: 'GET',
-                        cache: 'no-store',
-                        signal: controller.signal
+                        timeoutMs: 8000
                     });
                     if (!response.ok) throw new Error(`Desktop returned ${response.status}.`);
-                    const result = await response.json();
+                    const result = response.data;
                     if (result?.protocol !== 1 || result?.deviceId !== pairing.id) {
                         throw new Error('A different or outdated PharmAtlas desktop answered at this address. Generate a new pairing code.');
                     }
                     return { host, ok: true };
                 } catch (error) {
                     return { host, ok: false, error };
-                } finally {
-                    clearTimeout(timeout);
                 }
             }));
-        let attempts = await tryHosts();
-        let reachable = attempts.find(attempt => attempt.ok);
-        if (!reachable) {
-            // iOS can reject the first socket immediately while its Local Network
-            // permission alert is still being answered. Retry after that decision.
-            await new Promise(resolve => setTimeout(resolve, 1200));
+        let attempts = [];
+        let reachable = null;
+        for (const delay of [0, 2000, 5000]) {
+            if (delay) await new Promise(resolve => setTimeout(resolve, delay));
             attempts = await tryHosts();
             reachable = attempts.find(attempt => attempt.ok);
+            if (reachable) break;
         }
         if (reachable) return { ...pairing, host: reachable.host, hosts };
         const identityError = attempts.find(attempt => /different|outdated/i.test(attempt.error?.message || ''));
         if (identityError) throw identityError.error;
         const addresses = hosts.map(host => `${host}:${pairing.port}`).join(', ');
-        throw new Error(`Cannot reach ${addresses}. On iPhone, enable Settings > Privacy & Security > Local Network > PharmAtlas. On Windows, allow PharmAtlas on Private networks. Guest Wi-Fi, VPNs, and client isolation can also block local pairing.`);
+        throw new Error(`Cannot reach ${addresses}. On iPhone, open Settings > Privacy & Security > Local Network and allow PharmAtlas. If PharmAtlas is still missing there, delete the iPhone app, install this build again from Xcode, and tap Allow when pairing asks for local-network access. Also disable VPN/Private Relay temporarily and avoid guest Wi-Fi or client isolation.`);
     }
 
     window.enableIphoneReminders = async function() {
@@ -633,6 +671,10 @@
         const previousPairing = mobileSettings.pairing;
         try {
             let pairing = parsePairingPayload(value);
+            if (isNativeAppleRuntime() && !localStorage.getItem('pharmAtlasLocalNetworkExplainedV1')) {
+                await window.appAlert?.('PharmAtlas will now ask to find your desktop on the local network. Tap Allow in the iOS permission message. No medication data is shared with other nearby devices.', 'Allow Local Network');
+                localStorage.setItem('pharmAtlasLocalNetworkExplainedV1', '1');
+            }
             try {
                 pairing = await verifyDesktopReachable(pairing);
             } catch (localError) {

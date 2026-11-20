@@ -61,6 +61,8 @@ for (const check of nativeBundleChecks) {
 
 const nativeIndexPath = path.join(root, 'ios', 'App', 'App', 'public', 'index.html');
 const nativeIndex = fs.existsSync(nativeIndexPath) ? fs.readFileSync(nativeIndexPath, 'utf8') : '';
+const nativePluginBridgePath = path.join(root, 'ios', 'App', 'App', 'public', 'mobile-native-plugins.js');
+const nativePluginBridge = fs.existsSync(nativePluginBridgePath) ? fs.readFileSync(nativePluginBridgePath, 'utf8') : '';
 const bridgePosition = nativeIndex.indexOf('vendor/capacitor.js');
 const pluginPosition = nativeIndex.indexOf('mobile-native-plugins.js');
 if (bridgePosition < 0 || pluginPosition < 0 || bridgePosition > pluginPosition) {
@@ -68,10 +70,26 @@ if (bridgePosition < 0 || pluginPosition < 0 || bridgePosition > pluginPosition)
   failed = true;
 }
 
+if (!nativePluginBridge.includes("getPharmAtlasNativePlugin('CapacitorHttp')")) {
+  console.error('The native bundle does not register CapacitorHttp for local-network pairing. Run npm run cap:sync.');
+  failed = true;
+}
+
 const infoPlistPath = path.join(root, 'ios', 'App', 'App', 'Info.plist');
 const infoPlist = fs.existsSync(infoPlistPath) ? fs.readFileSync(infoPlistPath, 'utf8') : '';
+const mobileApi = fs.readFileSync(path.join(root, 'mobile-api.js'), 'utf8');
 if (!infoPlist.includes('<key>NSCameraUsageDescription</key>')) {
   console.error('Info.plist is missing NSCameraUsageDescription, so iOS cannot grant scanner access.');
+  failed = true;
+}
+
+if (!infoPlist.includes('<key>NSLocalNetworkUsageDescription</key>') || !infoPlist.includes('<key>NSAllowsLocalNetworking</key>')) {
+  console.error('Info.plist is missing the local-network permission or transport entry required for desktop pairing.');
+  failed = true;
+}
+
+if (!mobileApi.includes("nativePlugin('CapacitorHttp')") || !mobileApi.includes('localNetworkJsonRequest')) {
+  console.error('Pairing must use CapacitorHttp so iOS performs a native local-network request.');
   failed = true;
 }
 
@@ -114,4 +132,4 @@ if (failed) {
   process.exit(1);
 }
 
-console.log('iOS dependency versions, scanner bridge, camera permission, and privacy manifest are synchronized.');
+console.log('iOS dependencies, native local-network pairing, scanner bridge, permissions, and privacy manifest are synchronized.');

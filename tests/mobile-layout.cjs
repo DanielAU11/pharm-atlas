@@ -85,6 +85,10 @@ app.whenReady().then(async () => {
             open: modal.classList.contains('order-dock-open'),
             bodyVisible: getComputedStyle(body).display !== 'none',
             dockVisible: getComputedStyle(dock).visibility === 'visible',
+            modalClass: modal.className,
+            dockTransform: getComputedStyle(dock).transform,
+            dockLeft: Math.round(rect.left),
+            dockRight: Math.round(rect.right),
             dockWidth: Math.round(rect.width),
             viewportWidth: innerWidth,
             fitsViewport: rect.left >= 0 && rect.right <= innerWidth + 1
