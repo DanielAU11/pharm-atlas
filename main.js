@@ -608,6 +608,9 @@ function localSyncPairingInfo() {
     const payload = new URL('pharmatlas-sync://pair');
     payload.searchParams.set('v', '1');
     payload.searchParams.set('host', host);
+    addresses
+        .filter(address => address !== host)
+        .forEach(address => payload.searchParams.append('host', address));
     payload.searchParams.set('port', String(localSyncState.port));
     payload.searchParams.set('id', localSyncState.deviceId);
     payload.searchParams.set('key', localSyncState.key);

@@ -170,11 +170,15 @@ app.whenReady().then(async () => {
         const originalCapacitor = window.Capacitor;
         const originalAppAlert = window.appAlert;
         let lazyScannerRegistrations = 0;
+        let scannerOptions = null;
         window.Capacitor = {
             getPlatform: () => 'ios',
             registerPlugin: name => {
                 if (name === 'CapacitorBarcodeScanner') lazyScannerRegistrations += 1;
-                return { scanBarcode: async () => ({ ScanResult: '' }) };
+                return { scanBarcode: async options => {
+                    scannerOptions = options;
+                    return { ScanResult: '' };
+                } };
             }
         };
         window.PharmAtlasNativePlugins = {};
@@ -183,6 +187,10 @@ app.whenReady().then(async () => {
         window.Capacitor = originalCapacitor;
         window.appAlert = originalAppAlert;
         const lazyNativeScanner = lazyScannerRegistrations === 1;
+        const nativeScannerOptionsComplete = scannerOptions?.scanButton === false
+            && scannerOptions?.scanText === ' '
+            && scannerOptions?.hint === 0
+            && scannerOptions?.cameraDirection === 1;
         return {
             qodOriginalDates: originalDates.slice(0, 4).map(item => item.date + ' ' + item.time),
             qodAfterDates: afterDates.slice(0, 5).map(item => item.date + ' ' + item.time),
@@ -202,6 +210,7 @@ app.whenReady().then(async () => {
             mobileRuntime: document.documentElement.classList.contains('mobile-runtime'),
             mobileCompanionPanel: !!document.getElementById('mobile-companion-panel'),
             lazyNativeScanner,
+            nativeScannerOptionsComplete,
             mobilePairingControls: {
                 scannerFunction: typeof window.scanMobileDesktopQr === 'function',
                 textFunction: typeof window.pairMobileWithDesktop === 'function',
@@ -250,7 +259,8 @@ app.whenReady().then(async () => {
         !logic.linkDialogUi.validationStayedOpen || !logic.linkDialogUi.validationMessage ||
         Object.values(logic.panels).some(value => !value) || logic.unresolvedButtons.length > 0 ||
         logic.inventoryRows < 5 || logic.scheduleRows < 6 || logic.prepackReturnable < 1 ||
-        !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || Object.values(logic.mobilePairingControls || {}).some(value => !value) || !logic.simplifiedMobileNavigation ||
+        !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || !logic.lazyNativeScanner || !logic.nativeScannerOptionsComplete ||
+        Object.values(logic.mobilePairingControls || {}).some(value => !value) || !logic.simplifiedMobileNavigation ||
         !logic.checkboxLayout?.rendered || !logic.checkboxLayout?.scrollable || !logic.checkboxLayout?.contained || logic.checkboxLayout?.visibleFixedCount > 0 ||
         logic.overflow > 0 || logic.renderErrors.length > 0 || errors.length > 0;
     process.stdout.write(JSON.stringify({ device, logic, screenshots, consoleErrors: errors }, null, 2));

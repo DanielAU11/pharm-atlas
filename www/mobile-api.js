@@ -66,6 +66,8 @@
     }
 
     function nativePlugin(name) {
+        const prepared = window.getPharmAtlasNativePlugin?.(name);
+        if (prepared) return prepared;
         const registered = window.PharmAtlasNativePlugins?.[name] || window.Capacitor?.Plugins?.[name];
         if (registered) return registered;
         const registerPlugin = window.Capacitor?.registerPlugin;
@@ -221,34 +223,43 @@
         const keys = await importPairingKeys(pairing);
         const path = `/pharmatlas-sync/${encodeURIComponent(pairing.id)}/${action}`;
         const body = JSON.stringify(await encryptSyncValue(payload, keys.aes));
-        const timestamp = String(Date.now());
-        const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
-        const signingText = ['POST', path, timestamp, nonce, body].join('\n');
-        const signature = bytesToBase64Url(new Uint8Array(await crypto.subtle.sign('HMAC', keys.hmac, new TextEncoder().encode(signingText))));
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 12000);
-        let response;
-        try {
-            response = await fetch(`http://${pairing.host}:${pairing.port}${path}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-PharmAtlas-Timestamp': timestamp,
-                    'X-PharmAtlas-Nonce': nonce,
-                    'X-PharmAtlas-Signature': signature
-                },
-                body,
-                signal: controller.signal
-            });
-        } catch (error) {
-            if (error?.name === 'AbortError') throw new Error('The desktop did not respond within 12 seconds.');
-            throw error;
-        } finally {
-            clearTimeout(timeout);
+        const hosts = syncHostCandidates(pairing);
+        let lastError = null;
+        for (const host of hosts) {
+            const timestamp = String(Date.now());
+            const nonce = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+            const signingText = ['POST', path, timestamp, nonce, body].join('\n');
+            const signature = bytesToBase64Url(new Uint8Array(await crypto.subtle.sign('HMAC', keys.hmac, new TextEncoder().encode(signingText))));
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 7000);
+            try {
+                const response = await fetch(`http://${host}:${pairing.port}${path}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-PharmAtlas-Timestamp': timestamp,
+                        'X-PharmAtlas-Nonce': nonce,
+                        'X-PharmAtlas-Signature': signature
+                    },
+                    body,
+                    signal: controller.signal
+                });
+                const responseBody = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(responseBody.error || `Desktop returned ${response.status}.`);
+                if (pairing.host !== host) {
+                    pairing.host = host;
+                    await saveMobileSettings();
+                }
+                return decryptSyncValue(responseBody, keys.aes);
+            } catch (error) {
+                lastError = error;
+            } finally {
+                clearTimeout(timeout);
+            }
         }
-        const responseBody = await response.json();
-        if (!response.ok) throw new Error(responseBody.error || `Desktop returned ${response.status}.`);
-        return decryptSyncValue(responseBody, keys.aes);
+        const addresses = hosts.map(host => `${host}:${pairing.port}`).join(', ');
+        const detail = lastError?.name === 'AbortError' ? 'The desktop did not respond in time.' : (lastError?.message || 'The desktop could not be reached.');
+        throw new Error(`${detail} Tried ${addresses}. Keep PharmAtlas Desktop open and allow it through the Windows private-network firewall.`);
     }
 
     function cloudPairingConfigured(pairing = mobileSettings.pairing) {
@@ -522,9 +533,12 @@
     function parsePairingPayload(value) {
         const url = new URL(String(value || '').trim());
         if (url.protocol !== 'pharmatlas-sync:' || url.hostname !== 'pair') throw new Error('This is not a PharmAtlas desktop pairing code.');
+        const privateAddress = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+        const hosts = [...new Set(url.searchParams.getAll('host').map(host => host.trim()).filter(host => privateAddress.test(host)))];
         const pairing = {
             version: Number(url.searchParams.get('v')),
-            host: url.searchParams.get('host') || '',
+            host: hosts[0] || '',
+            hosts,
             port: Number(url.searchParams.get('port')),
             id: url.searchParams.get('id') || '',
             key: url.searchParams.get('key') || '',
@@ -533,8 +547,7 @@
         pairing.relay = url.searchParams.get('relay') || '';
         pairing.vault = url.searchParams.get('vault') || '';
         pairing.token = url.searchParams.get('token') || '';
-        const privateAddress = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(pairing.host);
-        if (pairing.version !== 1 || !privateAddress || !Number.isInteger(pairing.port) || pairing.port < 1 || pairing.port > 65535 || !pairing.id || base64UrlToBytes(pairing.key).length !== 32) {
+        if (pairing.version !== 1 || !pairing.hosts.length || !Number.isInteger(pairing.port) || pairing.port < 1 || pairing.port > 65535 || !pairing.id || base64UrlToBytes(pairing.key).length !== 32) {
             throw new Error('The pairing code is incomplete or does not point to a private local network.');
         }
         if ((pairing.relay || pairing.vault || pairing.token) && (!/^https:\/\//i.test(pairing.relay) || !pairing.vault || pairing.token.length < 32)) {
@@ -543,30 +556,50 @@
         return pairing;
     }
 
+    function syncHostCandidates(pairing) {
+        const privateAddress = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+        return [...new Set([pairing?.host, ...(Array.isArray(pairing?.hosts) ? pairing.hosts : [])])]
+            .map(host => String(host || '').trim())
+            .filter(host => privateAddress.test(host));
+    }
+
     async function verifyDesktopReachable(pairing) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 6000);
-        try {
-            const response = await fetch(`http://${pairing.host}:${pairing.port}/pharmatlas-sync/ping`, {
-                method: 'GET',
-                cache: 'no-store',
-                signal: controller.signal
-            });
-            if (!response.ok) throw new Error(`Desktop returned ${response.status}.`);
-            const result = await response.json();
-            if (result?.protocol !== 1 || result?.deviceId !== pairing.id) {
-                throw new Error('A different or outdated PharmAtlas desktop answered at this address. Generate a new pairing code.');
-            }
-            return true;
-        } catch (error) {
-            if (error?.name === 'AbortError') {
-                throw new Error(`Cannot reach ${pairing.host}:${pairing.port}. Confirm both devices use the same private Wi-Fi and allow PharmAtlas through the desktop firewall.`);
-            }
-            if (/different|outdated|returned/i.test(error?.message || '')) throw error;
-            throw new Error(`Cannot reach ${pairing.host}:${pairing.port}. Enable PharmAtlas in iPhone Settings > Privacy & Security > Local Network, disable VPN or guest Wi-Fi, and allow the desktop app through its private-network firewall.`);
-        } finally {
-            clearTimeout(timeout);
+        const hosts = syncHostCandidates(pairing);
+        const tryHosts = () => Promise.all(hosts.map(async host => {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 6000);
+                try {
+                    const response = await fetch(`http://${host}:${pairing.port}/pharmatlas-sync/ping`, {
+                        method: 'GET',
+                        cache: 'no-store',
+                        signal: controller.signal
+                    });
+                    if (!response.ok) throw new Error(`Desktop returned ${response.status}.`);
+                    const result = await response.json();
+                    if (result?.protocol !== 1 || result?.deviceId !== pairing.id) {
+                        throw new Error('A different or outdated PharmAtlas desktop answered at this address. Generate a new pairing code.');
+                    }
+                    return { host, ok: true };
+                } catch (error) {
+                    return { host, ok: false, error };
+                } finally {
+                    clearTimeout(timeout);
+                }
+            }));
+        let attempts = await tryHosts();
+        let reachable = attempts.find(attempt => attempt.ok);
+        if (!reachable) {
+            // iOS can reject the first socket immediately while its Local Network
+            // permission alert is still being answered. Retry after that decision.
+            await new Promise(resolve => setTimeout(resolve, 1200));
+            attempts = await tryHosts();
+            reachable = attempts.find(attempt => attempt.ok);
         }
+        if (reachable) return { ...pairing, host: reachable.host, hosts };
+        const identityError = attempts.find(attempt => /different|outdated/i.test(attempt.error?.message || ''));
+        if (identityError) throw identityError.error;
+        const addresses = hosts.map(host => `${host}:${pairing.port}`).join(', ');
+        throw new Error(`Cannot reach ${addresses}. On iPhone, enable Settings > Privacy & Security > Local Network > PharmAtlas. On Windows, allow PharmAtlas on Private networks. Guest Wi-Fi, VPNs, and client isolation can also block local pairing.`);
     }
 
     window.enableIphoneReminders = async function() {
@@ -599,8 +632,13 @@
         if (!value) return window.appAlert?.('Paste the pairing text from Desktop > Device Sync, then choose Pair Text.', 'Pair Desktop');
         const previousPairing = mobileSettings.pairing;
         try {
-            const pairing = parsePairingPayload(value);
-            await verifyDesktopReachable(pairing);
+            let pairing = parsePairingPayload(value);
+            try {
+                pairing = await verifyDesktopReachable(pairing);
+            } catch (localError) {
+                if (!cloudPairingConfigured(pairing)) throw localError;
+                await cloudRelayFetch(pairing, 'GET');
+            }
             mobileSettings.pairing = pairing;
             mobileSettings.lastSyncError = '';
             await saveMobileSettings();
@@ -626,6 +664,8 @@
         try {
             const result = await scanner.scanBarcode({
                 hint: 0,
+                scanButton: false,
+                scanText: ' ',
                 cameraDirection: 1,
                 scanOrientation: 3,
                 scanInstructions: 'Scan the pairing code shown by PharmAtlas Desktop',

@@ -43,12 +43,16 @@ app.whenReady().then(async () => {
     const window = await waitForWindow();
     const info = await window.webContents.executeJavaScript('window.api.startLocalSync()');
     if (!info?.available) throw new Error(info?.error || 'Local sync endpoint is unavailable.');
+    const payloadHosts = new URL(info.pairingPayload).searchParams.getAll('host');
+    if (payloadHosts[0] !== info.host || info.addresses.some(address => !payloadHosts.includes(address))) {
+        throw new Error(`Pairing payload did not include every desktop address: ${JSON.stringify({ payloadHosts, addresses: info.addresses })}`);
+    }
     const ping = await requestPing(info);
     if (ping.status !== 200 || ping.origin !== 'capacitor://localhost' || ping.body?.deviceId !== info.deviceId || ping.body?.protocol !== 1) {
         throw new Error(`Unexpected connectivity response: ${JSON.stringify(ping)}`);
     }
     await window.webContents.executeJavaScript('window.api.stopLocalSync()');
-    process.stdout.write(JSON.stringify({ host: info.host, port: info.port, addresses: info.addresses, ping }, null, 2));
+    process.stdout.write(JSON.stringify({ host: info.host, port: info.port, addresses: info.addresses, payloadHosts, ping }, null, 2));
     app.isQuiting = true;
     window.destroy();
     app.quit();
