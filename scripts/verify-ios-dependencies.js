@@ -70,8 +70,8 @@ if (bridgePosition < 0 || pluginPosition < 0 || bridgePosition > pluginPosition)
   failed = true;
 }
 
-if (!nativePluginBridge.includes("getPharmAtlasNativePlugin('CapacitorHttp')")) {
-  console.error('The native bundle does not register CapacitorHttp for local-network pairing. Run npm run cap:sync.');
+if (!nativePluginBridge.includes("getPharmAtlasNativePlugin('CapacitorHttp')") || !nativePluginBridge.includes("getPharmAtlasNativePlugin('PharmAtlasLocalNetwork')")) {
+  console.error('The native bundle does not register the local-network pairing plugins. Run npm run cap:sync.');
   failed = true;
 }
 
@@ -88,8 +88,10 @@ if (!infoPlist.includes('<key>NSLocalNetworkUsageDescription</key>') || !infoPli
   failed = true;
 }
 
-if (!mobileApi.includes("nativePlugin('CapacitorHttp')") || !mobileApi.includes('localNetworkJsonRequest')) {
-  console.error('Pairing must use CapacitorHttp so iOS performs a native local-network request.');
+const sceneDelegatePath = path.join(root, 'ios', 'App', 'App', 'SceneDelegate.swift');
+const sceneDelegate = fs.readFileSync(sceneDelegatePath, 'utf8');
+if (!mobileApi.includes("nativePlugin('CapacitorHttp')") || !mobileApi.includes("nativePlugin('PharmAtlasLocalNetwork')") || !mobileApi.includes('localNetworkJsonRequest') || !sceneDelegate.includes('NWConnection') || !sceneDelegate.includes('PharmAtlasBridgeViewController')) {
+  console.error('Pairing must use the native Network framework and CapacitorHttp so iOS can request and diagnose Local Network access.');
   failed = true;
 }
 

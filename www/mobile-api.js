@@ -607,6 +607,31 @@
             .filter(host => privateAddress.test(host));
     }
 
+    async function requestNativeLocalNetworkAccess(pairing) {
+        if (!isNativeAppleRuntime()) return pairing;
+        const probe = nativePlugin('PharmAtlasLocalNetwork');
+        if (!probe?.probe) throw new Error('The iOS Local Network bridge is unavailable. Pull the newest source, run npm run cap:sync, then delete and reinstall PharmAtlas from Xcode.');
+        const hosts = syncHostCandidates(pairing);
+        const results = [];
+        for (const host of hosts) {
+            try {
+                const result = await probe.probe({ host, port: pairing.port, timeoutMs: 30000 });
+                results.push({ host, ...result });
+                if (result?.status === 'allowed') return { ...pairing, host, hosts };
+                if (result?.status === 'denied') {
+                    throw new Error('Local Network access was denied. PharmAtlas should now appear in iPhone Settings > Privacy & Security > Local Network. Turn it on, return to PharmAtlas, and pair again.');
+                }
+            } catch (error) {
+                if (/denied|Local Network access/i.test(error?.message || '')) throw error;
+                results.push({ host, status: 'error', message: error?.message || String(error) });
+            }
+        }
+        if (results.some(result => result.status === 'timeout')) {
+            throw new Error('The Local Network permission request was not completed. Pair again and respond to the iOS permission sheet before it closes.');
+        }
+        return pairing;
+    }
+
     async function verifyDesktopReachable(pairing) {
         const hosts = syncHostCandidates(pairing);
         const tryHosts = () => Promise.all(hosts.map(async host => {
@@ -675,6 +700,7 @@
                 await window.appAlert?.('PharmAtlas will now ask to find your desktop on the local network. Tap Allow in the iOS permission message. No medication data is shared with other nearby devices.', 'Allow Local Network');
                 localStorage.setItem('pharmAtlasLocalNetworkExplainedV1', '1');
             }
+            pairing = await requestNativeLocalNetworkAccess(pairing);
             try {
                 pairing = await verifyDesktopReachable(pairing);
             } catch (localError) {

@@ -16,4 +16,5 @@
     window.getPharmAtlasNativePlugin('CapacitorBarcodeScanner');
     window.getPharmAtlasNativePlugin('LocalNotifications');
     window.getPharmAtlasNativePlugin('CapacitorHttp');
+    window.getPharmAtlasNativePlugin('PharmAtlasLocalNetwork');
 })();
