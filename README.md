@@ -70,11 +70,11 @@ It is not a substitute for professional medical judgment, pharmacy dispensing so
 
 ## Privacy
 
-PharmAtlas stores data locally on the user's device unless the user exports files, sends emails, creates backups, stores the data folder in a third-party sync location such as OneDrive, or explicitly pairs an iPhone/iPad with the desktop app over the local network.
+PharmAtlas stores data locally on the user's device unless the user exports files, sends emails, creates backups, stores the data folder in a third-party sync location such as OneDrive, pairs an iPhone/iPad with the desktop app, or enables an optional encrypted remote relay.
 
 Desktop email uses SMTP credentials configured by that Windows user in their local app profile. No developer email account is included. iPhone and iPad reminders are scheduled by iOS on the device and do not use email.
 
-Optional companion sync uses a QR pairing secret and encrypted, authenticated messages between the phone/tablet and a running PharmAtlas desktop on the same local network. A desktop safety backup is created before incoming mobile changes are written. No PharmAtlas cloud or developer-operated sync service is involved.
+Optional direct companion sync uses a QR pairing secret and encrypted, authenticated messages between the phone/tablet and a running PharmAtlas desktop on the same local network. Optional remote sync can instead store an AES-256-GCM encrypted envelope on a user-configured HTTPS relay so phone changes can wait while the desktop is offline. The relay address and hosting account are controlled by the user; PharmAtlas does not ship with a developer-operated relay. A desktop safety backup is created before incoming changes are written.
 
 Users are responsible for protecting their devices, local network, backups, exported PDFs, email settings, and any health information entered into the app.
 
@@ -123,6 +123,12 @@ npm run cap:doctor
 ```
 
 The native Swift Package Manager project is `ios/App/App.xcodeproj`. Open it with `npm run cap:open:ios`. App Store metadata, privacy language, screenshot requirements, and the Xcode publishing walkthrough are in `docs/app-store/`.
+
+### Distribution
+
+- The Windows desktop edition is a free download.
+- The iPhone and iPad edition is planned as a one-time **$3.99 USD** App Store purchase with no subscription or in-app purchase.
+- Apple controls storefront conversion, taxes, proceeds, refunds, and the final displayed price.
 
 ## Verification
 

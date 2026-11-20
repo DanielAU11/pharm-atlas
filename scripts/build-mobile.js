@@ -10,6 +10,7 @@ const files = [
   ['renderer.js', 'renderer.js'],
   ['mobile-api.js', 'mobile-api.js'],
   ['mobile-native-plugins.js', 'mobile-native-plugins.js'],
+  ['node_modules/@capacitor/core/dist/capacitor.js', 'vendor/capacitor.js'],
   ['vendor/qrcode.js', 'vendor/qrcode.js'],
   ['node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js'],
   ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'vendor/pdf.min.mjs'],
@@ -46,6 +47,7 @@ const mobileIndex = fs.readFileSync(mobileIndexPath, 'utf8')
   .replace('https://unpkg.com/98.css', 'vendor/98.css')
   .replace('node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js')
   .replace('<script src="mobile-api.js"></script>', [
+    '<script src="vendor/capacitor.js"></script>',
     '<script src="mobile-native-plugins.js"></script>',
     '<script src="mobile-api.js"></script>'
   ].join('\n'));

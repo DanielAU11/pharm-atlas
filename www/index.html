@@ -1027,13 +1027,16 @@
                         </fieldset>
 
                         <fieldset class="help-card">
-                            <legend>12. Local Sync & Privacy</legend>
+                            <legend>12. Sync &amp; Privacy</legend>
                             <ul>
                                 <li>Desktop Sync Folder can place PharmAtlas data inside OneDrive, Google Drive Desktop, Dropbox, or another user-controlled synced folder.</li>
                                 <li>Avoid editing from two computers at the same time. Let the sync app finish before opening PharmAtlas elsewhere.</li>
+                                <li>Initial iPhone pairing uses a QR code and the same local network. Optional Remote Sync can then exchange end-to-end encrypted updates while the desktop is closed or on another network.</li>
+                                <li>Remote Sync requires a user-controlled compatible HTTPS relay. The relay stores encrypted payloads and cannot read medication details without the pairing key.</li>
                                 <li>PharmAtlas data, PDFs, labels, backups, synced folders, and emails may contain private health information.</li>
                                 <li>Protect your computer account, cloud account, email app password, backups, and exported files.</li>
                             </ul>
+                            <button type="button" onclick="window.open('https://github.com/DanielAU11/pharm-atlas/blob/master/docs/app-store/PRIVACY_POLICY.md', '_blank')">Privacy Policy</button>
                         </fieldset>
 
                         <fieldset class="help-card help-wide">
@@ -1831,7 +1834,8 @@
     <script src="sync-core.js"></script>
     <script src="vendor/qrcode.js"></script>
     <script src="vendor/bwip-js-min.js"></script>
-    <script src="mobile-native-plugins.js"></script>
+    <script src="vendor/capacitor.js"></script>
+<script src="mobile-native-plugins.js"></script>
 <script src="mobile-api.js"></script>
     <script src="renderer.js"></script>
 </body>

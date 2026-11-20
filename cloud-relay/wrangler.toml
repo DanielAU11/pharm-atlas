@@ -1,0 +1,11 @@
+name = "pharmatlas-encrypted-relay"
+main = "worker.js"
+compatibility_date = "2026-11-20"
+
+[[durable_objects.bindings]]
+name = "PHARMATLAS_VAULTS"
+class_name = "PharmAtlasVault"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PharmAtlasVault"]

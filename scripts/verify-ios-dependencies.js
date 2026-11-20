@@ -16,6 +16,17 @@ const packageNames = [
   '@capacitor/barcode-scanner'
 ];
 
+const nativeBundleChecks = [
+  {
+    file: path.join(root, 'ios', 'App', 'App', 'public', 'vendor', 'capacitor.js'),
+    message: 'Missing the Capacitor browser bridge in the native bundle. Run npm run cap:sync.'
+  },
+  {
+    file: path.join(root, 'ios', 'App', 'App', 'PrivacyInfo.xcprivacy'),
+    message: 'Missing the app privacy manifest from the iOS target.'
+  }
+];
+
 let failed = false;
 for (const packageName of packageNames) {
   const manifestVersion = packageJson.dependencies[packageName] || packageJson.devDependencies[packageName];
@@ -41,6 +52,34 @@ if (swiftVersion !== expected) {
   console.log(`capacitor-swift-pm: ${swiftVersion}`);
 }
 
+for (const check of nativeBundleChecks) {
+  if (!fs.existsSync(check.file)) {
+    console.error(check.message);
+    failed = true;
+  }
+}
+
+const nativeIndexPath = path.join(root, 'ios', 'App', 'App', 'public', 'index.html');
+const nativeIndex = fs.existsSync(nativeIndexPath) ? fs.readFileSync(nativeIndexPath, 'utf8') : '';
+const bridgePosition = nativeIndex.indexOf('vendor/capacitor.js');
+const pluginPosition = nativeIndex.indexOf('mobile-native-plugins.js');
+if (bridgePosition < 0 || pluginPosition < 0 || bridgePosition > pluginPosition) {
+  console.error('The native bundle must load vendor/capacitor.js before mobile-native-plugins.js. Run npm run cap:sync.');
+  failed = true;
+}
+
+const infoPlistPath = path.join(root, 'ios', 'App', 'App', 'Info.plist');
+const infoPlist = fs.existsSync(infoPlistPath) ? fs.readFileSync(infoPlistPath, 'utf8') : '';
+if (!infoPlist.includes('<key>NSCameraUsageDescription</key>')) {
+  console.error('Info.plist is missing NSCameraUsageDescription, so iOS cannot grant scanner access.');
+  failed = true;
+}
+
+if (!packageSwift.includes('CapacitorBarcodeScanner')) {
+  console.error('The iOS Swift package does not include CapacitorBarcodeScanner. Run npm run cap:sync.');
+  failed = true;
+}
+
 if (process.platform === 'darwin') {
   try {
     const output = execFileSync('xcodebuild', ['-version'], { encoding: 'utf8' });
@@ -62,4 +101,4 @@ if (failed) {
   process.exit(1);
 }
 
-console.log('iOS dependency versions are synchronized.');
+console.log('iOS dependency versions, scanner bridge, camera permission, and privacy manifest are synchronized.');

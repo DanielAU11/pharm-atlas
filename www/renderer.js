@@ -9148,9 +9148,9 @@ function renderLinkChoicePanel(panel, choices, selected = [], pickerAction = '',
 
 function linkRelationshipOptionsHtml(selectedMode = '') {
     const modes = [
-        ['together', 'And', 'Both orders are due and move together.'],
+        ['together', 'And', 'Both medications are due and move together.'],
         ['choose-one', 'Or', 'Only one linked alternative is documented.'],
-        ['followed-by', 'Followed by', 'The selected order follows this order after a defined interval.']
+        ['followed-by', 'Followed by', 'The selected medication follows this medication after a defined interval.']
     ];
     return modes.map(([value, label, detail]) => `<label class="link-type-choice ${selectedMode === value ? 'selected' : ''}">
         <input name="linkMode" type="radio" value="${value}" ${selectedMode === value ? 'checked' : ''} onchange="updateLinkOrderDialog()">
@@ -9165,7 +9165,7 @@ function linkOrderDialogHtml(choices, selectedValues, options = {}) {
     const delayUnit = delayMinutes % 1440 === 0 ? 'days' : (delayMinutes % 60 === 0 ? 'hours' : 'minutes');
     const delayAmount = delayUnit === 'days' ? delayMinutes / 1440 : (delayUnit === 'hours' ? delayMinutes / 60 : delayMinutes);
     return `<div data-action-modal-size="wide" class="link-orders-dialog">
-        ${options.currentLabel ? `<div class="link-current-order"><strong>Current order</strong><span>${escapeHtml(options.currentLabel)}</span></div>` : ''}
+        ${options.currentLabel ? `<div class="link-current-order"><strong>Current medication</strong><span>${escapeHtml(options.currentLabel)}</span></div>` : ''}
         <div data-link-order-error class="link-order-error" style="display:none;"></div>
         <fieldset class="link-type-fieldset"><legend>Select link type</legend><div class="link-type-grid">${linkRelationshipOptionsHtml(selectedMode)}</div></fieldset>
         <div data-follow-delay class="link-follow-delay" style="${selectedMode === 'followed-by' ? '' : 'display:none;'}">
@@ -9173,7 +9173,7 @@ function linkOrderDialogHtml(choices, selectedValues, options = {}) {
             <label>Selected medication starts <input name="followDelayAmount" type="number" min="1" step="1" value="${escapeHtml(delayAmount)}">
                 <select name="followDelayUnit"><option value="minutes" ${delayUnit === 'minutes' ? 'selected' : ''}>minutes</option><option value="hours" ${delayUnit === 'hours' ? 'selected' : ''}>hours</option><option value="days" ${delayUnit === 'days' ? 'selected' : ''}>days</option></select> after this medication</label>
         </div>
-        <fieldset><legend>Select existing order</legend>
+        <fieldset><legend>Select existing medication</legend>
             <div class="link-order-search-row"><input name="linkSearch" type="search" placeholder="Search medication, strength, frequency, or time" oninput="filterLinkOrderChoices(this.value)"><button type="button" onclick="filterLinkOrderChoices(this.previousElementSibling.value)">Search</button><button type="button" onclick="clearLinkOrderSelection()">Clear</button></div>
             <div class="sunken-panel link-picker-list">
                 ${choices.map((choice, index) => {
@@ -9207,7 +9207,7 @@ function collectLinkOrderDialog(body) {
     if (mode === 'followed-by' && linkIds.length !== 1) return showError('Followed by links require exactly one next medication.');
     const amount = parseInt(body.querySelector('[name="followDelayAmount"]')?.value, 10);
     const unit = body.querySelector('[name="followDelayUnit"]')?.value || 'minutes';
-    if (mode === 'followed-by' && (!Number.isInteger(amount) || amount < 1)) return showError('Enter how long after this order the selected order should follow.');
+    if (mode === 'followed-by' && (!Number.isInteger(amount) || amount < 1)) return showError('Enter how long after this medication the selected medication should follow.');
     const multiplier = unit === 'days' ? 1440 : (unit === 'hours' ? 60 : 1);
     return { linkIds, linkMode: mode, followDelayMinutes: mode === 'followed-by' ? amount * multiplier : 0 };
 }
@@ -9294,7 +9294,7 @@ window.openScheduleLinkPicker = async function() {
     const memberId = document.getElementById('select-member')?.value || '';
     const choices = scheduleLinkChoices(memberId);
     const modeSelect = document.getElementById('sched-link-mode');
-    const result = await chooseLinkedMedications('Link Orders', choices, selectedOptionValues(panel), {
+    const result = await chooseLinkedMedications('Link Medications', choices, selectedOptionValues(panel), {
         mode: modeSelect?.value || panel.dataset.linkMode || 'together',
         followDelayMinutes: panel.dataset.followDelayMinutes,
         currentLabel: 'Medication order being scheduled'
@@ -9313,7 +9313,7 @@ window.openModifierLinkPicker = async function() {
     const choices = schedule ? scheduleLinkChoicesForModifier(schedule) : scheduleLinkChoices(panel.dataset.memberId || '', panel.dataset.excludeId || '');
     const previous = selectedOptionValues(panel).sort();
     const modeSelect = document.getElementById('mod-link-mode');
-    const result = await chooseLinkedMedications('Link Orders', choices, previous, {
+    const result = await chooseLinkedMedications('Link Medications', choices, previous, {
         mode: modeSelect?.value || panel.dataset.linkMode || 'together',
         followDelayMinutes: panel.dataset.followDelayMinutes,
         currentLabel: scheduleMedicationLabel(schedule)
@@ -9816,24 +9816,35 @@ window.openDesktopDeviceSync = async function() {
         return appAlert(`The local sync service could not start. ${error.message || ''}`, 'Device Sync');
     }
     if (!info?.available) return appAlert(info?.error || 'Connect the desktop to Wi-Fi, then try again.', 'Device Sync');
+    const cloud = await window.api.getCloudSyncStatus?.();
     const qr = rawQrDataUrl(info.pairingPayload);
     await showActionModal('Pair iPhone or iPad', `
         <div class="device-sync-dialog">
             <div class="device-sync-qr">${qr ? `<img src="${qr}" alt="Encrypted PharmAtlas pairing QR">` : ''}</div>
             <div class="device-sync-copy">
-                <h3><span class="win98-icon icon-view"></span> Same-network companion sync</h3>
+                <h3><span class="win98-icon icon-view"></span> Pair this phone</h3>
                 <ol>
                     <li>Keep PharmAtlas open on this desktop.</li>
                     <li>On the iPhone or iPad Dashboard, tap <b>Pair Desktop</b>.</li>
                     <li>Scan this code and approve Local Network access.</li>
                 </ol>
-                <p>Medication data is encrypted before it crosses the local network. It is not routed through email or a PharmAtlas cloud server.</p>
+                <p>Initial pairing happens directly on your private network. Medication data is encrypted before it leaves either device.</p>
                 ${(info.addresses || []).length > 1 ? `<label>Desktop network address
                     <select onchange="selectDesktopSyncAddress(this.value)">
                         ${(info.addresses || []).map(address => `<option value="${escapeHtml(address)}" ${address === info.host ? 'selected' : ''}>${escapeHtml(address)}</option>`).join('')}
                     </select>
                 </label>` : ''}
                 <div class="sunken-panel device-sync-address">${escapeHtml(info.host)}:${escapeHtml(info.port)}</div>
+                <div class="cloud-sync-summary ${cloud?.enabled ? 'enabled' : ''}">
+                    <strong>${cloud?.enabled ? 'Encrypted remote sync enabled' : 'Away-from-home sync is off'}</strong>
+                    <span>${cloud?.enabled
+                        ? `The relay stores ciphertext only. Phone changes can wait while this desktop is offline. Last sync: ${escapeHtml(cloud.lastSyncAt ? new Date(cloud.lastSyncAt).toLocaleString() : 'Not yet')}${cloud.lastError ? ` | ${escapeHtml(cloud.lastError)}` : ''}`
+                        : 'Enable an encrypted relay to document away from home or work without keeping this desktop online.'}</span>
+                    <div class="field-row">
+                        <button type="button" onclick="openRemoteSyncSetup()"><span class="win98-icon icon-view"></span>${cloud?.enabled ? 'Remote Sync Settings' : 'Enable Remote Sync'}</button>
+                        ${cloud?.enabled ? '<button type="button" onclick="syncRemoteNow()"><span class="win98-icon icon-receive"></span>Sync Remote Now</button>' : ''}
+                    </div>
+                </div>
                 <details class="device-sync-manual-pairing">
                     <summary>Simulator / manual pairing</summary>
                     <p>Use this when the Xcode Simulator cannot scan the QR. Treat this text like a password.</p>
@@ -9850,6 +9861,44 @@ window.openDesktopDeviceSync = async function() {
             </div>
         </div>
     `, 'Done');
+};
+
+window.openRemoteSyncSetup = async function() {
+    document.getElementById('action-modal-cancel')?.click();
+    const status = await window.api.getCloudSyncStatus?.();
+    const result = await showActionModal('Encrypted Remote Sync', `
+        <div class="remote-sync-setup">
+            <p><b>How it works:</b> PharmAtlas encrypts the complete sync payload on your device. The relay receives an opaque encrypted envelope and cannot read medication or member information.</p>
+            <label>HTTPS relay address
+                <input name="relayUrl" type="url" required placeholder="https://your-pharmatlas-relay.example.workers.dev" value="${escapeHtml(status?.relayUrl || '')}">
+            </label>
+            <div class="important-note">Use only a relay you control or a service covered by the privacy and regulatory agreements appropriate for your data. Enabling this changes the app's privacy disclosures. After setup, scan the newly generated pairing QR again.</div>
+            ${status?.enabled ? `<div class="sunken-panel remote-sync-status">Vault: ${escapeHtml(status.vaultId || '')}<br>Last sync: ${escapeHtml(status.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString() : 'Not yet')}${status.lastError ? `<br><span class="status-error">${escapeHtml(status.lastError)}</span>` : ''}</div><button type="button" onclick="disableRemoteSync()"><span class="win98-icon icon-clear"></span>Disable Remote Sync</button>` : ''}
+        </div>
+    `, status?.enabled ? 'Verify & Save' : 'Enable');
+    if (!result) return;
+    try {
+        await window.api.configureCloudSync?.(result.relayUrl);
+        await appAlert('Encrypted remote sync is ready. Re-open Device Sync and scan the new QR on the phone.', 'Remote Sync Ready');
+    } catch (error) {
+        await appAlert(error.message || 'The encrypted relay could not be reached.', 'Remote Sync Setup Failed');
+    }
+};
+
+window.disableRemoteSync = async function() {
+    if (!await appConfirm('Disable off-network sync on this desktop? Data already stored by the relay is not deleted automatically.', 'Disable Remote Sync')) return;
+    await window.api.disableCloudSync?.();
+    document.getElementById('action-modal-cancel')?.click();
+    await appAlert('Remote sync is disabled. Direct same-network sync is still available.', 'Remote Sync Disabled');
+};
+
+window.syncRemoteNow = async function() {
+    try {
+        await window.api.syncCloudNow?.();
+        await appAlert('Encrypted remote changes were merged.', 'Remote Sync Complete');
+    } catch (error) {
+        await appAlert(error.message || 'Remote sync is unavailable.', 'Remote Sync Failed');
+    }
 };
 
 window.selectDesktopSyncAddress = async function(host) {
@@ -9943,7 +9992,7 @@ function renderMemberPrnMedicationOrders(memberId) {
             <br><small>Dose: ${escapeHtml(formatPrescribedDose(med, schedule.doseQty))} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med))}${escapeHtml(prnLimitText(schedule))}${hasScheduledPrnReminders(schedule) ? ` | Frequency: ${escapeHtml(formatFrequency({ ...schedule, freq: schedule.prnScheduleFreq }))} ${escapeHtml(getScheduleTimes(schedule).join(', '))}` : ''}</small>
             ${linkedDetailsHtml(schedule, candidates)}
             <div class="member-med-timeline" data-schedule-id="${escapeHtml(schedule.id)}"></div>
-            <div style="text-align:right; margin-top:5px;">
+            <div class="member-med-actions">
                 <button onclick="event.stopPropagation(); printSingleLabel('${escapeHtml(schedule.id)}')">Label</button>
                 <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${escapeHtml(schedule.id)}')">Audit</button>
                 <button onclick="event.stopPropagation(); administerDose('${escapeHtml(schedule.medId)}','${escapeHtml(schedule.id)}')">Administer</button>
@@ -10464,7 +10513,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                     return `<div class="member-med-inline-row ${held ? 'member-med-held' : ''}" style="font-size:11px; border-bottom:1px dotted #c0c0c0; padding-bottom:4px;">${holdIndicatorHtml(schedule)}${med ? `${escapeHtml(med.name)} ${escapeHtml(formatMedStrength(med))}` : 'Unknown'} | Dose: ${med ? escapeHtml(formatPrescribedDose(med, schedule.doseQty)) : 'Unknown'} | Qty: ${escapeHtml(formatQtyForSchedule(schedule, med || {}))} | ${escapeHtml(formatFrequency(schedule))} ${escapeHtml(getScheduleTimes(schedule).join(', ') || 'PRN')}${escapeHtml(prnLimitText(schedule))}${escapeHtml(scheduleExceptionText(schedule))}
                         ${linkedDetailsHtml(schedule, setSchedules)}
                         <div class="member-med-timeline" data-schedule-id="${schedule.id}"></div>
-                        <div style="text-align:right; margin-top:3px;">
+                        <div class="member-med-actions member-med-inline-actions">
                             <button onclick="event.stopPropagation(); printSingleLabel('${schedule.id}')">Individual Labels</button>
                             <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${schedule.id}')">Audit</button>
                             <button onclick="event.stopPropagation(); openOrderModifier('${schedule.id}')">Modify</button>
@@ -10512,7 +10561,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                     <small>Dose: ${med ? escapeHtml(formatPrescribedDose(med, s.doseQty)) : 'Unknown'} | Qty: ${med ? escapeHtml(formatQtyForSchedule(s, med)) : escapeHtml(s.doseQty)} | ${escapeHtml(formatFrequency(s))} ${escapeHtml(getScheduleTimes(s).join(', ') || 'PRN')}${escapeHtml(prnLimitText(s))}${escapeHtml(scheduleExceptionText(s))}</small>
                     ${linkedDetailsHtml(s, memberActiveCandidates)}
                     <div class="member-med-timeline" data-schedule-id="${s.id}"></div>
-                    <div style="text-align:right; margin-top:5px;">
+                    <div class="member-med-actions">
                         <button onclick="event.stopPropagation(); printSingleLabel('${s.id}')">Label</button>
                         <button onclick="event.stopPropagation(); viewMedicationOrderAudit('${s.id}')">Audit</button>
                         <button onclick="event.stopPropagation(); administerDose('${s.medId}','${s.id}')">Administer</button>
@@ -18639,24 +18688,24 @@ window.renderVitalInputs = function() {
         const member = db.family.find(item => item.id === document.getElementById('vital-member-select')?.value);
         const profile = monitoringProfileById(member, type.slice('monitor:'.length));
         container.innerHTML = profile
-            ? `<label>${escapeHtml(profile.labName)}:</label><input id="vital-monitor-value" type="number" step="any" style="width:90px;">
-                <span>${escapeHtml(profile.unit || 'value')}</span>
+            ? `<label class="vital-input-item"><span>${escapeHtml(profile.labName)}</span><input id="vital-monitor-value" type="number" step="any" inputmode="decimal"></label>
+                <span class="vital-input-unit">${escapeHtml(profile.unit || 'value')}</span>
                 <span class="form-help">${escapeHtml(monitoringGoalText(profile))}</span>`
             : '<span class="form-help">Select a valid medication monitoring profile.</span>';
     } else if (type === 'bp') {
         container.innerHTML = `
-            <label>Systolic:</label><input id="vital-systolic" type="number" style="width:60px;">
-            <label>Diastolic:</label><input id="vital-diastolic" type="number" style="width:60px;">
-            <label>Heart Rate:</label><input id="vital-hr" type="number" style="width:60px;">
+            <label class="vital-input-item"><span>Systolic</span><input id="vital-systolic" type="number" inputmode="numeric"></label>
+            <label class="vital-input-item"><span>Diastolic</span><input id="vital-diastolic" type="number" inputmode="numeric"></label>
+            <label class="vital-input-item"><span>Heart rate</span><input id="vital-hr" type="number" inputmode="numeric"></label>
         `;
     } else if (type === 'weight') {
-        container.innerHTML = `<label>Weight:</label><input id="vital-weight" type="number" step="0.1" style="width:80px;">
-            <select id="vital-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select>`;
+        container.innerHTML = `<label class="vital-input-item"><span>Weight</span><input id="vital-weight" type="number" step="0.1" inputmode="decimal"></label>
+            <label class="vital-input-item vital-input-unit-field"><span>Unit</span><select id="vital-weight-unit"><option value="lb">lb</option><option value="kg">kg</option></select></label>`;
     } else {
         container.innerHTML = type === 'temperature'
-            ? `<label>Temperature:</label><input id="vital-temperature" type="number" step="0.1" style="width:80px;">
-                <select id="vital-temperature-unit"><option value="F">Fahrenheit (F)</option><option value="C">Celsius (C)</option></select>`
-            : `<label>Blood Glucose:</label><input id="vital-glucose" type="number" style="width:80px;"> <span>mg/dL</span>`;
+            ? `<label class="vital-input-item"><span>Temperature</span><input id="vital-temperature" type="number" step="0.1" inputmode="decimal"></label>
+                <label class="vital-input-item vital-input-unit-field"><span>Unit</span><select id="vital-temperature-unit"><option value="F">Fahrenheit (F)</option><option value="C">Celsius (C)</option></select></label>`
+            : `<label class="vital-input-item"><span>Blood glucose</span><input id="vital-glucose" type="number" inputmode="numeric"></label><span class="vital-input-unit">mg/dL</span>`;
     }
 };
 
@@ -23496,7 +23545,7 @@ window.openProfileScheduleLinkPicker = async function() {
     const previous = selectedOptionValues(panel).filter(value => !excludeIds.has(value)).sort();
     const modeSelect = body.querySelector('[name="linkMode"]');
     const sourceSchedule = db.schedules.find(item => item.id === (body.querySelector('[name="modifySourceId"]')?.value || ''));
-    const result = await chooseLinkedMedicationsChild('Link Orders', choices, previous, {
+    const result = await chooseLinkedMedicationsChild('Link Medications', choices, previous, {
         mode: modeSelect?.value || panel.dataset.linkMode || 'together',
         followDelayMinutes: panel.dataset.followDelayMinutes,
         currentLabel: sourceSchedule ? scheduleMedicationLabel(sourceSchedule) : 'Medication order being scheduled'

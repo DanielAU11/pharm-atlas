@@ -5,9 +5,11 @@ The native iOS project must be archived and uploaded on a Mac with Xcode 26.0 or
 ## 1. Prepare Apple Accounts
 
 1. Join the Apple Developer Program.
-2. In App Store Connect, create a new app named **PharmAtlas**.
-3. Use bundle ID `com.pharmatlas.app` and SKU `pharmatlas-ios`.
-4. Add the privacy policy URL, categories, age rating, app privacy answers, description, keywords, support URL, and screenshots from this folder.
+2. As the Account Holder, open **Business > Agreements**, accept the Paid Apps Agreement, and complete the requested tax and banking information.
+3. In App Store Connect, create a new app named **PharmAtlas**.
+4. Use bundle ID `com.pharmatlas.app` and SKU `pharmatlas-ios`.
+5. Under **Monetization > Pricing and Availability**, choose the United States as the base storefront and select the `$3.99 USD` price point. Do not create an in-app purchase; this is a one-time paid download.
+6. Add the privacy policy URL, categories, age rating, app privacy answers, description, keywords, support URL, and screenshots from this folder.
 
 ## 2. Move The Repository To The Mac
 
@@ -39,7 +41,7 @@ In Xcode's package list, `capacitor-swift-pm` must show `8.5.3`. If another vers
 1. Select the **App** target in Xcode.
 2. In **Signing & Capabilities**, select the correct development team.
 3. Keep **Automatically manage signing** enabled.
-4. Confirm bundle identifier `com.pharmatlas.app`, version `1.3.0`, and a build number not previously uploaded.
+4. Confirm bundle identifier `com.pharmatlas.app`, version `1.3.1`, and a build number not previously uploaded.
 5. Confirm iPhone and iPad are both selected as supported destinations.
 
 ## 4. Test Before Archiving
@@ -49,8 +51,10 @@ In Xcode's package list, `capacitor-swift-pm` must show `8.5.3`. If another vers
 3. Verify persistence after force-quit and relaunch.
 4. Verify schedule creation, single-dose and future-dose retiming, inventory subtraction, native local notifications, backup/restore, PDF generation, sharing, and accessibility text sizing.
 5. Pair with a running Windows desktop on the same Wi-Fi network. Verify QR camera permission, manual pairing fallback, phone-to-desktop and desktop-to-phone changes, conflict merging, deletion handling, and automatic desktop safety backups.
-6. Force-quit the iOS app and verify already-scheduled reminders still appear without email or a network connection.
-7. In Xcode, use **Product > Analyze** and resolve release-blocking findings.
+6. If remote sync will be offered, deploy and configure the encrypted relay, re-pair with the new QR, turn off Wi-Fi on the phone, make a test change over cellular, quit/reopen the desktop, and verify the queued change merges with a safety backup.
+7. Force-quit the iOS app and verify already-scheduled reminders still appear without email or a network connection.
+8. In Xcode, use **Product > Analyze** and resolve release-blocking findings.
+9. Choose **Product > Archive**, open the archive in Organizer, and generate the privacy report. Confirm the report matches the App Store Connect answers before uploading.
 
 ### Local Companion Sync From Xcode
 
@@ -82,6 +86,7 @@ If pairing fails, verify the desktop pairing address is a private address (`10.x
 1. Add the processed build to an internal TestFlight group and complete a real-device acceptance pass.
 2. In the App Store version page, select the processed build.
 3. Complete export compliance, content rights, age rating, app privacy, and review contact fields.
-4. Add the build for review, then submit it to App Review.
+4. Confirm Pricing and Availability shows the intended `$3.99 USD` base price and that no in-app purchase products exist.
+5. Add the build for review, then submit it to App Review.
 
 For every later upload, increment `CURRENT_PROJECT_VERSION` in Xcode. Increment `MARKETING_VERSION` only for a new public version.

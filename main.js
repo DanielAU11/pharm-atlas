@@ -50,6 +50,8 @@ let lastKnownDbFingerprint = '';
 let localSyncServer = null;
 let localSyncState = loadLocalSyncConfig();
 const localSyncNonces = new Map();
+let cloudSyncInProgress = false;
+let cloudSyncTimer = null;
 
 function dbFingerprintFromText(text) {
     return crypto.createHash('sha256').update(String(text || '').replace(/^\uFEFF/, '')).digest('hex');
@@ -73,13 +75,34 @@ function loadLocalSyncConfig() {
                 key: saved.key || randomBase64Url(),
                 port: Number(saved.port) || 43127,
                 host: String(saved.host || ''),
-                pairedAt: saved.pairedAt || ''
+                pairedAt: saved.pairedAt || '',
+                cloudEnabled: saved.cloudEnabled === true,
+                relayUrl: String(saved.relayUrl || ''),
+                vaultId: String(saved.vaultId || ''),
+                cloudToken: String(saved.cloudToken || ''),
+                cloudRevision: String(saved.cloudRevision || ''),
+                lastCloudSyncAt: saved.lastCloudSyncAt || '',
+                lastCloudSyncError: saved.lastCloudSyncError || ''
             };
         }
     } catch (error) {
         console.error('Unable to read local sync configuration:', error.message);
     }
-    return { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, host: '', pairedAt: '' };
+    return {
+        enabled: false,
+        deviceId: `desktop-${crypto.randomUUID()}`,
+        key: randomBase64Url(),
+        port: 43127,
+        host: '',
+        pairedAt: '',
+        cloudEnabled: false,
+        relayUrl: '',
+        vaultId: '',
+        cloudToken: '',
+        cloudRevision: '',
+        lastCloudSyncAt: '',
+        lastCloudSyncError: ''
+    };
 }
 
 function saveLocalSyncConfig() {
@@ -315,6 +338,137 @@ function decryptLocalSyncPayload(envelope) {
     ]).toString('utf8'));
 }
 
+function normalizedRelayUrl(value) {
+    const url = new URL(String(value || '').trim());
+    if (url.protocol !== 'https:') throw new Error('Remote sync requires an HTTPS relay address.');
+    url.pathname = url.pathname.replace(/\/+$/, '');
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+}
+
+function cloudSyncConfigured() {
+    return localSyncState.cloudEnabled === true && !!localSyncState.relayUrl && !!localSyncState.vaultId && !!localSyncState.cloudToken;
+}
+
+function cloudSyncStatus() {
+    return {
+        enabled: cloudSyncConfigured(),
+        relayUrl: localSyncState.relayUrl || '',
+        vaultId: localSyncState.vaultId || '',
+        lastSyncAt: localSyncState.lastCloudSyncAt || '',
+        lastError: localSyncState.lastCloudSyncError || ''
+    };
+}
+
+async function cloudRelayFetch(method, envelope = null, revision = '') {
+    if (!cloudSyncConfigured()) throw new Error('Encrypted remote sync is not configured.');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+        const response = await fetch(`${localSyncState.relayUrl}/v1/vaults/${encodeURIComponent(localSyncState.vaultId)}`, {
+            method,
+            headers: {
+                'Authorization': `Bearer ${localSyncState.cloudToken}`,
+                'Content-Type': 'application/json',
+                ...(method === 'PUT' ? { 'If-Match': revision || '*' } : {})
+            },
+            body: method === 'PUT' ? JSON.stringify({ envelope }) : undefined,
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        if (response.status === 404) return { missing: true };
+        const result = await response.json().catch(() => ({}));
+        if (response.status === 409 || response.status === 412) return { conflict: true, revision: result.revision || '' };
+        if (!response.ok) throw new Error(result.error || `Remote relay returned ${response.status}.`);
+        return result;
+    } catch (error) {
+        if (error?.name === 'AbortError') throw new Error('The encrypted sync relay did not respond within 15 seconds.');
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function syncWithCloudRelay(retry = true) {
+    if (!cloudSyncConfigured() || cloudSyncInProgress) return cloudSyncStatus();
+    cloudSyncInProgress = true;
+    try {
+        const current = readDbFromPath(dbPath);
+        const pulled = await cloudRelayFetch('GET');
+        if (pulled.missing) {
+            const created = await cloudRelayFetch('PUT', encryptLocalSyncPayload(current), '');
+            if (created.conflict && retry) {
+                cloudSyncInProgress = false;
+                return syncWithCloudRelay(false);
+            }
+            localSyncState.cloudRevision = created.revision || '';
+        } else {
+            if (!pulled.envelope || !pulled.revision) throw new Error('The encrypted sync relay returned an incomplete vault.');
+            const incoming = decryptLocalSyncPayload(pulled.envelope);
+            const merged = SyncCore.mergeDatabases(current, incoming, desktopDeviceId(), new Date().toISOString(), { preferIncomingOnTie: true });
+            const localChanged = SyncCore.canonical(current) !== SyncCore.canonical(merged);
+            const remoteChanged = SyncCore.canonical(incoming) !== SyncCore.canonical(merged);
+            if (localChanged) {
+                const backupPath = preserveMobileSyncBackup();
+                writeDbToPath(dbPath, merged);
+                win?.webContents.send('db-updated-from-mobile', { deviceName: 'encrypted cloud sync', backupPath });
+            }
+            if (remoteChanged) {
+                const pushed = await cloudRelayFetch('PUT', encryptLocalSyncPayload(merged), pulled.revision);
+                if (pushed.conflict && retry) {
+                    cloudSyncInProgress = false;
+                    return syncWithCloudRelay(false);
+                }
+                if (pushed.conflict) throw new Error('Remote data changed during synchronization. Try Sync Now again.');
+                localSyncState.cloudRevision = pushed.revision || '';
+            } else {
+                localSyncState.cloudRevision = pulled.revision;
+            }
+        }
+        localSyncState.lastCloudSyncAt = new Date().toISOString();
+        localSyncState.lastCloudSyncError = '';
+        saveLocalSyncConfig();
+        return cloudSyncStatus();
+    } catch (error) {
+        localSyncState.lastCloudSyncError = error.message || 'Encrypted remote sync failed.';
+        saveLocalSyncConfig();
+        throw error;
+    } finally {
+        cloudSyncInProgress = false;
+    }
+}
+
+function queueCloudSync(delay = 800) {
+    if (!cloudSyncConfigured()) return;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(() => syncWithCloudRelay().catch(error => console.error('Encrypted remote sync:', error.message)), delay);
+}
+
+async function configureCloudSync(relayUrl) {
+    const previous = { ...localSyncState };
+    try {
+        localSyncState.relayUrl = normalizedRelayUrl(relayUrl);
+        localSyncState.vaultId = localSyncState.vaultId || crypto.randomUUID();
+        localSyncState.cloudToken = localSyncState.cloudToken || randomBase64Url(32);
+        localSyncState.cloudEnabled = true;
+        localSyncState.lastCloudSyncError = '';
+        saveLocalSyncConfig();
+        return await syncWithCloudRelay();
+    } catch (error) {
+        localSyncState = previous;
+        saveLocalSyncConfig();
+        throw error;
+    }
+}
+
+function disableCloudSync() {
+    localSyncState.cloudEnabled = false;
+    localSyncState.lastCloudSyncError = '';
+    saveLocalSyncConfig();
+    return cloudSyncStatus();
+}
+
 function localSyncSignature(method, requestPath, timestamp, nonce, body) {
     return crypto.createHmac('sha256', localSyncKeyBuffer())
         .update([method.toUpperCase(), requestPath, timestamp, nonce, body].join('\n'))
@@ -458,6 +612,11 @@ function localSyncPairingInfo() {
     payload.searchParams.set('id', localSyncState.deviceId);
     payload.searchParams.set('key', localSyncState.key);
     payload.searchParams.set('name', os.hostname());
+    if (cloudSyncConfigured()) {
+        payload.searchParams.set('relay', localSyncState.relayUrl);
+        payload.searchParams.set('vault', localSyncState.vaultId);
+        payload.searchParams.set('token', localSyncState.cloudToken);
+    }
     return {
         enabled: true,
         available: true,
@@ -466,7 +625,8 @@ function localSyncPairingInfo() {
         port: localSyncState.port,
         deviceId: localSyncState.deviceId,
         pairingPayload: payload.toString(),
-        pairedAt: localSyncState.pairedAt || ''
+        pairedAt: localSyncState.pairedAt || '',
+        cloud: cloudSyncStatus()
     };
 }
 
@@ -675,8 +835,25 @@ ipcMain.handle('start-local-sync', () => startLocalSyncServer());
 ipcMain.handle('stop-local-sync', () => stopLocalSyncServer());
 ipcMain.handle('reset-local-sync-pairing', async () => {
     await stopLocalSyncServer();
-    localSyncState = { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, host: '', pairedAt: '' };
+    const relayUrl = localSyncState.relayUrl || '';
+    const cloudEnabled = localSyncState.cloudEnabled === true && !!relayUrl;
+    localSyncState = {
+        enabled: false,
+        deviceId: `desktop-${crypto.randomUUID()}`,
+        key: randomBase64Url(),
+        port: 43127,
+        host: '',
+        pairedAt: '',
+        cloudEnabled,
+        relayUrl,
+        vaultId: cloudEnabled ? crypto.randomUUID() : '',
+        cloudToken: cloudEnabled ? randomBase64Url(32) : '',
+        cloudRevision: '',
+        lastCloudSyncAt: '',
+        lastCloudSyncError: ''
+    };
     saveLocalSyncConfig();
+    if (cloudEnabled) await syncWithCloudRelay();
     return startLocalSyncServer();
 });
 ipcMain.handle('set-local-sync-host', (_event, host) => {
@@ -686,12 +863,17 @@ ipcMain.handle('set-local-sync-host', (_event, host) => {
     saveLocalSyncConfig();
     return localSyncPairingInfo();
 });
+ipcMain.handle('get-cloud-sync-status', () => cloudSyncStatus());
+ipcMain.handle('configure-cloud-sync', (_event, relayUrl) => configureCloudSync(relayUrl));
+ipcMain.handle('sync-cloud-now', () => syncWithCloudRelay());
+ipcMain.handle('disable-cloud-sync', () => disableCloudSync());
 
 ipcMain.handle('save-db', (event, data) => {
     const conflictBackup = preserveDbConflictBackupIfNeeded();
     const current = readDbFromPath(dbPath);
     const prepared = SyncCore.prepareDatabase(current, data, desktopDeviceId());
     writeDbToPath(dbPath, prepared);
+    queueCloudSync();
     return { success: true, conflictBackup, revision: dbFingerprintFromText(JSON.stringify(prepared)) };
 });
 
@@ -1007,6 +1189,10 @@ app.whenReady().then(async () => {
             console.error('Unable to resume local companion sync:', error.message);
         }
     }
+    if (cloudSyncConfigured()) {
+        queueCloudSync(1000);
+        setInterval(() => queueCloudSync(0), 30000);
+    }
 });
 
 // Handle app quitting properly
@@ -1016,4 +1202,5 @@ app.on('before-quit', () => {
         localSyncServer.close();
         localSyncServer = null;
     }
+    clearTimeout(cloudSyncTimer);
 });

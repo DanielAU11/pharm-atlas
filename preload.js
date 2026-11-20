@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('api', {
     stopLocalSync: () => ipcRenderer.invoke('stop-local-sync'),
     resetLocalSyncPairing: () => ipcRenderer.invoke('reset-local-sync-pairing'),
     setLocalSyncHost: (host) => ipcRenderer.invoke('set-local-sync-host', host),
+    getCloudSyncStatus: () => ipcRenderer.invoke('get-cloud-sync-status'),
+    configureCloudSync: (relayUrl) => ipcRenderer.invoke('configure-cloud-sync', relayUrl),
+    syncCloudNow: () => ipcRenderer.invoke('sync-cloud-now'),
+    disableCloudSync: () => ipcRenderer.invoke('disable-cloud-sync'),
     onDatabaseUpdatedFromMobile: (callback) => {
         const listener = (_event, details) => callback(details);
         ipcRenderer.on('db-updated-from-mobile', listener);

@@ -506,6 +506,14 @@ button {
     color: #000080;
 }
 
+.member-med-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 5px;
+}
+
 .today-primary-action {
     min-width: 86px;
     font-weight: bold;
@@ -3962,6 +3970,42 @@ button {
     padding: 6px;
     background: #fff;
     font-family: monospace;
+}
+
+.cloud-sync-summary {
+    display: grid;
+    gap: 5px;
+    margin: 9px 0;
+    padding: 8px;
+    border: 2px inset #ffffff;
+    background: #fff8d8;
+}
+
+.cloud-sync-summary.enabled {
+    background: #e2f5e2;
+}
+
+.cloud-sync-summary strong {
+    color: #000080;
+}
+
+.remote-sync-setup {
+    display: grid;
+    gap: 9px;
+    max-width: 620px;
+}
+
+.remote-sync-setup label {
+    display: grid;
+    gap: 4px;
+    color: #000080;
+    font-weight: bold;
+}
+
+.remote-sync-status {
+    padding: 7px;
+    background: #ffffff;
+    overflow-wrap: anywhere;
 }
 
 .device-sync-manual-pairing {
@@ -12813,6 +12857,547 @@ button {
     .email-setup-grid,
     .device-sync-dialog {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    /* Mobile companion: a phone layout with Win98 controls, not a squeezed desktop. */
+    .mobile-runtime,
+    .mobile-runtime body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden !important;
+        background: #b8b8b8;
+    }
+
+    .mobile-runtime body {
+        padding-bottom: calc(68px + env(safe-area-inset-bottom)) !important;
+    }
+
+    .mobile-runtime body > .window.app-window {
+        width: 100% !important;
+        min-width: 0 !important;
+        margin: 0;
+        border-left-width: 2px;
+        border-right-width: 2px;
+    }
+
+    .mobile-runtime .app-window > .title-bar {
+        position: sticky;
+        top: 0;
+        z-index: 80;
+        min-height: 38px;
+        padding: 5px 8px;
+    }
+
+    .mobile-runtime .app-window > .title-bar .title-bar-text {
+        font-size: 18px;
+        line-height: 24px;
+        letter-spacing: 0;
+    }
+
+    .mobile-runtime .tabs > menu[role="tablist"],
+    .mobile-runtime .workspace-taskbar,
+    .mobile-runtime .dashboard-command-rail {
+        display: none !important;
+    }
+
+    .mobile-runtime .app-panel-window,
+    .mobile-runtime .app-panel-window > .window-body {
+        width: 100% !important;
+        min-width: 0 !important;
+        margin: 0;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime .app-panel-window > .window-body {
+        padding: 7px;
+        overflow-x: hidden;
+    }
+
+    .mobile-bottom-nav {
+        position: fixed;
+        z-index: 20000;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 2px;
+        padding: 5px 5px calc(5px + env(safe-area-inset-bottom));
+        border-top: 2px outset #ffffff;
+        background: #c0c0c0;
+        box-shadow: 0 -2px 0 #000000;
+    }
+
+    .mobile-bottom-nav button {
+        display: flex;
+        min-width: 0;
+        min-height: 48px;
+        padding: 4px 2px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        font-size: 11px;
+        line-height: 12px;
+        white-space: normal;
+    }
+
+    .mobile-bottom-nav button.active {
+        color: #000080;
+        font-weight: bold;
+        box-shadow: inset 1px 1px #000000, inset -1px -1px #ffffff;
+        background: #e6f1ff;
+    }
+
+    .mobile-bottom-nav .win98-icon {
+        transform: none;
+    }
+
+    .mobile-more-sheet {
+        position: fixed;
+        z-index: 19999;
+        left: 8px;
+        right: 8px;
+        bottom: calc(68px + env(safe-area-inset-bottom));
+        width: auto;
+        max-height: 60dvh;
+    }
+
+    .mobile-more-sheet[hidden] {
+        display: none !important;
+    }
+
+    .mobile-more-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding: 8px;
+    }
+
+    .mobile-more-actions button {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 7px;
+        min-height: 48px;
+        white-space: normal;
+    }
+
+    .mobile-runtime fieldset {
+        min-width: 0;
+        margin: 0 0 10px;
+        padding: 8px;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime legend {
+        max-width: calc(100vw - 42px);
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-runtime .dashboard-workspace,
+    .mobile-runtime .dashboard-main-column {
+        display: flex !important;
+        width: 100%;
+        min-width: 0;
+        flex-direction: column;
+    }
+
+    .mobile-runtime .dashboard-main-column > fieldset:nth-child(3) { order: 1; }
+    .mobile-runtime .dashboard-main-column > fieldset:nth-child(1) { order: 2; }
+    .mobile-runtime .dashboard-main-column > fieldset:nth-child(2) { order: 3; }
+    .mobile-runtime .dashboard-main-column > fieldset:nth-child(4) { order: 4; }
+    .mobile-runtime .dashboard-main-column > fieldset:nth-child(5) { order: 5; }
+
+    .mobile-runtime .calendar-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+        overflow: visible;
+    }
+
+    .mobile-runtime .calendar-controls > strong {
+        grid-column: 1 / -1;
+        grid-row: 1;
+        padding: 5px;
+        text-align: center;
+        border: 1px solid #808080;
+        background: #ffffff;
+    }
+
+    .mobile-runtime .calendar-view-toggle {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 3px;
+    }
+
+    .mobile-runtime #calendar-grid {
+        min-width: 0 !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        overflow: hidden !important;
+    }
+
+    .mobile-runtime #calendar-grid.calendar-day-view .calendar-hour-row:has(.calendar-hour-empty) {
+        display: none;
+    }
+
+    .mobile-runtime .calendar-hour-row {
+        grid-template-columns: 52px minmax(0, 1fr);
+        min-height: 34px;
+    }
+
+    .mobile-runtime .calendar-dose {
+        padding: 5px 2px;
+        font-size: 12px;
+        line-height: 16px;
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-runtime .today-summary-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+    }
+
+    .mobile-runtime .today-summary-strip span {
+        min-width: 0;
+        padding: 7px;
+        text-align: center;
+    }
+
+    .mobile-runtime .today-dose-list {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .mobile-runtime .today-dose-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 7px;
+        padding: 10px 8px;
+        font-size: 13px;
+    }
+
+    .mobile-runtime .today-dose-row strong {
+        font-size: 15px;
+    }
+
+    .mobile-runtime .today-dose-row small {
+        display: block;
+        margin-top: 3px;
+        font-size: 12px;
+        line-height: 16px;
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-runtime .today-row-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) repeat(2, auto);
+        width: 100%;
+        gap: 5px;
+        white-space: normal;
+    }
+
+    .mobile-runtime .today-row-actions button {
+        min-height: 38px;
+    }
+
+    .mobile-runtime .today-status-pill {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        padding: 0 5px;
+        font-weight: bold;
+    }
+
+    .mobile-runtime .mobile-companion-panel {
+        margin-bottom: 10px;
+        padding: 7px;
+    }
+
+    .mobile-runtime .mobile-companion-heading {
+        font-size: 13px;
+    }
+
+    .mobile-runtime .mobile-companion-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mobile-runtime .mobile-companion-actions button {
+        min-height: 44px;
+        font-size: 12px;
+    }
+
+    .mobile-runtime .mobile-camera-pair {
+        color: #000080;
+        font-weight: bold;
+        background: #e6f1ff;
+    }
+
+    .mobile-runtime .mobile-pairing-fallback {
+        margin-top: 7px;
+        padding: 5px;
+        border: 1px solid #808080;
+        background: #f7f7f7;
+    }
+
+    .mobile-runtime .mobile-pairing-fallback summary {
+        min-height: 28px;
+        line-height: 28px;
+        color: #000080;
+        cursor: pointer;
+    }
+
+    .mobile-runtime .mobile-pairing-fallback-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 5px;
+        margin-top: 5px;
+    }
+
+    .mobile-runtime .mobile-pairing-code {
+        min-width: 0;
+        margin: 0;
+    }
+
+    .mobile-runtime #panel-schedules .field-row,
+    .mobile-runtime #panel-inventory fieldset:first-child .field-row,
+    .mobile-runtime #panel-inventory .inventory-tracking-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px !important;
+        align-items: stretch;
+    }
+
+    .mobile-runtime #panel-schedules .field-row > *,
+    .mobile-runtime #panel-inventory fieldset:first-child .field-row > *,
+    .mobile-runtime #panel-inventory .inventory-tracking-row > * {
+        width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime #panel-schedules .field-row > label,
+    .mobile-runtime #panel-inventory fieldset:first-child .field-row > label,
+    .mobile-runtime #panel-inventory .inventory-tracking-row > label {
+        width: auto !important;
+        margin-top: 5px;
+        color: #000080;
+        font-weight: bold;
+    }
+
+    .mobile-runtime .guide-tip {
+        display: none !important;
+    }
+
+    .mobile-runtime input,
+    .mobile-runtime select,
+    .mobile-runtime textarea {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        min-height: 40px;
+        box-sizing: border-box;
+        font-size: 16px;
+    }
+
+    .mobile-runtime textarea {
+        min-height: 92px;
+    }
+
+    .mobile-runtime button {
+        min-height: 38px;
+        white-space: normal;
+    }
+
+    .mobile-runtime .inventory-command-strip,
+    .mobile-runtime .inventory-search-strip,
+    .mobile-runtime .inventory-command-groups,
+    .mobile-runtime .inventory-command-group {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        width: 100%;
+        min-width: 0;
+        gap: 5px;
+    }
+
+    .mobile-runtime .inventory-command-title {
+        padding-top: 5px;
+        color: #000080;
+        font-weight: bold;
+    }
+
+    .mobile-runtime #panel-inventory .sunken-panel:has(#inventory-table-body) {
+        height: auto !important;
+        max-height: none;
+        overflow-x: auto !important;
+    }
+
+    .mobile-runtime #panel-inventory table {
+        min-width: 680px;
+    }
+
+    .mobile-runtime .profile-demographics-strip {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .mobile-runtime .profile-name-grid {
+        grid-template-columns: minmax(0, 1fr) 70px !important;
+    }
+
+    .mobile-runtime .profile-name-grid > label:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-runtime .profile-demo-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .mobile-runtime .profile-demo-grid label,
+    .mobile-runtime .profile-name-grid label {
+        min-width: 0;
+    }
+
+    .mobile-runtime .member-profile-tabbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        margin: 0;
+        padding: 5px 2px;
+        background: #c0c0c0;
+    }
+
+    .mobile-runtime .member-profile-tabbar button {
+        min-height: 42px;
+        padding: 5px 10px;
+    }
+
+    .mobile-runtime .member-profile-body {
+        padding: 6px !important;
+        overflow-x: hidden !important;
+    }
+
+    .mobile-runtime .member-active-toolbar,
+    .mobile-runtime .timeline-controls {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+        overflow: visible;
+    }
+
+    .mobile-runtime .member-active-toolbar > *,
+    .mobile-runtime .timeline-controls > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .mobile-runtime .member-med-timeline {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .mobile-runtime .member-med-timeline > * {
+        min-width: 580px;
+    }
+
+    .mobile-runtime .member-med-actions,
+    .mobile-runtime .member-regimen-actions,
+    .mobile-runtime .completed-med-actions {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+        width: 100%;
+        margin-top: 8px;
+    }
+
+    .mobile-runtime .member-med-actions button,
+    .mobile-runtime .member-regimen-actions button,
+    .mobile-runtime .completed-med-actions button {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+    }
+
+    .mobile-runtime .member-regimen-summary,
+    .mobile-runtime .completed-med-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 5px;
+    }
+
+    .mobile-runtime .profile-main-grid,
+    .mobile-runtime .profile-two-column,
+    .mobile-runtime .profile-contact-grid,
+    .mobile-runtime .regimen-builder-grid,
+    .mobile-runtime .order-set-card,
+    .mobile-runtime .monitoring-layout {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .mobile-runtime #panel-vitals > fieldset:first-child > .field-row:first-of-type {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+        gap: 4px;
+    }
+
+    .mobile-runtime #panel-vitals > fieldset:first-child > .field-row:first-of-type label {
+        margin-top: 5px;
+        color: #000080;
+        font-weight: bold;
+    }
+
+    .mobile-runtime #vital-input-fields {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+        align-items: end;
+    }
+
+    .mobile-runtime #vital-input-fields .vital-input-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+        color: #000080;
+        font-weight: bold;
+    }
+
+    .mobile-runtime #vital-input-fields .vital-input-item input,
+    .mobile-runtime #vital-input-fields .vital-input-item select {
+        width: 100% !important;
+    }
+
+    .mobile-runtime #vital-input-fields .vital-input-unit,
+    .mobile-runtime #vital-input-fields .form-help {
+        grid-column: 1 / -1;
+    }
+
+    @media (max-width: 360px) {
+        .mobile-runtime #vital-input-fields {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
+    .mobile-runtime .favorite-regimen-button,
+    .mobile-runtime .regimen-card-actions,
+    .mobile-runtime .order-set-actions {
+        position: static !important;
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        gap: 5px;
+        margin-top: 7px;
+    }
+
+    .mobile-runtime .modal-overlay .field-row,
+    .mobile-runtime .action-modal-window .field-row,
+    .mobile-runtime .order-modifier-window .field-row {
+        max-width: 100%;
     }
 }
 

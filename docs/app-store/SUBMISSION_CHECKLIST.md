@@ -1,10 +1,13 @@
 # PharmAtlas App Store Submission Checklist
 
 - [ ] Apple Developer Program membership is active.
+- [ ] The Account Holder has accepted the Paid Apps Agreement and completed required tax and banking details.
 - [ ] App Store Connect record uses bundle ID `com.pharmatlas.app`.
+- [ ] Pricing and Availability uses a United States base price of `$3.99` with no in-app purchases or subscription.
 - [ ] App name, subtitle, description, keywords, categories, support URL, and privacy URL are complete.
 - [ ] Privacy policy is publicly reachable without authentication.
 - [ ] App privacy answers match the exact submitted binary.
+- [x] App target includes `PrivacyInfo.xcprivacy`; Capacitor dependencies include their privacy manifests.
 - [ ] Medical-device/regulatory status has been reviewed for the intended distribution and claims.
 - [ ] 1024 x 1024 icon has no transparency and contains no rounded-corner mask.
 - [ ] At least one accepted iPhone screenshot and one 13-inch iPad screenshot are uploaded.
@@ -15,6 +18,7 @@
 - [ ] Backup/restore and persistence after relaunch pass.
 - [ ] Native iOS reminders work after force-quit and do not depend on email.
 - [ ] Camera QR pairing, manual pairing, local-network permission, encrypted sync, conflict merge, and desktop safety backup pass on physical devices.
+- [ ] Optional remote relay is either deployed and tested end to end or clearly left disabled for the submitted build.
 - [ ] Medication scheduling, retiming, administration, inventory, monitoring, reports, and sharing pass on iOS.
 - [ ] Desktop-only Prepack and Recipe Builder tabs are absent from iOS navigation.
 - [ ] App Review notes clearly state intended use and provide a review path.

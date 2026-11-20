@@ -3,6 +3,12 @@
 
     window.__PHARMATLAS_MOBILE__ = true;
     document.documentElement.classList.add('mobile-runtime');
+    if (!localStorage.getItem('pharmAtlasMobileCalendarDefaultV1')) {
+        localStorage.setItem('pharmAtlasDashboardCalendarView', 'day');
+        localStorage.setItem('pharmAtlasCustomEventCalendarView', 'day');
+        localStorage.setItem('pharmAtlasMemberCalendarView', 'day');
+        localStorage.setItem('pharmAtlasMobileCalendarDefaultV1', '1');
+    }
     if (/iPad|iPhone|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
         document.documentElement.classList.add('ios-runtime');
     }
@@ -245,10 +251,74 @@
         return decryptSyncValue(responseBody, keys.aes);
     }
 
+    function cloudPairingConfigured(pairing = mobileSettings.pairing) {
+        return !!pairing?.relay && !!pairing?.vault && !!pairing?.token;
+    }
+
+    async function cloudRelayFetch(pairing, method, envelope = null, revision = '') {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+            const response = await fetch(`${pairing.relay}/v1/vaults/${encodeURIComponent(pairing.vault)}`, {
+                method,
+                headers: {
+                    'Authorization': `Bearer ${pairing.token}`,
+                    'Content-Type': 'application/json',
+                    ...(method === 'PUT' ? { 'If-Match': revision || '*' } : {})
+                },
+                body: method === 'PUT' ? JSON.stringify({ envelope }) : undefined,
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            if (response.status === 404) return { missing: true };
+            const result = await response.json().catch(() => ({}));
+            if (response.status === 409 || response.status === 412) return { conflict: true, revision: result.revision || '' };
+            if (!response.ok) throw new Error(result.error || `Encrypted relay returned ${response.status}.`);
+            return result;
+        } catch (error) {
+            if (error?.name === 'AbortError') throw new Error('The encrypted sync relay did not respond within 15 seconds.');
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    async function syncWithCloudRelay(data, retry = true) {
+        const pairing = mobileSettings.pairing;
+        const keys = await importPairingKeys(pairing);
+        const pulled = await cloudRelayFetch(pairing, 'GET');
+        if (pulled.missing) {
+            const created = await cloudRelayFetch(pairing, 'PUT', await encryptSyncValue(data, keys.aes), '');
+            if (created.conflict && retry) return syncWithCloudRelay(data, false);
+            if (created.conflict) throw new Error('The encrypted vault changed while it was being initialized. Try again.');
+            return data;
+        }
+        if (!pulled.envelope || !pulled.revision) throw new Error('The encrypted sync relay returned an incomplete vault.');
+        const incoming = await decryptSyncValue(pulled.envelope, keys.aes);
+        const merged = window.PharmAtlasSyncCore.mergeDatabases(data, incoming, mobileDeviceId, new Date().toISOString(), { preferIncomingOnTie: true });
+        if (window.PharmAtlasSyncCore.canonical(incoming) !== window.PharmAtlasSyncCore.canonical(merged)) {
+            const pushed = await cloudRelayFetch(pairing, 'PUT', await encryptSyncValue(merged, keys.aes), pulled.revision);
+            if (pushed.conflict && retry) return syncWithCloudRelay(merged, false);
+            if (pushed.conflict) throw new Error('Another device updated the encrypted vault. Tap Sync Now to merge the newest changes.');
+        }
+        return merged;
+    }
+
     async function syncWithDesktop(data = lastMobileDatabase, quiet = false) {
         if (!mobileSettings.pairing || mobileSyncInProgress || !data) return null;
         mobileSyncInProgress = true;
         try {
+            if (cloudPairingConfigured()) {
+                const merged = await syncWithCloudRelay(data);
+                lastMobileDatabase = merged;
+                await writeMobileRecord(dbKey, JSON.stringify(merged));
+                mobileSettings.lastSyncAt = new Date().toISOString();
+                mobileSettings.lastSyncError = '';
+                await saveMobileSettings();
+                await refreshNativeNotifications(merged);
+                if (typeof window.applyMobileSyncedDatabase === 'function') window.applyMobileSyncedDatabase(merged);
+                return merged;
+            }
             // Always establish a desktop baseline before sending phone changes. This makes
             // first pairing additive and gives the desktop a revision it can verify.
             const pulled = await signedSyncRequest('pull', { protocol: 1, deviceId: mobileDeviceId });
@@ -456,9 +526,15 @@
             key: url.searchParams.get('key') || '',
             name: url.searchParams.get('name') || 'PharmAtlas Desktop'
         };
+        pairing.relay = url.searchParams.get('relay') || '';
+        pairing.vault = url.searchParams.get('vault') || '';
+        pairing.token = url.searchParams.get('token') || '';
         const privateAddress = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(pairing.host);
         if (pairing.version !== 1 || !privateAddress || !Number.isInteger(pairing.port) || pairing.port < 1 || pairing.port > 65535 || !pairing.id || base64UrlToBytes(pairing.key).length !== 32) {
             throw new Error('The pairing code is incomplete or does not point to a private local network.');
+        }
+        if ((pairing.relay || pairing.vault || pairing.token) && (!/^https:\/\//i.test(pairing.relay) || !pairing.vault || pairing.token.length < 32)) {
+            throw new Error('The remote-sync portion of this pairing code is incomplete. Generate a new code on the desktop.');
         }
         return pairing;
     }
@@ -525,12 +601,15 @@
             mobileSettings.lastSyncError = '';
             await saveMobileSettings();
             await syncWithDesktop(lastMobileDatabase || emptyDb);
-            return window.appAlert?.(`Paired with ${mobileSettings.pairing.name}. Changes sync while both apps are open on the same local network.`, 'Desktop Paired');
+            const mode = cloudPairingConfigured(pairing)
+                ? 'Encrypted remote sync is enabled, so changes can wait securely while the desktop is offline.'
+                : 'Direct sync works while both apps are open on the same local network.';
+            return window.appAlert?.(`Paired with ${mobileSettings.pairing.name}. ${mode}`, 'Desktop Paired');
         } catch (error) {
             mobileSettings.pairing = previousPairing;
             mobileSettings.lastSyncError = error.message;
             await saveMobileSettings();
-            return window.appAlert?.(`${error.message}\nKeep the desktop app open and confirm both devices use the same Wi-Fi network.`, 'Pairing Failed');
+            return window.appAlert?.(`${error.message}\nInitial pairing still requires the desktop and phone on the same network.`, 'Pairing Failed');
         }
     }
 
@@ -562,6 +641,56 @@
         }
     };
 
+    function updateMobileNavigation(activeTab = '') {
+        document.querySelectorAll('.mobile-bottom-nav button[data-mobile-tab], .mobile-more-sheet button[data-mobile-tab]').forEach(button => {
+            const active = button.dataset.mobileTab === activeTab;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-current', active ? 'page' : 'false');
+        });
+    }
+
+    window.mobileSwitchTab = function(tabName) {
+        window.switchTab?.(tabName);
+        updateMobileNavigation(tabName);
+        document.getElementById('mobile-more-sheet')?.setAttribute('hidden', '');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    window.toggleMobileMore = function(forceOpen) {
+        const sheet = document.getElementById('mobile-more-sheet');
+        if (!sheet) return;
+        const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : sheet.hasAttribute('hidden');
+        sheet.toggleAttribute('hidden', !shouldOpen);
+    };
+
+    function installMobileNavigation() {
+        if (document.getElementById('mobile-bottom-nav')) return;
+        const nav = document.createElement('nav');
+        nav.id = 'mobile-bottom-nav';
+        nav.className = 'mobile-bottom-nav';
+        nav.setAttribute('aria-label', 'Primary navigation');
+        nav.innerHTML = `
+            <button type="button" data-mobile-tab="dashboard" onclick="mobileSwitchTab('dashboard')"><span class="win98-icon icon-dashboard"></span><span>Today</span></button>
+            <button type="button" data-mobile-tab="schedules" onclick="mobileSwitchTab('schedules')"><span class="win98-icon icon-calendar"></span><span>Schedule</span></button>
+            <button type="button" data-mobile-tab="family" onclick="mobileSwitchTab('family')"><span class="win98-icon icon-family"></span><span>Members</span></button>
+            <button type="button" data-mobile-tab="vitals" onclick="mobileSwitchTab('vitals')"><span class="win98-icon icon-monitor"></span><span>Checks</span></button>
+            <button type="button" onclick="toggleMobileMore()" aria-controls="mobile-more-sheet"><span class="win98-icon icon-info"></span><span>More</span></button>`;
+        const sheet = document.createElement('section');
+        sheet.id = 'mobile-more-sheet';
+        sheet.className = 'mobile-more-sheet window';
+        sheet.setAttribute('hidden', '');
+        sheet.innerHTML = `
+            <div class="title-bar"><div class="title-bar-text">More PharmAtlas tools</div><div class="title-bar-controls"><button type="button" aria-label="Close" onclick="toggleMobileMore(false)"></button></div></div>
+            <div class="window-body mobile-more-actions">
+                <button type="button" data-mobile-tab="order-sets" onclick="mobileSwitchTab('order-sets')"><span class="win98-icon icon-regimen"></span>Regimens</button>
+                <button type="button" data-mobile-tab="inventory" onclick="mobileSwitchTab('inventory')"><span class="win98-icon icon-inventory"></span>Inventory</button>
+                <button type="button" data-mobile-tab="drug-info" onclick="mobileSwitchTab('drug-info')"><span class="win98-icon icon-info"></span>Drug information</button>
+                <button type="button" data-mobile-tab="help" onclick="mobileSwitchTab('help')"><span class="win98-icon icon-info"></span>Help &amp; setup</button>
+            </div>`;
+        document.body.append(sheet, nav);
+        updateMobileNavigation('dashboard');
+    }
+
     window.pairMobileWithDesktop = async function() {
         const value = document.getElementById('mobile-pairing-code')?.value?.trim() || '';
         return finishDesktopPairing(value);
@@ -570,9 +699,13 @@
     window.syncMobileWithDesktopNow = async function() {
         try {
             await syncWithDesktop(lastMobileDatabase || emptyDb);
-            return window.appAlert?.('Phone and desktop changes were merged. A safety backup is created on the desktop before incoming changes are written.', 'Sync Complete');
+            const location = cloudPairingConfigured() ? 'encrypted relay' : 'paired desktop';
+            return window.appAlert?.(`Changes were merged through the ${location}. A safety backup is created on the desktop before incoming changes are written.`, 'Sync Complete');
         } catch (error) {
-            return window.appAlert?.(`${error.message}\nKeep PharmAtlas Desktop open and use the same Wi-Fi network.`, 'Sync Unavailable');
+            const help = cloudPairingConfigured()
+                ? 'Check this device\'s internet connection and the configured relay status.'
+                : 'Keep PharmAtlas Desktop open and use the same Wi-Fi network.';
+            return window.appAlert?.(`${error.message}\n${help}`, 'Sync Unavailable');
         }
     };
 
@@ -590,18 +723,21 @@
         if (!host) return;
         const deviceName = window.innerWidth >= 700 ? 'iPad' : 'iPhone';
         const paired = mobileSettings.pairing;
+        const remote = cloudPairingConfigured(paired);
         const lastSync = mobileSettings.lastSyncAt ? new Date(mobileSettings.lastSyncAt).toLocaleString() : 'Not synced yet';
         host.innerHTML = `
-            <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>${deviceName} Companion</strong></div>
+            <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>${deviceName} Reminders &amp; Sync</strong></div>
             <div class="mobile-companion-actions">
                 <button type="button" onclick="${mobileSettings.notificationsEnabled ? 'disableIphoneReminders()' : 'enableIphoneReminders()'}"><span class="win98-icon icon-calendar"></span>${mobileSettings.notificationsEnabled ? 'Reminders On' : 'Enable Reminders'}</button>
-                <button type="button" onclick="scanMobileDesktopQr()"><span class="win98-icon icon-view"></span>${paired ? 'Re-pair Desktop' : 'Pair Desktop'}</button>
-                <button type="button" onclick="pairMobileWithDesktop()"><span class="win98-icon icon-receive"></span>Pair Text</button>
+                <button type="button" class="mobile-camera-pair" onclick="scanMobileDesktopQr()"><span class="win98-icon icon-view"></span>${paired ? 'Scan New QR' : 'Scan Desktop QR'}</button>
                 <button type="button" onclick="syncMobileWithDesktopNow()" ${paired ? '' : 'disabled'}><span class="win98-icon icon-view"></span>Sync Now</button>
                 ${paired ? '<button type="button" title="Disconnect desktop" onclick="unpairMobileDesktop()"><span class="win98-icon icon-clear"></span>Unpair</button>' : ''}
             </div>
-            <input id="mobile-pairing-code" class="mobile-pairing-code" type="text" placeholder="Pairing text fallback" aria-label="Desktop pairing text">
-            <div class="mobile-companion-status ${mobileSettings.lastSyncError ? 'error' : ''}">${paired ? `Paired: ${paired.name} | Last sync: ${lastSync}` : 'Not paired with a desktop.'}${mobileSettings.lastSyncError ? ` | ${mobileSettings.lastSyncError}` : ''}</div>`;
+            <details class="mobile-pairing-fallback">
+                <summary>Camera unavailable? Use pairing text</summary>
+                <div class="mobile-pairing-fallback-row"><input id="mobile-pairing-code" class="mobile-pairing-code" type="text" placeholder="Paste pairing text" aria-label="Desktop pairing text"><button type="button" onclick="pairMobileWithDesktop()"><span class="win98-icon icon-receive"></span>Pair</button></div>
+            </details>
+            <div class="mobile-companion-status ${mobileSettings.lastSyncError ? 'error' : ''}">${paired ? `${remote ? 'Remote encrypted sync' : 'Direct local sync'} | ${paired.name} | Last sync: ${lastSync}` : 'Not paired with a desktop.'}${mobileSettings.lastSyncError ? ` | ${mobileSettings.lastSyncError}` : ''}</div>`;
         host.querySelector('#mobile-pairing-code')?.addEventListener('keydown', event => {
             if (event.key !== 'Enter') return;
             event.preventDefault();
@@ -611,7 +747,7 @@
 
     function applyMobileFeatureSet() {
         document.documentElement.classList.add('mobile-companion-mode');
-        ['tab-prepackage', 'tab-recipes'].forEach(id => document.getElementById(id)?.setAttribute('hidden', ''));
+        ['tab-prepackage', 'tab-recipes', 'tab-drug-info', 'tab-help'].forEach(id => document.getElementById(id)?.setAttribute('hidden', ''));
         const dashboard = document.getElementById('panel-dashboard');
         if (dashboard && !document.getElementById('mobile-companion-panel')) {
             const panel = document.createElement('section');
@@ -621,6 +757,7 @@
         }
         const deviceName = window.innerWidth >= 700 ? 'iPad' : 'iPhone';
         document.querySelector('.app-window > .title-bar .title-bar-text')?.replaceChildren(document.createTextNode(`PharmAtlas ${deviceName}`));
+        installMobileNavigation();
         renderMobileCompanionPanel();
     }
 
@@ -629,7 +766,7 @@
         applyMobileFeatureSet();
         setInterval(() => {
             if (document.visibilityState === 'visible' && mobileSettings.pairing) syncWithDesktop(lastMobileDatabase, true);
-        }, 5000);
+        }, 15000);
     }
 
     if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initializeMobileRuntime, { once: true });
