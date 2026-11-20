@@ -8,6 +8,241 @@ body {
     overflow: hidden;
 }
 
+/* Phone workspaces keep the Windows 98 controls while replacing squeezed desktop grids. */
+@media screen and (max-width: 700px) {
+    .mobile-runtime .schedule-med-search-shell {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .mobile-runtime .schedule-med-search-results {
+        position: static;
+        width: 100%;
+        max-height: min(42dvh, 310px);
+        margin-top: 4px;
+    }
+
+    .mobile-runtime .schedule-med-search-results button {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+        min-height: 48px;
+    }
+
+    .mobile-runtime .schedule-med-search-results button small {
+        text-align: left;
+    }
+
+    .mobile-runtime #calendar-grid.calendar-week-view,
+    .mobile-runtime .member-calendar-grid.calendar-week-view {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 5px;
+        background: #c0c0c0;
+    }
+
+    .mobile-runtime #calendar-grid.calendar-week-view .calendar-day,
+    .mobile-runtime .member-calendar-grid.calendar-week-view .calendar-day {
+        min-height: 54px;
+        max-height: none;
+        overflow: visible;
+        padding: 2px;
+    }
+
+    .mobile-runtime #calendar-grid.calendar-month-view,
+    .mobile-runtime .member-calendar-grid.calendar-month-view {
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+        gap: 1px;
+        overflow: hidden !important;
+    }
+
+    .mobile-runtime .calendar-month-view .calendar-header {
+        padding: 3px 0;
+        font-size: 9px;
+        overflow: hidden;
+    }
+
+    .mobile-runtime .calendar-month-view .calendar-day {
+        min-height: 70px;
+        max-height: 92px;
+        padding: 1px;
+        overflow: hidden;
+        font-size: 9px;
+    }
+
+    .mobile-runtime .calendar-month-view .calendar-month-date {
+        margin: 0;
+        padding: 1px 2px;
+        font-size: 10px;
+    }
+
+    .mobile-runtime .calendar-month-dose {
+        min-height: 0;
+        padding: 1px;
+        font-size: 8px;
+        line-height: 10px;
+        box-shadow: none;
+    }
+
+    .mobile-runtime .calendar-month-dose span {
+        display: none;
+    }
+
+    .mobile-runtime .mobile-regimen-stepper {
+        position: sticky;
+        z-index: 8;
+        top: 0;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        margin: -4px -4px 8px;
+        padding: 5px 4px;
+        border-bottom: 1px solid #808080;
+        background: #c0c0c0;
+    }
+
+    .mobile-runtime .mobile-regimen-stepper button {
+        display: flex;
+        min-width: 0;
+        min-height: 42px;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        padding: 4px 2px;
+        font-size: 12px;
+    }
+
+    .mobile-runtime .mobile-regimen-stepper button.active {
+        color: #000080;
+        font-weight: bold;
+        background: #e6f1ff;
+        box-shadow: inset 1px 1px #000000, inset -1px -1px #ffffff;
+    }
+
+    .mobile-runtime .regimen-builder-fieldset [data-mobile-regimen-step]:not(.mobile-regimen-step-active) {
+        display: none !important;
+    }
+
+    .mobile-runtime .regimen-builder-grid,
+    .mobile-runtime .regimen-builder-main,
+    .mobile-runtime .regimen-builder-side,
+    .mobile-runtime .regimen-preview-side,
+    .mobile-runtime .regimen-builder-side fieldset,
+    .mobile-runtime .regimen-preview-side fieldset,
+    .mobile-runtime .order-set-med-row {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        grid-column: 1 !important;
+        grid-row: auto !important;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime .regimen-builder-grid,
+    .mobile-runtime .regimen-med-grid,
+    .mobile-runtime .regimen-header-strip,
+    .mobile-runtime .regimen-cycle-row,
+    .mobile-runtime .os-link-row,
+    .mobile-runtime .regimen-notes-grid,
+    .mobile-runtime .monitoring-reminder-layout {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .mobile-runtime .regimen-builder-grid {
+        display: grid;
+        gap: 6px;
+        overflow: visible;
+    }
+
+    .mobile-runtime .regimen-grid-resizer {
+        display: none !important;
+    }
+
+    .mobile-runtime .regimen-header-strip,
+    .mobile-runtime .regimen-med-grid {
+        gap: 6px;
+        padding: 6px;
+    }
+
+    .mobile-runtime .regimen-med-section label,
+    .mobile-runtime .os-cycle-days-fields,
+    .mobile-runtime .os-cycle-date-fields {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+
+    .mobile-runtime .order-set-med-row {
+        min-height: 0;
+        overflow: visible;
+        resize: none;
+    }
+
+    .mobile-runtime .regimen-med-row-title {
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+    }
+
+    .mobile-runtime .regimen-med-row-title strong,
+    .mobile-runtime .regimen-med-row-title small {
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-runtime .regimen-cycle-row,
+    .mobile-runtime .os-link-row,
+    .mobile-runtime .regimen-notes-grid {
+        margin-right: 6px;
+        margin-left: 6px;
+        padding: 6px;
+    }
+
+    .mobile-runtime .os-link-row .os-link-mode,
+    .mobile-runtime .os-link-row .link-choice-panel,
+    .mobile-runtime .regimen-med-section .os-med-search,
+    .mobile-runtime .regimen-med-section .os-med-strength,
+    .mobile-runtime .regimen-med-section .os-dose,
+    .mobile-runtime .regimen-med-section .os-calculated-dose,
+    .mobile-runtime .regimen-med-section .os-freq {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    .mobile-runtime .regimen-builder-side {
+        display: grid;
+        gap: 6px;
+    }
+
+    .mobile-runtime .regimen-preview-side {
+        max-height: none;
+        overflow: hidden !important;
+    }
+
+    .mobile-runtime .regimen-preview-side fieldset,
+    .mobile-runtime .regimen-pdf-preview {
+        min-height: 0;
+        max-height: none;
+    }
+
+    .mobile-runtime .regimen-pdf-preview {
+        padding: 5px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .mobile-runtime .regimen-preview-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .mobile-runtime .regimen-builder-command-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 5px;
+        bottom: calc(64px + env(safe-area-inset-bottom));
+    }
+
+    .mobile-runtime .regimen-builder-command-row > span:last-child {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+    }
+}
+
 body {
     display: flex;
 }
@@ -5522,6 +5757,55 @@ button {
     display: none;
 }
 
+.mobile-regimen-stepper {
+    display: none;
+}
+
+.schedule-med-search-shell {
+    position: relative;
+    min-width: 120px;
+}
+
+.schedule-med-search-results {
+    position: absolute;
+    z-index: 50;
+    top: calc(100% + 2px);
+    left: 0;
+    width: min(390px, 80vw);
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 2px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.schedule-med-search-results button {
+    display: grid;
+    width: 100%;
+    min-height: 38px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 7px;
+    text-align: left;
+}
+
+.schedule-med-search-results button strong,
+.schedule-med-search-results button small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.schedule-med-search-results button small {
+    color: #404040;
+    text-align: right;
+}
+
+.schedule-med-search-empty {
+    padding: 8px;
+    color: #404040;
+}
+
 .member-schedule-report-tools,
 .member-schedule-report-actions {
     display: contents;
@@ -8994,6 +9278,49 @@ button {
 }
 
 .calendar-dose i { color: #0000aa; }
+
+.mobile-calendar-day-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin: -2px -2px 4px;
+    padding: 5px 7px;
+    border-bottom: 1px solid #808080;
+    background: #dfeeff;
+    color: #000080;
+}
+
+.calendar-month-dose {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    margin: 1px 0;
+    padding: 2px;
+    overflow: hidden;
+    border: 1px solid #808080;
+    background: #e8f4e8;
+    color: #000000;
+    font: inherit;
+    text-align: left;
+}
+
+.calendar-month-dose i,
+.calendar-month-dose span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calendar-month-dose i {
+    color: #000080;
+}
+
+.calendar-month-more {
+    color: #000080;
+    font-weight: bold;
+    text-align: center;
+}
 
 #calendar-grid,
 .member-calendar-grid {
@@ -14042,4 +14369,48 @@ button {
 #print-area .custom-label-font-xlarge .custom-label-header {
     font-size: 12pt;
     line-height: 1.05;
+}
+
+@media screen and (max-width: 700px) {
+    .mobile-runtime #med-search-input {
+        width: 100% !important;
+    }
+
+    .mobile-runtime .custom-event-calendar-grid.calendar-week-view {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 5px;
+        background: #c0c0c0;
+    }
+
+    .mobile-runtime .custom-event-calendar-grid.calendar-week-view .custom-event-day {
+        min-height: 50px;
+        overflow: visible;
+    }
+
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view {
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+        gap: 1px;
+        overflow: hidden;
+    }
+
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view .custom-event-day {
+        min-height: 68px;
+        max-height: 88px;
+        padding: 1px;
+        overflow: hidden;
+    }
+
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view .custom-event-card {
+        margin-bottom: 1px;
+        padding: 1px;
+        font-size: 8px;
+        line-height: 10px;
+    }
+
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view .custom-event-meta,
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view .custom-event-links,
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view .custom-event-note,
+    .mobile-runtime .custom-event-calendar-grid.calendar-month-view .custom-event-empty {
+        display: none;
+    }
 }

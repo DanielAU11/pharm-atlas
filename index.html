@@ -149,7 +149,10 @@
                             <label>Who:</label>
                             <select id="select-member" onchange="renderSchedulePrescriberOptions(); updateSchedStrength(); renderPendingScheduleOrders(); renderScheduleLinkOptions(); renderMonitoringParameterOptions('sched'); syncMonitoringParameterScheduleUi('sched');"></select>
                             <label>Medication:</label>
-                            <input list="med-options" id="med-search-input" oninput="updateSchedStrength()" style="width:120px;" placeholder="Search...">
+                            <div class="schedule-med-search-shell">
+                                <input list="med-options" id="med-search-input" oninput="handleScheduleMedicationSearchInput()" onfocus="handleScheduleMedicationSearchInput(true)" onkeydown="handleScheduleMedicationSearchKeydown(event)" autocomplete="off" style="width:120px;" placeholder="Search medications..." aria-controls="schedule-med-search-results" aria-autocomplete="list">
+                                <div id="schedule-med-search-results" class="schedule-med-search-results" role="listbox" hidden></div>
+                            </div>
                             <datalist id="med-options"></datalist>
                         </div>
                         <div class="field-row" style="margin-top:8px;">

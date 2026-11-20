@@ -161,6 +161,109 @@ app.whenReady().then(async () => {
         };
     })()`);
 
+    await win.webContents.executeJavaScript(`
+        switchTab('dashboard');
+        dashboardCalendarView = 'week';
+        renderCalendar();
+        document.getElementById('calendar-grid').closest('fieldset').scrollIntoView({ block: 'start' });
+        true;
+    `);
+    await pause(120);
+    await capture(win, 'calendar-week-agenda');
+    const weekCalendar = await win.webContents.executeJavaScript(`(() => {
+        const grid = document.getElementById('calendar-grid');
+        return {
+            agenda: grid.classList.contains('calendar-mobile-agenda'),
+            headers: grid.querySelectorAll(':scope > .calendar-header').length,
+            days: grid.querySelectorAll(':scope > .calendar-day').length,
+            dayHeadings: grid.querySelectorAll('.mobile-calendar-day-heading').length,
+            overflow: grid.scrollWidth - grid.clientWidth
+        };
+    })()`);
+
+    await win.webContents.executeJavaScript(`
+        dashboardCalendarView = 'month';
+        renderCalendar();
+        document.getElementById('calendar-grid').closest('fieldset').scrollIntoView({ block: 'start' });
+        true;
+    `);
+    await pause(120);
+    await capture(win, 'calendar-month-compact');
+    const monthCalendar = await win.webContents.executeJavaScript(`(() => {
+        const grid = document.getElementById('calendar-grid');
+        const columns = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
+        return {
+            month: grid.classList.contains('calendar-month-view'),
+            headers: grid.querySelectorAll(':scope > .calendar-header').length,
+            days: grid.querySelectorAll(':scope > .calendar-day').length,
+            columns,
+            overflow: grid.scrollWidth - grid.clientWidth
+        };
+    })()`);
+
+    await win.webContents.executeJavaScript(`
+        switchTab('schedules');
+        setMobileScheduleStep('medication');
+        document.getElementById('select-member').value = 'demo-member';
+        const input = document.getElementById('med-search-input');
+        input.value = 'lis';
+        handleScheduleMedicationSearchInput(true);
+        true;
+    `);
+    await pause(180);
+    await capture(win, 'schedule-medication-search');
+    const medicationSearch = await win.webContents.executeJavaScript(`(() => {
+        const input = document.getElementById('med-search-input');
+        const results = document.getElementById('schedule-med-search-results');
+        const first = results.querySelector('button[data-medication-name]');
+        const customResultsVisible = !results.hidden;
+        if (first) selectScheduleMedicationSearchResult(first.dataset.medicationName);
+        return {
+            customResultsVisible,
+            resultCount: results.querySelectorAll('button[data-medication-name]').length,
+            nativeDatalistRemoved: !input.hasAttribute('list'),
+            selectedMedication: input.value,
+            overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+        };
+    })()`);
+
+    await win.webContents.executeJavaScript(`
+        switchTab('order-sets');
+        ensureMobileRegimenStepper();
+        setMobileRegimenStep('medications');
+        if (!document.querySelector('#order-set-med-list .order-set-med-row')) addOrderSetMedicationRow();
+        true;
+    `);
+    await pause(160);
+    await capture(win, 'regimen-medications-step');
+    const regimenPlanner = await win.webContents.executeJavaScript(`(() => {
+        const fieldset = document.querySelector('.regimen-builder-fieldset');
+        const active = Array.from(fieldset.querySelectorAll('[data-mobile-regimen-step].mobile-regimen-step-active'));
+        const row = document.querySelector('.order-set-med-row');
+        return {
+            buttons: fieldset.querySelectorAll('[data-mobile-regimen-step-button]').length,
+            selected: fieldset.querySelector('[data-mobile-regimen-step-button].active')?.dataset.mobileRegimenStepButton,
+            activeGroups: active.length,
+            wrongGroups: active.filter(element => element.dataset.mobileRegimenStep !== 'medications').length,
+            rowOverflow: row ? row.scrollWidth - row.clientWidth : 0,
+            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+        };
+    })()`);
+
+    await win.webContents.executeJavaScript(`setMobileRegimenStep('review'); true;`);
+    await pause(120);
+    await capture(win, 'regimen-review-step');
+    const regimenReview = await win.webContents.executeJavaScript(`(() => {
+        const preview = document.querySelector('.regimen-preview-side');
+        const rect = preview.getBoundingClientRect();
+        return {
+            selected: document.querySelector('[data-mobile-regimen-step-button].active')?.dataset.mobileRegimenStepButton,
+            visible: getComputedStyle(preview).display !== 'none',
+            fitsViewport: rect.left >= 0 && rect.right <= innerWidth + 1,
+            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+        };
+    })()`);
+
     const bottomNavigation = await win.webContents.executeJavaScript(`(async () => {
         const scroller = document.querySelector('.app-panel-window > .window-body');
         const results = {};
@@ -179,13 +282,19 @@ app.whenReady().then(async () => {
         return results;
     })()`);
 
-    const result = { closed, open, doseSheet, moreSheet, scheduleSteps, bottomNavigation, consoleErrors: errors };
+    const result = { closed, open, doseSheet, moreSheet, scheduleSteps, weekCalendar, monthCalendar, medicationSearch, regimenPlanner, regimenReview, bottomNavigation, consoleErrors: errors };
     const failed = closed.viewMode !== 'grid' || !closed.gridVisible || !closed.handleVisible || closed.handleCount !== '1' ||
         !closed.bodyVisible || !closed.reportsCollapsed || closed.pageOverflow > 0 || !open.open || !open.bodyVisible || !open.dockVisible ||
         open.dockWidth >= open.viewportWidth || !open.fitsViewport || !doseSheet.visible || !doseSheet.compact ||
         doseSheet.actions !== 2 || !moreSheet.visible || !moreSheet.compact || moreSheet.buttons !== 4 ||
         scheduleSteps.buttons !== 3 || scheduleSteps.selected !== 'timing' || scheduleSteps.activeGroups < 1 ||
         scheduleSteps.wrongGroups > 0 || scheduleSteps.pageOverflow > 0 || !closed.memberActionsVisible || closed.memberActionButtons !== 2 ||
+        !weekCalendar.agenda || weekCalendar.headers !== 0 || weekCalendar.days !== 7 || weekCalendar.dayHeadings !== 7 || weekCalendar.overflow > 0 ||
+        !monthCalendar.month || monthCalendar.headers !== 7 || monthCalendar.days < 35 || monthCalendar.columns !== 7 || monthCalendar.overflow > 0 ||
+        !medicationSearch.customResultsVisible || medicationSearch.resultCount < 1 || !medicationSearch.nativeDatalistRemoved || !medicationSearch.selectedMedication || medicationSearch.overflow > 0 ||
+        regimenPlanner.buttons !== 3 || regimenPlanner.selected !== 'medications' || regimenPlanner.activeGroups < 2 || regimenPlanner.wrongGroups > 0 ||
+        regimenPlanner.rowOverflow > 0 || regimenPlanner.pageOverflow > 0 ||
+        regimenReview.selected !== 'review' || !regimenReview.visible || !regimenReview.fitsViewport || regimenReview.pageOverflow > 0 ||
         Object.values(bottomNavigation).some(tab => !tab.visible || !tab.active || tab.scrollTop !== 0 || tab.otherVisible !== 0) || errors.length > 0;
     process.stdout.write(JSON.stringify(result, null, 2));
     win.destroy();

@@ -324,6 +324,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     maybeOpenFirstRunSetupGuide();
     renderFrequencyControls('sched');
     ensureMobileScheduleStepper();
+    ensureMobileRegimenStepper();
     initializeInAppWindows();
     updateInventoryEntryMode();
     setupImageDropzone('med-image-dropzone', image => { pendingNewMedImage = image; });
@@ -9750,6 +9751,7 @@ window.switchTab = function(tabName) {
     applyCustomTabOrder();
     applyDashboardCommandPanelState();
     if (tabName === 'schedules') ensureMobileScheduleStepper();
+    if (tabName === 'order-sets') ensureMobileRegimenStepper();
 };
 
 function ensureMobileScheduleStepper() {
@@ -9769,6 +9771,12 @@ function ensureMobileScheduleStepper() {
             <button type="button" role="tab" data-mobile-schedule-step-button="details" onclick="setMobileScheduleStep('details')"><span class="win98-icon icon-info"></span>Details</button>`;
         const legend = fieldset.querySelector(':scope > legend');
         legend?.insertAdjacentElement('afterend', stepper);
+    }
+
+    const searchInput = document.getElementById('med-search-input');
+    if (document.documentElement.classList.contains('mobile-runtime') && searchInput) {
+        searchInput.removeAttribute('list');
+        searchInput.setAttribute('autocomplete', 'off');
     }
 
     const frequencyRow = document.getElementById('sched-freq')?.closest('.field-row');
@@ -9798,6 +9806,49 @@ window.setMobileScheduleStep = function(stepName, persist = true) {
     if (persist) localStorage.setItem('pharmAtlasMobileScheduleStep', safeStep);
 };
 
+function ensureMobileRegimenStepper() {
+    const fieldset = document.querySelector('#panel-order-sets .regimen-builder-fieldset');
+    const grid = fieldset?.querySelector('.regimen-builder-grid');
+    if (!fieldset || !grid) return;
+
+    let stepper = fieldset.querySelector(':scope > .mobile-regimen-stepper');
+    if (!stepper) {
+        stepper = document.createElement('div');
+        stepper.className = 'mobile-regimen-stepper';
+        stepper.setAttribute('role', 'tablist');
+        stepper.setAttribute('aria-label', 'Regimen planner steps');
+        stepper.innerHTML = `
+            <button type="button" role="tab" data-mobile-regimen-step-button="setup" onclick="setMobileRegimenStep('setup')"><span class="win98-icon icon-family"></span>Setup</button>
+            <button type="button" role="tab" data-mobile-regimen-step-button="medications" onclick="setMobileRegimenStep('medications')"><span class="win98-icon icon-order"></span>Medications</button>
+            <button type="button" role="tab" data-mobile-regimen-step-button="review" onclick="setMobileRegimenStep('review')"><span class="win98-icon icon-view"></span>Review</button>`;
+        fieldset.querySelector(':scope > legend')?.insertAdjacentElement('afterend', stepper);
+    }
+
+    grid.querySelector('.regimen-header-strip')?.setAttribute('data-mobile-regimen-step', 'setup');
+    grid.querySelector('#order-set-med-list')?.setAttribute('data-mobile-regimen-step', 'medications');
+    grid.querySelector('.regimen-add-row')?.setAttribute('data-mobile-regimen-step', 'medications');
+    grid.querySelector('.regimen-builder-side')?.setAttribute('data-mobile-regimen-step', 'medications');
+    grid.querySelector('.regimen-preview-side')?.setAttribute('data-mobile-regimen-step', 'review');
+    fieldset.querySelector(':scope > .regimen-builder-command-row')?.setAttribute('data-mobile-regimen-step', 'review');
+    setMobileRegimenStep(localStorage.getItem('pharmAtlasMobileRegimenStep') || 'setup', false);
+}
+
+window.setMobileRegimenStep = function(stepName, persist = true) {
+    const safeStep = ['setup', 'medications', 'review'].includes(stepName) ? stepName : 'setup';
+    const fieldset = document.querySelector('#panel-order-sets .regimen-builder-fieldset');
+    if (!fieldset) return;
+    fieldset.querySelectorAll('[data-mobile-regimen-step]').forEach(element => {
+        element.classList.toggle('mobile-regimen-step-active', element.dataset.mobileRegimenStep === safeStep);
+    });
+    fieldset.querySelectorAll('[data-mobile-regimen-step-button]').forEach(button => {
+        const selected = button.dataset.mobileRegimenStepButton === safeStep;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    if (persist) localStorage.setItem('pharmAtlasMobileRegimenStep', safeStep);
+    document.querySelector('.app-panel-window > .window-body')?.scrollTo({ top: 0, behavior: 'auto' });
+};
+
 window.applyMobileSyncedDatabase = function(data) {
     db = { ...emptyDb, ...(data || {}), settings: { ...emptyDb.settings, ...(data?.settings || {}) } };
     normalizeScheduleLinkRelationships();
@@ -9810,7 +9861,8 @@ window.applyMobileSyncedDatabase = function(data) {
     }
 };
 
-async function sync() {
+async function sync(options = {}) {
+    const renderMode = options.render === false ? 'none' : (options.render || 'full');
     normalizeScheduleLinkRelationships();
     updateScheduleCompletionStates();
     maintainPrepackRetention();
@@ -9820,6 +9872,7 @@ async function sync() {
         addAudit('Sync conflict backup', 'Desktop Sync Folder', `Existing synced data changed before save. Backup preserved at ${saveResult.conflictBackup}`);
         setTimeout(() => appAlert(`PharmAtlas detected that the synced data file changed before this save. A conflict backup was preserved:\n${saveResult.conflictBackup}`, 'Sync Conflict Backup'), 100);
     }
+    if (renderMode === 'none') return saveResult;
     renderAll();
     const memberModal = document.getElementById('member-modal');
     if (currentEditingMemberId && memberModal?.style.display === 'flex') {
@@ -9837,6 +9890,21 @@ async function sync() {
         renderMemberCalendar(currentEditingMemberId);
         renderMemberOrderWorklist(currentEditingMemberId);
         renderMemberCommandScanPanel();
+    }
+    return saveResult;
+}
+
+let deferredFullRenderHandle = null;
+function scheduleDeferredFullRender() {
+    if (deferredFullRenderHandle !== null) return;
+    const run = () => {
+        deferredFullRenderHandle = null;
+        renderAll();
+    };
+    if (typeof requestIdleCallback === 'function') {
+        deferredFullRenderHandle = requestIdleCallback(run, { timeout: 1200 });
+    } else {
+        deferredFullRenderHandle = setTimeout(run, 350);
     }
 }
 
@@ -20040,7 +20108,19 @@ window.documentScheduleInstance = async function(scheduleId, scheduledDate, sche
         schedule.orderSetName ? `Regimen (${schedule.orderSetName})` : 'Schedule',
         { adjustPattern }
     );
-    if (documented) await sync();
+    if (documented) {
+        // The dose is already committed to the in-memory history and inventory here.
+        // Paint the affected surfaces before IndexedDB/cloud queue work so iOS feels immediate.
+        renderTodayViewDashboard();
+        renderCalendar();
+        renderInventoryStatus();
+        if (currentEditingMemberId === schedule.memberId && document.getElementById('member-modal')?.style.display === 'flex') {
+            refreshOpenMemberMedicationViews(schedule.memberId);
+        }
+        await new Promise(resolve => requestAnimationFrame(() => resolve()));
+        await sync({ render: false });
+        scheduleDeferredFullRender();
+    }
 };
 
 function historyEntryDateKey(entry) {
@@ -21845,6 +21925,80 @@ window.emailMemberVitalsPdfReport = async function(memberId = currentEditingMemb
 };
 
 // --- SCHEDULING ---
+let scheduleMedicationSearchTimer = null;
+
+function mobileScheduleMedicationMatches(query, memberId) {
+    const normalized = String(query || '').trim().toLowerCase();
+    const grouped = new Map();
+    db.inventory.forEach(med => {
+        if (!medicationAssignedToMember(med, memberId)) return;
+        const searchText = `${med.name || ''} ${formatMedStrength(med)} ${med.notes || ''}`.toLowerCase();
+        if (normalized && !searchText.includes(normalized)) return;
+        const key = String(med.name || '').trim();
+        if (!key) return;
+        const group = grouped.get(key) || { name: key, strengths: [], stock: 0 };
+        group.strengths.push(formatMedStrength(med));
+        group.stock += parseAmount(med.stock);
+        grouped.set(key, group);
+    });
+    return [...grouped.values()]
+        .sort((a, b) => {
+            const aStarts = a.name.toLowerCase().startsWith(normalized) ? 0 : 1;
+            const bStarts = b.name.toLowerCase().startsWith(normalized) ? 0 : 1;
+            return aStarts - bStarts || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        })
+        .slice(0, 10);
+}
+
+function renderScheduleMedicationSearchResults(forceOpen = false) {
+    const input = document.getElementById('med-search-input');
+    const results = document.getElementById('schedule-med-search-results');
+    if (!input || !results || !document.documentElement.classList.contains('mobile-runtime')) return;
+    const query = input.value.trim();
+    if (!forceOpen && query.length < 1) {
+        results.hidden = true;
+        results.innerHTML = '';
+        return;
+    }
+    const memberId = document.getElementById('select-member')?.value || '';
+    const matches = mobileScheduleMedicationMatches(query, memberId);
+    results.innerHTML = matches.length
+        ? matches.map(match => `<button type="button" role="option" data-medication-name="${escapeHtml(match.name)}" onclick="selectScheduleMedicationSearchResult(this.dataset.medicationName)">
+            <strong>${escapeHtml(match.name)}</strong>
+            <small>${escapeHtml(uniqueValues(match.strengths).slice(0, 3).join(', '))}${match.strengths.length > 3 ? ` +${match.strengths.length - 3}` : ''}</small>
+        </button>`).join('')
+        : '<div class="schedule-med-search-empty">No assigned inventory medication matches.</div>';
+    results.hidden = false;
+}
+
+window.handleScheduleMedicationSearchInput = function(forceOpen = false) {
+    const mobile = document.documentElement.classList.contains('mobile-runtime');
+    if (!mobile) {
+        updateSchedStrength();
+        return;
+    }
+    clearTimeout(scheduleMedicationSearchTimer);
+    scheduleMedicationSearchTimer = setTimeout(() => renderScheduleMedicationSearchResults(forceOpen), 90);
+};
+
+window.handleScheduleMedicationSearchKeydown = function(event) {
+    if (event.key !== 'Enter' || !document.documentElement.classList.contains('mobile-runtime')) return;
+    const first = document.querySelector('#schedule-med-search-results button[data-medication-name]');
+    if (!first) return;
+    event.preventDefault();
+    selectScheduleMedicationSearchResult(first.dataset.medicationName);
+};
+
+window.selectScheduleMedicationSearchResult = function(name) {
+    const input = document.getElementById('med-search-input');
+    const results = document.getElementById('schedule-med-search-results');
+    if (!input) return;
+    input.value = name;
+    if (results) results.hidden = true;
+    updateSchedStrength();
+    document.getElementById('sched-strength-display')?.focus();
+};
+
 window.updateSchedStrength = function() {
     const input = document.getElementById('med-search-input');
     const name = input.value;
@@ -26368,6 +26522,14 @@ function calendarDoseHtml(schedule, dateStr, memberId = null) {
     </div>`;
 }
 
+function mobileCalendarMonthDoseHtml(schedule, dateStr) {
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    if (!med) return '';
+    return `<button type="button" class="calendar-month-dose" title="${escapeHtml(`${schedule.specificTime} ${med.name} ${formatMedStrength(med)}`)}" onclick="openOrderModifier('${escapeHtml(schedule.id)}')">
+        <i>${escapeHtml(schedule.specificTime)}</i><span>${escapeHtml(med.name)}</span>
+    </button>`;
+}
+
 function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarStart, memberId = null, rangeLabelId = 'dashboard-calendar-range', view = null) {
     const grid = document.getElementById(gridId);
     if (!grid) return;
@@ -26377,6 +26539,9 @@ function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarS
     grid.innerHTML = '';
     grid.classList.toggle('calendar-month-view', activeView === 'month');
     grid.classList.toggle('calendar-day-view', activeView === 'day');
+    grid.classList.toggle('calendar-week-view', activeView === 'week');
+    const mobileRuntime = document.documentElement.classList.contains('mobile-runtime');
+    grid.classList.toggle('calendar-mobile-agenda', mobileRuntime && activeView === 'week');
     grid.style.gridTemplateColumns = activeView === 'day' ? '1fr' : 'repeat(7, minmax(0, 1fr))';
     const rangeLabel = document.getElementById(rangeLabelId);
     if (rangeLabel) rangeLabel.textContent = formatCalendarRange(localDateKey(start), activeView);
@@ -26403,6 +26568,7 @@ function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarS
 
     const range = calendarRangeForView(localDateKey(start), activeView);
     for (let i = 0; i < 7; i++) {
+        if (mobileRuntime && activeView === 'week') break;
         const d = new Date(range.start);
         d.setDate(d.getDate() + i);
         grid.innerHTML += `
@@ -26420,13 +26586,24 @@ function renderCalendar(gridId = 'calendar-grid', startDate = dashboardCalendarS
         cell.className = 'calendar-day';
         if (activeView === 'month' && d.getMonth() !== range.month) cell.classList.add('calendar-outside-month');
         if (dateStr === localDateKey()) cell.classList.add('calendar-today-cell');
+        if (mobileRuntime && activeView === 'week') {
+            cell.innerHTML = `<div class="mobile-calendar-day-heading"><strong>${days[d.getDay()]}</strong><span>${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></div>`;
+        }
         if (activeView === 'month') {
             cell.innerHTML = `<div class="calendar-month-date">${d.getDate()}</div>`;
         }
 
-        scheduledDosesForCalendarDate(dateStr, memberId).forEach(schedule => {
-            cell.innerHTML += calendarDoseHtml(schedule, dateStr, memberId);
-        });
+        const dayDoses = scheduledDosesForCalendarDate(dateStr, memberId);
+        if (mobileRuntime && activeView === 'month') {
+            dayDoses.slice(0, 3).forEach(schedule => {
+                cell.innerHTML += mobileCalendarMonthDoseHtml(schedule, dateStr);
+            });
+            if (dayDoses.length > 3) cell.innerHTML += `<div class="calendar-month-more">+${dayDoses.length - 3}</div>`;
+        } else {
+            dayDoses.forEach(schedule => {
+                cell.innerHTML += calendarDoseHtml(schedule, dateStr, memberId);
+            });
+        }
         grid.appendChild(cell);
     }
 }
@@ -26624,6 +26801,9 @@ function renderCustomEventCalendar(startDate = customEventCalendarStart, view = 
     grid.innerHTML = '';
     grid.classList.toggle('calendar-month-view', activeView === 'month');
     grid.classList.toggle('calendar-day-view', activeView === 'day');
+    grid.classList.toggle('calendar-week-view', activeView === 'week');
+    const mobileRuntime = document.documentElement.classList.contains('mobile-runtime');
+    grid.classList.toggle('calendar-mobile-agenda', mobileRuntime && activeView === 'week');
     grid.style.gridTemplateColumns = activeView === 'day' ? '1fr' : 'repeat(7, minmax(0, 1fr))';
     if (activeView === 'day') {
         const dateKey = localDateKey(start);
@@ -26647,6 +26827,7 @@ function renderCustomEventCalendar(startDate = customEventCalendarStart, view = 
     }
     const range = calendarRangeForView(localDateKey(start), activeView);
     for (let i = 0; i < 7; i++) {
+        if (mobileRuntime && activeView === 'week') break;
         const d = new Date(range.start);
         d.setDate(d.getDate() + i);
         grid.innerHTML += `<div class="calendar-header">${days[d.getDay()]}<br>${d.getMonth() + 1}/${d.getDate()}</div>`;
@@ -26661,9 +26842,12 @@ function renderCustomEventCalendar(startDate = customEventCalendarStart, view = 
         if (activeView === 'month' && d.getMonth() !== range.month) cell.classList.add('calendar-outside-month');
         if (date === localDateKey()) cell.classList.add('calendar-today-cell');
         const events = customEventsForDate(date);
+        const heading = mobileRuntime && activeView === 'week'
+            ? `<div class="mobile-calendar-day-heading"><strong>${days[d.getDay()]}</strong><span>${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></div>`
+            : (activeView === 'month' ? `<div class="calendar-month-date">${d.getDate()}</div>` : '');
         cell.innerHTML = events.length
-            ? `${activeView === 'month' ? `<div class="calendar-month-date">${d.getDate()}</div>` : ''}${events.map(event => customEventCardHtml(event, date)).join('')}`
-            : `${activeView === 'month' ? `<div class="calendar-month-date">${d.getDate()}</div>` : ''}<div class="custom-event-empty">No tasks</div>`;
+            ? `${heading}${events.map(event => customEventCardHtml(event, date)).join('')}`
+            : `${heading}<div class="custom-event-empty">No tasks</div>`;
         grid.appendChild(cell);
     }
 }
