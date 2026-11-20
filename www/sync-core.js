@@ -3,7 +3,14 @@
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (root) root.PharmAtlasSyncCore = api;
 })(typeof window !== 'undefined' ? window : globalThis, function() {
-    const META_FIELDS = new Set(['_syncUpdatedAt', '_syncDeviceId']);
+    const META_FIELDS = new Set([
+        '_syncUpdatedAt',
+        '_syncDeviceId',
+        '_syncSettingsUpdatedAt',
+        '_syncSettingsDeviceId',
+        '_syncRootUpdatedAt',
+        '_syncRootDeviceId'
+    ]);
 
     function clone(value) {
         return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -47,6 +54,16 @@
             if (!existing || recordTime(item) >= recordTime(existing)) map.set(key, clone(item));
         });
         return map;
+    }
+
+    function duplicateIds(items) {
+        const counts = new Map();
+        (items || []).forEach(item => {
+            if (!item || item.id == null) return;
+            const id = String(item.id);
+            counts.set(id, (counts.get(id) || 0) + 1);
+        });
+        return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
     }
 
     function prepareDatabase(previous, next, deviceId, now = new Date().toISOString()) {
@@ -100,27 +117,36 @@
         const left = clone(local && typeof local === 'object' ? local : {});
         const right = clone(incoming && typeof incoming === 'object' ? incoming : {});
         const merged = { ...left };
+        const collections = collectionNames(left, right);
+        const collectionSet = new Set(collections);
         const tombstones = newestByKey(
             [...(left.syncTombstones || []), ...(right.syncTombstones || [])],
             item => `${item?.collection || ''}|${item?.id || ''}`
         );
 
-        collectionNames(left, right).forEach(collection => {
+        collections.forEach(collection => {
             const rows = new Map();
+            const repeatedIds = new Set([
+                ...duplicateIds(left[collection]),
+                ...duplicateIds(right[collection])
+            ]);
             const consider = (row, sourcePriority) => {
                 if (!row || row.id == null) return;
                 const id = String(row.id);
-                const current = rows.get(id);
+                // Older batch workflows could assign one millisecond ID to several
+                // distinct history rows. Keep those rows independently mergeable.
+                const rowKey = repeatedIds.has(id) ? `${id}|${canonical(row)}` : id;
+                const current = rows.get(rowKey);
                 const tieWins = options.preferIncomingOnTie === true && sourcePriority > current?.priority;
                 if (!current || recordTime(row) > recordTime(current.row) || (recordTime(row) === recordTime(current.row) && tieWins)) {
-                    rows.set(id, { row: clone(row), priority: sourcePriority });
+                    rows.set(rowKey, { row: clone(row), priority: sourcePriority, id });
                 }
             };
             (left[collection] || []).forEach(row => consider(row, 1));
             (right[collection] || []).forEach(row => consider(row, 2));
             merged[collection] = [...rows.entries()]
-                .filter(([id, value]) => {
-                    const deletion = tombstones.get(`${collection}|${id}`);
+                .filter(([, value]) => {
+                    const deletion = tombstones.get(`${collection}|${value.id}`);
                     return !deletion || recordTime(value.row) > recordTime(deletion);
                 })
                 .map(([, value]) => value.row);
@@ -142,7 +168,10 @@
         const rightRoot = Date.parse(right._syncRootUpdatedAt || '') || 0;
         const newerRoot = rightRoot > leftRoot || (rightRoot === leftRoot && options.preferIncomingOnTie === true) ? right : left;
         Object.keys(newerRoot).forEach(key => {
-            if (key === 'settings' || key === 'syncTombstones' || isRecordCollection(newerRoot[key])) return;
+            // Empty record arrays do not identify themselves as collections. Keep every
+            // collection already merged above out of the root-field copy pass so an empty
+            // first-pair database cannot replace the desktop's records.
+            if (key === 'settings' || key === 'syncTombstones' || collectionSet.has(key) || isRecordCollection(newerRoot[key])) return;
             merged[key] = clone(newerRoot[key]);
         });
         merged.syncTombstones = [...tombstones.values()];

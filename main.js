@@ -410,22 +410,34 @@ async function handleLocalSyncRequest(request, response) {
         if (request.url.endsWith('/push')) {
             if (!payload?.data || typeof payload.data !== 'object') throw new Error('The phone did not send a valid database.');
             const current = readDbFromPath(dbPath);
-            const merged = SyncCore.mergeDatabases(current, payload.data, desktopDeviceId());
             const currentFingerprint = dbFingerprintFromText(JSON.stringify(current));
-            const mergedFingerprint = dbFingerprintFromText(JSON.stringify(merged));
+            if (!payload.baseRevision) {
+                return sendLocalSyncJson(response, request, 409, {
+                    error: 'This phone build must pull a desktop baseline before syncing. Update and reopen the iPhone app, then try again.'
+                });
+            }
+            if (payload.baseRevision !== currentFingerprint) {
+                return sendLocalSyncJson(response, request, 409, {
+                    error: 'Desktop data changed while the phone was preparing its update. Sync again to merge the latest version safely.'
+                });
+            }
+            const merged = SyncCore.mergeDatabases(current, payload.data, desktopDeviceId());
+            const changed = SyncCore.canonical(current) !== SyncCore.canonical(merged);
+            const result = changed ? merged : current;
+            const mergedFingerprint = dbFingerprintFromText(JSON.stringify(result));
             let backupPath = '';
-            if (currentFingerprint !== mergedFingerprint) {
+            if (changed) {
                 backupPath = preserveMobileSyncBackup();
-                writeDbToPath(dbPath, merged);
+                writeDbToPath(dbPath, result);
                 localSyncState.pairedAt = localSyncState.pairedAt || new Date().toISOString();
                 saveLocalSyncConfig();
                 win?.webContents.send('db-updated-from-mobile', { deviceName: payload.deviceName || 'iPhone or iPad', backupPath });
             }
             return sendLocalSyncJson(response, request, 200, encryptLocalSyncPayload({
                 protocol: 1,
-                revision: dbFingerprintFromText(JSON.stringify(merged)),
-                changed: currentFingerprint !== mergedFingerprint,
-                data: merged
+                revision: mergedFingerprint,
+                changed,
+                data: result
             }));
         }
         return sendLocalSyncJson(response, request, 404, { error: 'Unknown sync action.' });

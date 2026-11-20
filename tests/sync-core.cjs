@@ -39,4 +39,30 @@ assert.equal(stalePhoneMerge.inventory[0].stock, 9, 'A stale phone edit must not
 const phonePull = SyncCore.mergeDatabases(firstPhoneCopy, initial, 'phone', '2026-11-05T12:00:00.000Z', { preferIncomingOnTie: true });
 assert.equal(phonePull.inventory.find(item => item.id === 'med-1').name, 'Medication A', 'A first phone pull must accept the desktop copy on a legacy tie.');
 
-process.stdout.write(JSON.stringify({ passed: 7, tombstones: phoneDelete.syncTombstones.length }, null, 2));
+const emptyNewerPhone = {
+    family: [],
+    inventory: [],
+    schedules: [],
+    history: [],
+    _syncRootUpdatedAt: '2026-11-05T13:00:00.000Z',
+    _syncRootDeviceId: 'phone'
+};
+const safeFirstPair = SyncCore.mergeDatabases(initial, emptyNewerPhone, 'desktop', '2026-11-05T13:01:00.000Z');
+assert.equal(safeFirstPair.family.length, 1, 'An empty newer phone root must not erase desktop members.');
+assert.equal(safeFirstPair.inventory.length, 1, 'An empty newer phone root must not erase desktop inventory.');
+assert.equal(safeFirstPair.schedules.length, 1, 'An empty newer phone root must not erase desktop schedules.');
+
+const duplicateHistory = {
+    history: [
+        { id: 'batch-1', medId: 'med-1', details: 'Returned one tablet' },
+        { id: 'batch-1', medId: 'med-2', details: 'Returned one capsule' }
+    ]
+};
+const duplicateHistoryMerge = SyncCore.mergeDatabases(duplicateHistory, { history: [] }, 'desktop');
+assert.equal(duplicateHistoryMerge.history.length, 2, 'Distinct batch history rows sharing a legacy ID must survive sync.');
+
+const initialWithSyncState = { ...initial, syncTombstones: [] };
+const metadataOnlyMerge = SyncCore.mergeDatabases(initialWithSyncState, initialWithSyncState, 'desktop', '2026-11-05T14:00:00.000Z');
+assert.equal(SyncCore.canonical(metadataOnlyMerge), SyncCore.canonical(initialWithSyncState), 'Sync timestamps alone must not count as a data change.');
+
+process.stdout.write(JSON.stringify({ passed: 12, tombstones: phoneDelete.syncTombstones.length }, null, 2));

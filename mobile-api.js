@@ -60,7 +60,18 @@
     }
 
     function nativePlugin(name) {
-        return window.PharmAtlasNativePlugins?.[name] || window.Capacitor?.Plugins?.[name] || null;
+        const registered = window.PharmAtlasNativePlugins?.[name] || window.Capacitor?.Plugins?.[name];
+        if (registered) return registered;
+        const registerPlugin = window.Capacitor?.registerPlugin;
+        if (typeof registerPlugin !== 'function') return null;
+        try {
+            window.PharmAtlasNativePlugins = window.PharmAtlasNativePlugins || {};
+            window.PharmAtlasNativePlugins[name] = registerPlugin(name);
+            return window.PharmAtlasNativePlugins[name];
+        } catch (error) {
+            console.warn(`Unable to register native plugin ${name}.`, error);
+            return null;
+        }
     }
 
     async function loadMobileSettings() {
@@ -238,8 +249,24 @@
         if (!mobileSettings.pairing || mobileSyncInProgress || !data) return null;
         mobileSyncInProgress = true;
         try {
-            const pushed = await signedSyncRequest('push', { protocol: 1, deviceName: 'iPhone or iPad', data });
-            const merged = window.PharmAtlasSyncCore.mergeDatabases(data, pushed.data, mobileDeviceId, new Date().toISOString(), { preferIncomingOnTie: true });
+            // Always establish a desktop baseline before sending phone changes. This makes
+            // first pairing additive and gives the desktop a revision it can verify.
+            const pulled = await signedSyncRequest('pull', { protocol: 1, deviceId: mobileDeviceId });
+            const phoneBaseline = window.PharmAtlasSyncCore.mergeDatabases(
+                data,
+                pulled.data,
+                mobileDeviceId,
+                new Date().toISOString(),
+                { preferIncomingOnTie: true }
+            );
+            const pushed = await signedSyncRequest('push', {
+                protocol: 1,
+                deviceId: mobileDeviceId,
+                deviceName: 'iPhone or iPad',
+                baseRevision: pulled.revision,
+                data: phoneBaseline
+            });
+            const merged = window.PharmAtlasSyncCore.mergeDatabases(phoneBaseline, pushed.data, mobileDeviceId, new Date().toISOString(), { preferIncomingOnTie: true });
             lastMobileDatabase = merged;
             await writeMobileRecord(dbKey, JSON.stringify(merged));
             mobileSettings.lastSyncAt = new Date().toISOString();
@@ -510,7 +537,8 @@
     window.scanMobileDesktopQr = async function() {
         const scanner = nativePlugin('CapacitorBarcodeScanner');
         if (!scanner?.scanBarcode) {
-            return window.appAlert?.('The QR scanner is unavailable in this build. Paste the pairing text from Desktop > Device Sync and choose Pair Text.', 'QR Scanner Unavailable');
+            const platform = window.Capacitor?.getPlatform?.() || 'web';
+            return window.appAlert?.(`The native QR scanner is unavailable (${platform}). Update the iPhone app from the latest project, run npm run cap:sync, delete the old PharmAtlas app from the iPhone, and install it again from Xcode. Pair Text remains available.`, 'QR Scanner Unavailable');
         }
         try {
             const result = await scanner.scanBarcode({
@@ -527,7 +555,10 @@
             const message = String(error?.message || error || 'The camera could not be opened.');
             if (message.toLowerCase().includes('cancel')) return;
             console.warn('Pairing QR scan did not complete:', error);
-            return window.appAlert?.(`${message}\n\nThe iOS Simulator has no camera for QR scanning; use Pair Text there. On an iPhone, enable PharmAtlas under Settings > Privacy & Security > Camera, then try again.`, 'QR Scanner Unavailable');
+            const permissionHelp = /denied|permission|camera access/i.test(message)
+                ? 'Camera access was denied. Open iPhone Settings > Privacy & Security > Camera and enable PharmAtlas. If PharmAtlas is not listed, delete the app and install this build again from Xcode so iOS can show the permission prompt.'
+                : 'The iOS Simulator has no camera for QR scanning; use Pair Text there. On a physical iPhone, rebuild after npm run cap:sync and try again.';
+            return window.appAlert?.(`${message}\n\n${permissionHelp}`, 'QR Scanner Unavailable');
         }
     };
 

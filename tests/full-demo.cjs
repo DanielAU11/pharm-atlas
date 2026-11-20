@@ -167,6 +167,22 @@ app.whenReady().then(async () => {
         document.getElementById('action-modal-cancel')?.click();
         await checkboxPickerPromise;
         db.schedules.splice(scheduleCountBeforeCheckboxAudit);
+        const originalCapacitor = window.Capacitor;
+        const originalAppAlert = window.appAlert;
+        let lazyScannerRegistrations = 0;
+        window.Capacitor = {
+            getPlatform: () => 'ios',
+            registerPlugin: name => {
+                if (name === 'CapacitorBarcodeScanner') lazyScannerRegistrations += 1;
+                return { scanBarcode: async () => ({ ScanResult: '' }) };
+            }
+        };
+        window.PharmAtlasNativePlugins = {};
+        window.appAlert = async () => true;
+        await window.scanMobileDesktopQr();
+        window.Capacitor = originalCapacitor;
+        window.appAlert = originalAppAlert;
+        const lazyNativeScanner = lazyScannerRegistrations === 1;
         return {
             qodOriginalDates: originalDates.slice(0, 4).map(item => item.date + ' ' + item.time),
             qodAfterDates: afterDates.slice(0, 5).map(item => item.date + ' ' + item.time),
@@ -185,6 +201,7 @@ app.whenReady().then(async () => {
             checkboxLayout,
             mobileRuntime: document.documentElement.classList.contains('mobile-runtime'),
             mobileCompanionPanel: !!document.getElementById('mobile-companion-panel'),
+            lazyNativeScanner,
             mobilePairingControls: {
                 scannerFunction: typeof window.scanMobileDesktopQr === 'function',
                 textFunction: typeof window.pairMobileWithDesktop === 'function',
