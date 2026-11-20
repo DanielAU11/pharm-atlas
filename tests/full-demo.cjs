@@ -185,6 +185,13 @@ app.whenReady().then(async () => {
             checkboxLayout,
             mobileRuntime: document.documentElement.classList.contains('mobile-runtime'),
             mobileCompanionPanel: !!document.getElementById('mobile-companion-panel'),
+            mobilePairingControls: {
+                scannerFunction: typeof window.scanMobileDesktopQr === 'function',
+                textFunction: typeof window.pairMobileWithDesktop === 'function',
+                scannerButton: !!document.querySelector('#mobile-companion-panel button[onclick="scanMobileDesktopQr()"]'),
+                textButton: !!document.querySelector('#mobile-companion-panel button[onclick="pairMobileWithDesktop()"]'),
+                textInput: !!document.getElementById('mobile-pairing-code')
+            },
             simplifiedMobileNavigation: document.getElementById('tab-prepackage')?.hidden === true && document.getElementById('tab-recipes')?.hidden === true,
             mobileUiState: {
                 classes: document.documentElement.className,
@@ -226,7 +233,7 @@ app.whenReady().then(async () => {
         !logic.linkDialogUi.validationStayedOpen || !logic.linkDialogUi.validationMessage ||
         Object.values(logic.panels).some(value => !value) || logic.unresolvedButtons.length > 0 ||
         logic.inventoryRows < 5 || logic.scheduleRows < 6 || logic.prepackReturnable < 1 ||
-        !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || !logic.simplifiedMobileNavigation ||
+        !logic.barcodeRendered || !logic.persistence || !logic.mobileCompanionPanel || Object.values(logic.mobilePairingControls || {}).some(value => !value) || !logic.simplifiedMobileNavigation ||
         !logic.checkboxLayout?.rendered || !logic.checkboxLayout?.scrollable || !logic.checkboxLayout?.contained || logic.checkboxLayout?.visibleFixedCount > 0 ||
         logic.overflow > 0 || logic.renderErrors.length > 0 || errors.length > 0;
     process.stdout.write(JSON.stringify({ device, logic, screenshots, consoleErrors: errors }, null, 2));

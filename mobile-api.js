@@ -462,19 +462,8 @@
         renderMobileCompanionPanel();
     };
 
-    window.pairMobileWithDesktop = async function() {
-        let value = '';
-        const scanner = nativePlugin('CapacitorBarcodeScanner');
-        if (scanner) {
-            try {
-                const result = await scanner.scanBarcode({ hint: 0, cameraDirection: 1, scanOrientation: 1, scanInstructions: 'Scan the pairing code shown by PharmAtlas Desktop', cancelButtonAccessibilityLabel: 'Cancel pairing scan' });
-                value = result?.ScanResult || '';
-            } catch (error) {
-                if (!String(error?.message || '').toLowerCase().includes('cancel')) console.warn('Pairing QR scan did not complete:', error);
-            }
-        }
-        if (!value) value = document.getElementById('mobile-pairing-code')?.value || '';
-        if (!value) return window.appAlert?.('Scan the QR shown by Desktop > Device Sync, or paste its pairing text into the field.', 'Pair Desktop');
+    async function finishDesktopPairing(value) {
+        if (!value) return window.appAlert?.('Paste the pairing text from Desktop > Device Sync, then choose Pair Text.', 'Pair Desktop');
         try {
             mobileSettings.pairing = parsePairingPayload(value);
             mobileSettings.lastSyncError = '';
@@ -487,6 +476,35 @@
             await saveMobileSettings();
             return window.appAlert?.(`${error.message}\nKeep the desktop app open and confirm both devices use the same Wi-Fi network.`, 'Pairing Failed');
         }
+    }
+
+    window.scanMobileDesktopQr = async function() {
+        const scanner = nativePlugin('CapacitorBarcodeScanner');
+        if (!scanner?.scanBarcode) {
+            return window.appAlert?.('The QR scanner is unavailable in this build. Paste the pairing text from Desktop > Device Sync and choose Pair Text.', 'QR Scanner Unavailable');
+        }
+        try {
+            const result = await scanner.scanBarcode({
+                hint: 0,
+                cameraDirection: 1,
+                scanOrientation: 3,
+                scanInstructions: 'Scan the pairing code shown by PharmAtlas Desktop',
+                cancelButtonAccessibilityLabel: 'Cancel pairing scan'
+            });
+            const value = result?.ScanResult || '';
+            if (!value) return window.appAlert?.('No QR code was detected. Try again, or use Pair Text in the iOS Simulator.', 'QR Not Detected');
+            return finishDesktopPairing(value);
+        } catch (error) {
+            const message = String(error?.message || error || 'The camera could not be opened.');
+            if (message.toLowerCase().includes('cancel')) return;
+            console.warn('Pairing QR scan did not complete:', error);
+            return window.appAlert?.(`${message}\n\nThe iOS Simulator has no camera for QR scanning; use Pair Text there. On an iPhone, enable PharmAtlas under Settings > Privacy & Security > Camera, then try again.`, 'QR Scanner Unavailable');
+        }
+    };
+
+    window.pairMobileWithDesktop = async function() {
+        const value = document.getElementById('mobile-pairing-code')?.value?.trim() || '';
+        return finishDesktopPairing(value);
     };
 
     window.syncMobileWithDesktopNow = async function() {
@@ -517,12 +535,18 @@
             <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>${deviceName} Companion</strong></div>
             <div class="mobile-companion-actions">
                 <button type="button" onclick="${mobileSettings.notificationsEnabled ? 'disableIphoneReminders()' : 'enableIphoneReminders()'}"><span class="win98-icon icon-calendar"></span>${mobileSettings.notificationsEnabled ? 'Reminders On' : 'Enable Reminders'}</button>
-                <button type="button" onclick="pairMobileWithDesktop()"><span class="win98-icon icon-view"></span>${paired ? 'Re-pair Desktop' : 'Pair Desktop'}</button>
+                <button type="button" onclick="scanMobileDesktopQr()"><span class="win98-icon icon-view"></span>${paired ? 'Re-pair Desktop' : 'Pair Desktop'}</button>
+                <button type="button" onclick="pairMobileWithDesktop()"><span class="win98-icon icon-receive"></span>Pair Text</button>
                 <button type="button" onclick="syncMobileWithDesktopNow()" ${paired ? '' : 'disabled'}><span class="win98-icon icon-view"></span>Sync Now</button>
                 ${paired ? '<button type="button" title="Disconnect desktop" onclick="unpairMobileDesktop()"><span class="win98-icon icon-clear"></span>Unpair</button>' : ''}
             </div>
             <input id="mobile-pairing-code" class="mobile-pairing-code" type="text" placeholder="Pairing text fallback" aria-label="Desktop pairing text">
             <div class="mobile-companion-status ${mobileSettings.lastSyncError ? 'error' : ''}">${paired ? `Paired: ${paired.name} | Last sync: ${lastSync}` : 'Not paired with a desktop.'}${mobileSettings.lastSyncError ? ` | ${mobileSettings.lastSyncError}` : ''}</div>`;
+        host.querySelector('#mobile-pairing-code')?.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            window.pairMobileWithDesktop();
+        });
     }
 
     function applyMobileFeatureSet() {
