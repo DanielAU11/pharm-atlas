@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -38,6 +39,22 @@ if (swiftVersion !== expected) {
   failed = true;
 } else {
   console.log(`capacitor-swift-pm: ${swiftVersion}`);
+}
+
+if (process.platform === 'darwin') {
+  try {
+    const output = execFileSync('xcodebuild', ['-version'], { encoding: 'utf8' });
+    const version = output.match(/^Xcode\s+(\d+(?:\.\d+)?)/m)?.[1];
+    if (!version || Number(version.split('.')[0]) < 26) {
+      console.error(`Xcode ${version || 'unknown'} is installed; Capacitor 8 requires Xcode 26.0 or newer.`);
+      failed = true;
+    } else {
+      console.log(`Xcode: ${version}`);
+    }
+  } catch (error) {
+    console.error(`Unable to run xcodebuild: ${error.message}`);
+    failed = true;
+  }
 }
 
 if (failed) {

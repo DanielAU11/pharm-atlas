@@ -1,6 +1,6 @@
 # Publishing PharmAtlas With Xcode
 
-The native iOS project must be archived and uploaded on a Mac with a current supported Xcode release.
+The native iOS project must be archived and uploaded on a Mac with Xcode 26.0 or newer. Capacitor 8 cannot be built with Xcode 16.
 
 ## 1. Prepare Apple Accounts
 
