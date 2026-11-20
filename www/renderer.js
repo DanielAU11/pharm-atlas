@@ -9828,6 +9828,11 @@ window.openDesktopDeviceSync = async function() {
                     <li>Scan this code and approve Local Network access.</li>
                 </ol>
                 <p>Medication data is encrypted before it crosses the local network. It is not routed through email or a PharmAtlas cloud server.</p>
+                ${(info.addresses || []).length > 1 ? `<label>Desktop network address
+                    <select onchange="selectDesktopSyncAddress(this.value)">
+                        ${(info.addresses || []).map(address => `<option value="${escapeHtml(address)}" ${address === info.host ? 'selected' : ''}>${escapeHtml(address)}</option>`).join('')}
+                    </select>
+                </label>` : ''}
                 <div class="sunken-panel device-sync-address">${escapeHtml(info.host)}:${escapeHtml(info.port)}</div>
                 <details class="device-sync-manual-pairing">
                     <summary>Simulator / manual pairing</summary>
@@ -9845,6 +9850,16 @@ window.openDesktopDeviceSync = async function() {
             </div>
         </div>
     `, 'Done');
+};
+
+window.selectDesktopSyncAddress = async function(host) {
+    try {
+        await window.api.setLocalSyncHost?.(host);
+        document.getElementById('action-modal-cancel')?.click();
+        await openDesktopDeviceSync();
+    } catch (error) {
+        await appAlert(error.message || 'That desktop network address is unavailable.', 'Network Address');
+    }
 };
 
 window.copyDesktopPairingText = async function() {

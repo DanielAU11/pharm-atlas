@@ -9,6 +9,7 @@ const files = [
   ['sync-core.js', 'sync-core.js'],
   ['renderer.js', 'renderer.js'],
   ['mobile-api.js', 'mobile-api.js'],
+  ['mobile-native-plugins.js', 'mobile-native-plugins.js'],
   ['vendor/qrcode.js', 'vendor/qrcode.js'],
   ['node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js'],
   ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'vendor/pdf.min.mjs'],
@@ -43,7 +44,11 @@ for (const [sourceFile, outputFile] of files) {
 const mobileIndexPath = path.join(outDir, 'index.html');
 const mobileIndex = fs.readFileSync(mobileIndexPath, 'utf8')
   .replace('https://unpkg.com/98.css', 'vendor/98.css')
-  .replace('node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js');
+  .replace('node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js')
+  .replace('<script src="mobile-api.js"></script>', [
+    '<script src="mobile-native-plugins.js"></script>',
+    '<script src="mobile-api.js"></script>'
+  ].join('\n'));
 fs.writeFileSync(mobileIndexPath, mobileIndex);
 
 fs.cpSync(path.join(root, 'assets'), path.join(outDir, 'assets'), { recursive: true });

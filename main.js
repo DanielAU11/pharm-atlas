@@ -72,13 +72,14 @@ function loadLocalSyncConfig() {
                 deviceId: saved.deviceId || `desktop-${crypto.randomUUID()}`,
                 key: saved.key || randomBase64Url(),
                 port: Number(saved.port) || 43127,
+                host: String(saved.host || ''),
                 pairedAt: saved.pairedAt || ''
             };
         }
     } catch (error) {
         console.error('Unable to read local sync configuration:', error.message);
     }
-    return { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, pairedAt: '' };
+    return { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, host: '', pairedAt: '' };
 }
 
 function saveLocalSyncConfig() {
@@ -274,17 +275,20 @@ function emailStatus() {
 }
 
 function privateIpv4Addresses() {
-    const addresses = [];
-    Object.values(os.networkInterfaces()).flat().forEach(entry => {
-        if (!entry || entry.internal || entry.family !== 'IPv4') return;
-        if (/^(169\.254|127\.)/.test(entry.address)) return;
-        addresses.push(entry.address);
+    const candidates = [];
+    Object.entries(os.networkInterfaces()).forEach(([name, entries]) => {
+        (entries || []).forEach(entry => {
+            if (!entry || entry.internal || entry.family !== 'IPv4') return;
+            if (!/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(entry.address)) return;
+            const virtual = /(virtual|vethernet|wsl|vmware|virtualbox|tailscale|zerotier|vpn|bluetooth)/i.test(name);
+            const physical = /(wi-?fi|wireless|wlan|ethernet|^en\d+$)/i.test(name);
+            candidates.push({ address: entry.address, name, rank: virtual ? 3 : physical ? 0 : 1 });
+        });
     });
-    return addresses.sort((a, b) => {
-        const privateA = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a) ? 0 : 1;
-        const privateB = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(b) ? 0 : 1;
-        return privateA - privateB;
-    });
+    return candidates
+        .sort((a, b) => a.rank - b.rank || Number(!a.address.startsWith('192.168.')) - Number(!b.address.startsWith('192.168.')) || a.name.localeCompare(b.name))
+        .map(candidate => candidate.address)
+        .filter((address, index, all) => all.indexOf(address) === index);
 }
 
 function localSyncKeyBuffer() {
@@ -346,7 +350,7 @@ function localSyncCorsHeaders(request) {
     return {
         'Access-Control-Allow-Origin': allowed && origin ? origin : 'capacitor://localhost',
         'Vary': 'Origin',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, X-PharmAtlas-Timestamp, X-PharmAtlas-Nonce, X-PharmAtlas-Signature',
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff'
@@ -373,6 +377,13 @@ async function handleLocalSyncRequest(request, response) {
     if (request.method === 'OPTIONS') {
         response.writeHead(204, localSyncCorsHeaders(request));
         return response.end();
+    }
+    if (request.method === 'GET' && request.url === '/pharmatlas-sync/ping') {
+        return sendLocalSyncJson(response, request, 200, {
+            protocol: 1,
+            deviceId: localSyncState.deviceId,
+            desktopName: os.hostname()
+        });
     }
     const expectedPrefix = `/pharmatlas-sync/${encodeURIComponent(localSyncState.deviceId)}/`;
     if (request.method !== 'POST' || !request.url?.startsWith(expectedPrefix)) return sendLocalSyncJson(response, request, 404, { error: 'Not found' });
@@ -425,7 +436,8 @@ async function handleLocalSyncRequest(request, response) {
 }
 
 function localSyncPairingInfo() {
-    const host = privateIpv4Addresses()[0] || '';
+    const addresses = privateIpv4Addresses();
+    const host = addresses.includes(localSyncState.host) ? localSyncState.host : addresses[0] || '';
     if (!host || !localSyncServer) return { enabled: !!localSyncServer, available: false, error: 'Connect this desktop to the same Wi-Fi network as the iPhone or iPad.' };
     const payload = new URL('pharmatlas-sync://pair');
     payload.searchParams.set('v', '1');
@@ -438,6 +450,7 @@ function localSyncPairingInfo() {
         enabled: true,
         available: true,
         host,
+        addresses,
         port: localSyncState.port,
         deviceId: localSyncState.deviceId,
         pairingPayload: payload.toString(),
@@ -522,11 +535,11 @@ function createWindow() {
         }
     });
 
-    win.loadFile('index.html');
+    win.loadFile(path.join(__dirname, 'index.html'));
     if (savedState?.maximized) win.maximize();
-    win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-        if (level >= 2) {
-            console.error(`[renderer] ${message} (${sourceId}:${line})`);
+    win.webContents.on('console-message', details => {
+        if (details.level === 'warning' || details.level === 'error') {
+            console.error(`[renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`);
         }
     });
 
@@ -650,9 +663,16 @@ ipcMain.handle('start-local-sync', () => startLocalSyncServer());
 ipcMain.handle('stop-local-sync', () => stopLocalSyncServer());
 ipcMain.handle('reset-local-sync-pairing', async () => {
     await stopLocalSyncServer();
-    localSyncState = { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, pairedAt: '' };
+    localSyncState = { enabled: false, deviceId: `desktop-${crypto.randomUUID()}`, key: randomBase64Url(), port: 43127, host: '', pairedAt: '' };
     saveLocalSyncConfig();
     return startLocalSyncServer();
+});
+ipcMain.handle('set-local-sync-host', (_event, host) => {
+    const addresses = privateIpv4Addresses();
+    if (!addresses.includes(host)) throw new Error('That network address is no longer available on this desktop.');
+    localSyncState.host = host;
+    saveLocalSyncConfig();
+    return localSyncPairingInfo();
 });
 
 ipcMain.handle('save-db', (event, data) => {

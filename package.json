@@ -23,6 +23,7 @@
     "make": "electron-forge make",
     "test:demo": "npm run mobile:build && electron tests/full-demo.cjs",
     "test:sync": "node tests/sync-core.cjs",
+    "test:connectivity": "electron tests/connectivity.cjs",
     "test:labels": "npm run mobile:build && electron tests/label-formulation.cjs",
     "test:label-layout": "electron tests/label-print-layout.cjs",
     "screenshots:iphone": "npm run mobile:build && electron tests/full-demo.cjs --device iphone --capture-dir docs/app-store/screenshots/iphone",

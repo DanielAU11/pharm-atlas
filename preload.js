@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
     startLocalSync: () => ipcRenderer.invoke('start-local-sync'),
     stopLocalSync: () => ipcRenderer.invoke('stop-local-sync'),
     resetLocalSyncPairing: () => ipcRenderer.invoke('reset-local-sync-pairing'),
+    setLocalSyncHost: (host) => ipcRenderer.invoke('set-local-sync-host', host),
     onDatabaseUpdatedFromMobile: (callback) => {
         const listener = (_event, details) => callback(details);
         ipcRenderer.on('db-updated-from-mobile', listener);

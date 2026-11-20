@@ -60,7 +60,7 @@
     }
 
     function nativePlugin(name) {
-        return window.Capacitor?.Plugins?.[name] || null;
+        return window.PharmAtlasNativePlugins?.[name] || window.Capacitor?.Plugins?.[name] || null;
     }
 
     async function loadMobileSettings() {
@@ -436,6 +436,32 @@
         return pairing;
     }
 
+    async function verifyDesktopReachable(pairing) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        try {
+            const response = await fetch(`http://${pairing.host}:${pairing.port}/pharmatlas-sync/ping`, {
+                method: 'GET',
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            if (!response.ok) throw new Error(`Desktop returned ${response.status}.`);
+            const result = await response.json();
+            if (result?.protocol !== 1 || result?.deviceId !== pairing.id) {
+                throw new Error('A different or outdated PharmAtlas desktop answered at this address. Generate a new pairing code.');
+            }
+            return true;
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                throw new Error(`Cannot reach ${pairing.host}:${pairing.port}. Confirm both devices use the same private Wi-Fi and allow PharmAtlas through the desktop firewall.`);
+            }
+            if (/different|outdated|returned/i.test(error?.message || '')) throw error;
+            throw new Error(`Cannot reach ${pairing.host}:${pairing.port}. Enable PharmAtlas in iPhone Settings > Privacy & Security > Local Network, disable VPN or guest Wi-Fi, and allow the desktop app through its private-network firewall.`);
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     window.enableIphoneReminders = async function() {
         const plugin = nativePlugin('LocalNotifications');
         if (!plugin) return window.appAlert?.('Native notifications are available in the installed iPhone or iPad app.', 'iPhone Reminders');
@@ -464,14 +490,17 @@
 
     async function finishDesktopPairing(value) {
         if (!value) return window.appAlert?.('Paste the pairing text from Desktop > Device Sync, then choose Pair Text.', 'Pair Desktop');
+        const previousPairing = mobileSettings.pairing;
         try {
-            mobileSettings.pairing = parsePairingPayload(value);
+            const pairing = parsePairingPayload(value);
+            await verifyDesktopReachable(pairing);
+            mobileSettings.pairing = pairing;
             mobileSettings.lastSyncError = '';
             await saveMobileSettings();
             await syncWithDesktop(lastMobileDatabase || emptyDb);
             return window.appAlert?.(`Paired with ${mobileSettings.pairing.name}. Changes sync while both apps are open on the same local network.`, 'Desktop Paired');
         } catch (error) {
-            mobileSettings.pairing = null;
+            mobileSettings.pairing = previousPairing;
             mobileSettings.lastSyncError = error.message;
             await saveMobileSettings();
             return window.appAlert?.(`${error.message}\nKeep the desktop app open and confirm both devices use the same Wi-Fi network.`, 'Pairing Failed');
