@@ -57,6 +57,9 @@ app.whenReady().then(async () => {
         const modal = document.getElementById('member-modal');
         const handle = modal.querySelector('.member-medication-work-handle');
         const body = modal.querySelector('.member-profile-body');
+        const actions = modal.querySelector('.member-profile-save-actions');
+        const actionRect = actions.getBoundingClientRect();
+        const navRect = document.getElementById('mobile-bottom-nav').getBoundingClientRect();
         return {
             viewMode: memberScheduleViewMode(),
             gridVisible: getComputedStyle(document.getElementById('member-schedule-grid-view')).display !== 'none',
@@ -64,7 +67,9 @@ app.whenReady().then(async () => {
             handleCount: handle.querySelector('strong')?.textContent,
             bodyVisible: getComputedStyle(body).display !== 'none',
             reportsCollapsed: !modal.querySelector('.member-schedule-report-tools')?.open,
-            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            memberActionsVisible: actionRect.top >= 0 && actionRect.bottom <= navRect.top + 1,
+            memberActionButtons: actions.querySelectorAll('button').length
         };
     })()`);
 
@@ -152,13 +157,32 @@ app.whenReady().then(async () => {
         };
     })()`);
 
-    const result = { closed, open, doseSheet, moreSheet, scheduleSteps, consoleErrors: errors };
+    const bottomNavigation = await win.webContents.executeJavaScript(`(async () => {
+        const scroller = document.querySelector('.app-panel-window > .window-body');
+        const results = {};
+        for (const tab of ['dashboard', 'schedules', 'family', 'vitals']) {
+            scroller.scrollTop = 500;
+            mobileSwitchTab(tab);
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const panel = document.getElementById('panel-' + tab);
+            results[tab] = {
+                visible: getComputedStyle(panel).display !== 'none',
+                active: document.querySelector('.mobile-bottom-nav button[data-mobile-tab="' + tab + '"]')?.classList.contains('active') === true,
+                scrollTop: scroller.scrollTop,
+                otherVisible: ['dashboard', 'schedules', 'family', 'vitals'].filter(other => other !== tab && getComputedStyle(document.getElementById('panel-' + other)).display !== 'none').length
+            };
+        }
+        return results;
+    })()`);
+
+    const result = { closed, open, doseSheet, moreSheet, scheduleSteps, bottomNavigation, consoleErrors: errors };
     const failed = closed.viewMode !== 'grid' || !closed.gridVisible || !closed.handleVisible || closed.handleCount !== '1' ||
         !closed.bodyVisible || !closed.reportsCollapsed || closed.pageOverflow > 0 || !open.open || !open.bodyVisible || !open.dockVisible ||
         open.dockWidth >= open.viewportWidth || !open.fitsViewport || !doseSheet.visible || !doseSheet.compact ||
         doseSheet.actions !== 2 || !moreSheet.visible || !moreSheet.compact || moreSheet.buttons !== 4 ||
         scheduleSteps.buttons !== 3 || scheduleSteps.selected !== 'timing' || scheduleSteps.activeGroups < 1 ||
-        scheduleSteps.wrongGroups > 0 || scheduleSteps.pageOverflow > 0 || errors.length > 0;
+        scheduleSteps.wrongGroups > 0 || scheduleSteps.pageOverflow > 0 || !closed.memberActionsVisible || closed.memberActionButtons !== 2 ||
+        Object.values(bottomNavigation).some(tab => !tab.visible || !tab.active || tab.scrollTop !== 0 || tab.otherVisible !== 0) || errors.length > 0;
     process.stdout.write(JSON.stringify(result, null, 2));
     win.destroy();
     app.exit(failed ? 1 : 0);

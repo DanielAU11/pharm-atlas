@@ -10,3 +10,26 @@ const normalized = source.replace(/(\.package\(name:\s*"[^"]+",\s*path:\s*")([^"
 });
 
 if (normalized !== source) fs.writeFileSync(packageFile, normalized);
+
+// Xcode 16+ diagnoses this imported-type/imported-protocol conformance unless
+// the plugin explicitly acknowledges that it is retrospective. Keep the
+// upstream package patch reproducible after every npm install and cap sync.
+const scannerDecoderFile = path.join(
+    __dirname,
+    '..',
+    'node_modules',
+    '@capacitor',
+    'barcode-scanner',
+    'ios',
+    'Sources',
+    'CapacitorBarcodeScannerPlugin',
+    'OSBARCScanParameters+Decodable.swift'
+);
+if (fs.existsSync(scannerDecoderFile)) {
+    const scannerSource = fs.readFileSync(scannerDecoderFile, 'utf8');
+    const patchedScannerSource = scannerSource.replace(
+        'extension OSBARCScanParameters: Decodable {',
+        'extension OSBARCScanParameters: @retroactive Decodable {'
+    );
+    if (patchedScannerSource !== scannerSource) fs.writeFileSync(scannerDecoderFile, patchedScannerSource);
+}

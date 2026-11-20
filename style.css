@@ -13257,8 +13257,12 @@ button {
     }
 
     /* Turn the long desktop prescription form into a short, explicit phone flow. */
-    .mobile-runtime #panel-schedules {
+    .mobile-runtime #panel-schedules.active-app-panel {
         display: block !important;
+    }
+
+    .mobile-runtime #panel-schedules:not(.active-app-panel) {
+        display: none !important;
     }
 
     .mobile-runtime #panel-schedules .schedule-entry-column,
@@ -13419,8 +13423,30 @@ button {
     }
 
     .mobile-runtime .member-profile-body {
-        padding: 6px !important;
+        padding: 6px 6px calc(86px + env(safe-area-inset-bottom)) !important;
         overflow-x: hidden !important;
+    }
+
+    .mobile-runtime .member-profile-save-actions {
+        position: fixed;
+        z-index: 19000;
+        left: calc(8px + env(safe-area-inset-left));
+        right: calc(8px + env(safe-area-inset-right));
+        bottom: calc(68px + env(safe-area-inset-bottom));
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin: 0 !important;
+        padding: 7px;
+        border: 2px outset #ffffff;
+        background: #c0c0c0;
+        box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.2);
+    }
+
+    .mobile-runtime .member-profile-save-actions button {
+        min-width: 0;
+        min-height: 44px;
+        font-weight: bold;
     }
 
     .mobile-runtime .member-active-toolbar,

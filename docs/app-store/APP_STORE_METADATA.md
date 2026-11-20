@@ -7,7 +7,7 @@
 - **Primary category:** Medical
 - **Secondary category:** Health & Fitness
 - **Bundle ID:** `com.pharmatlas.app`
-- **Version:** 1.3.1
+- **Version:** 1.3.3
 - **Business model:** One-time paid download
 - **US base price:** $3.99 USD
 - **In-app purchases:** None

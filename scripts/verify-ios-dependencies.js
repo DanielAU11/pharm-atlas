@@ -75,6 +75,19 @@ if (!infoPlist.includes('<key>NSCameraUsageDescription</key>')) {
   failed = true;
 }
 
+const phoneOrientations = infoPlist.match(/<key>UISupportedInterfaceOrientations<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1] || '';
+if (!phoneOrientations.includes('UIInterfaceOrientationPortrait') || /Landscape|PortraitUpsideDown/.test(phoneOrientations)) {
+  console.error('iPhone orientation must be portrait-only. Keep the separate iPad orientation list for tablet rotation.');
+  failed = true;
+}
+
+const scannerDecoderPath = path.join(root, 'node_modules', '@capacitor', 'barcode-scanner', 'ios', 'Sources', 'CapacitorBarcodeScannerPlugin', 'OSBARCScanParameters+Decodable.swift');
+const scannerDecoder = fs.existsSync(scannerDecoderPath) ? fs.readFileSync(scannerDecoderPath, 'utf8') : '';
+if (!scannerDecoder.includes('OSBARCScanParameters: @retroactive Decodable')) {
+  console.error('The iOS barcode scanner retrospective conformance patch is missing. Run npm run cap:sync.');
+  failed = true;
+}
+
 if (!packageSwift.includes('CapacitorBarcodeScanner')) {
   console.error('The iOS Swift package does not include CapacitorBarcodeScanner. Run npm run cap:sync.');
   failed = true;

@@ -9733,10 +9733,18 @@ window.switchTab = function(tabName) {
         const panelElement = document.getElementById(`panel-${t}`);
         if (t === tabName) {
             if (tabElement) tabElement.classList.add('active');
-            if (panelElement) panelElement.style.display = t === 'schedules' ? 'grid' : 'block';
+            if (panelElement) {
+                panelElement.style.display = t === 'schedules' ? 'grid' : 'block';
+                panelElement.classList.add('active-app-panel');
+                panelElement.setAttribute('aria-hidden', 'false');
+            }
         } else {
             if (tabElement) tabElement.classList.remove('active');
-            if (panelElement) panelElement.style.display = 'none';
+            if (panelElement) {
+                panelElement.style.display = 'none';
+                panelElement.classList.remove('active-app-panel');
+                panelElement.setAttribute('aria-hidden', 'true');
+            }
         }
     });
     applyCustomTabOrder();

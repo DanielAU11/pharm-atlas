@@ -41,7 +41,7 @@ In Xcode's package list, `capacitor-swift-pm` must show `8.5.3`. If another vers
 1. Select the **App** target in Xcode.
 2. In **Signing & Capabilities**, select the correct development team.
 3. Keep **Automatically manage signing** enabled.
-4. Confirm bundle identifier `com.pharmatlas.app`, version `1.3.1`, and a build number not previously uploaded.
+4. Confirm bundle identifier `com.pharmatlas.app`, version `1.3.3`, and a build number not previously uploaded.
 5. Confirm iPhone and iPad are both selected as supported destinations.
 
 ## 4. Test Before Archiving

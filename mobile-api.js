@@ -693,11 +693,25 @@
         });
     }
 
+    function resetMobilePrimaryScroll() {
+        const panelScroller = document.querySelector('.app-panel-window > .window-body');
+        [panelScroller, document.scrollingElement].forEach(scroller => {
+            if (!scroller) return;
+            scroller.scrollTop = 0;
+            scroller.scrollLeft = 0;
+        });
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    }
+
     window.mobileSwitchTab = function(tabName) {
+        window.toggleMobileMore?.(false);
         window.switchTab?.(tabName);
         updateMobileNavigation(tabName);
-        document.getElementById('mobile-more-sheet')?.setAttribute('hidden', '');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        resetMobilePrimaryScroll();
+        requestAnimationFrame(() => {
+            resetMobilePrimaryScroll();
+            document.getElementById(`panel-${tabName}`)?.getBoundingClientRect();
+        });
     };
 
     window.toggleMobileMore = function(forceOpen) {
