@@ -117,7 +117,9 @@ PharmAtlas includes a Capacitor iOS project with an adaptive phone/tablet interf
 Build the mobile web bundle and synchronize it into Xcode with:
 
 ```powershell
+npm ci
 npm run cap:sync
+npm run cap:doctor
 ```
 
 The native Swift Package Manager project is `ios/App/App.xcodeproj`. Open it with `npm run cap:open:ios`. App Store metadata, privacy language, screenshot requirements, and the Xcode publishing walkthrough are in `docs/app-store/`.

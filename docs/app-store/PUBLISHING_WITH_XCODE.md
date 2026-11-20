@@ -14,12 +14,25 @@ The native iOS project must be archived and uploaded on a Mac with a current sup
 Clone or pull the repository, then run:
 
 ```bash
-npm install
+npm ci
 npm run cap:sync
+npm run cap:doctor
 npm run cap:open:ios
 ```
 
 PharmAtlas uses Capacitor's Swift Package Manager project. The native Xcode project is `ios/App/App.xcodeproj`; this repository does not use an `.xcworkspace`. You can also open it directly with `open ios/App/App.xcodeproj`.
+
+### If Xcode Reports Missing Capacitor Members
+
+Errors such as `PluginConfig has no member getArray` or `JSTypes has no member coerceDictionaryToJSObject` mean Xcode retained an incompatible Capacitor binary package. PharmAtlas pins the JavaScript bridge and Swift package to the same release. Do not edit the plugin's Swift source.
+
+1. Quit the running app and close Xcode.
+2. Pull the latest repository, then run `npm ci`, `npm run cap:sync`, and `npm run cap:doctor`.
+3. Reopen `ios/App/App.xcodeproj`.
+4. In Xcode, choose **File > Packages > Reset Package Caches**, then **File > Packages > Resolve Package Versions**.
+5. Choose **Product > Clean Build Folder**, wait for package resolution to finish, and press **Run** again.
+
+In Xcode's package list, `capacitor-swift-pm` must show `8.5.3`. If another version remains, delete the app's Derived Data from **Xcode > Settings > Locations**, reopen the project, and resolve packages again.
 
 ## 3. Configure Signing
 
