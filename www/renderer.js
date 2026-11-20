@@ -27,11 +27,17 @@ let currentEditingMedId = null;
 let currentEditingMemberId = null;
 const notifiedDoseKeys = new Set();
 const pendingReminderKeys = new Set();
-const componentUnitOptions = ['mg', 'mcg', 'g', 'mL', 'L', 'mg/mL', 'mcg/mL', 'units/mL', 'U/mL', 'mg/g', 'mcg/g', 'g/g', 'mEq', 'mmol', 'IU', 'units', 'CFU', '%', 'mg/actuation', 'mcg/actuation', 'mg/spray', 'mcg/spray', 'mg/drop', 'mcg/drop', 'mg/patch', 'mcg/hr'];
-const componentPerUnitOptions = ['', 'mL', 'L', 'g', 'mg', 'tablet', 'capsule', 'caplet', 'softgel', 'lozenge', 'troche', 'packet', 'sachet', 'spray', 'drop', 'puff', 'inhalation', 'actuation', 'patch', 'suppository', 'vial', 'ampule', 'syringe', 'pen', 'film', 'strip', 'wafer', 'tube', 'jar', 'bottle', 'application', 'scoop', 'teaspoon', 'tablespoon', 'unit'];
+const componentUnitOptions = ['mg', 'mcg', 'g', 'mL', 'L', 'mg/mL', 'mcg/mL', 'units/mL', 'U/mL', 'mEq/mL', 'mmol/mL', 'mg/g', 'mcg/g', 'g/g', 'mEq', 'mmol', 'IU', 'units', 'CFU', '%', 'mg/actuation', 'mcg/actuation', 'units/dose', 'mg/spray', 'mcg/spray', 'mg/drop', 'mcg/drop', 'mg/patch', 'mcg/hr'];
+const componentPerUnitOptions = ['', 'mL', 'L', 'g', 'mg', 'dose', 'tablet', 'capsule', 'caplet', 'softgel', 'lozenge', 'troche', 'packet', 'sachet', 'spray', 'drop', 'puff', 'inhalation', 'actuation', 'patch', 'suppository', 'vial', 'ampule', 'syringe', 'pen', 'cartridge', 'canister', 'film', 'strip', 'wafer', 'tube', 'jar', 'bottle', 'bag', 'implant', 'ring', 'application', 'scoop', 'teaspoon', 'tablespoon', 'unit'];
 const formulationDoseUnits = {
     Tablets: 'tablet',
+    'Extended-release Tablet': 'tablet',
+    'Delayed-release Tablet': 'tablet',
+    'Effervescent Tablet': 'tablet',
+    'Dispersible Tablet': 'tablet',
     Capsules: 'capsule',
+    'Extended-release Capsule': 'capsule',
+    'Delayed-release Capsule': 'capsule',
     Caplet: 'caplet',
     Softgel: 'softgel',
     Chewable: 'tablet',
@@ -47,12 +53,18 @@ const formulationDoseUnits = {
     'Oral Solution': 'mL',
     Suspension: 'mL',
     Syrup: 'mL',
+    Elixir: 'mL',
+    Emulsion: 'mL',
+    'Oral Drops': 'drop',
     Powder: 'g',
     Granules: 'packet',
     Packet: 'packet',
     Sachet: 'sachet',
     Inhalations: 'inhalation',
     Inhaler: 'puff',
+    'Metered-dose Inhaler': 'puff',
+    'Dry Powder Inhaler': 'inhalation',
+    'Nebulizer Unit Dose': 'vial',
     'Nebulizer Solution': 'mL',
     Sprays: 'spray',
     'Nasal Spray': 'spray',
@@ -63,6 +75,9 @@ const formulationDoseUnits = {
     'Prefilled Syringe': 'mL',
     Pen: 'pen',
     'Auto-injector': 'unit',
+    Cartridge: 'cartridge',
+    'Infusion Bag': 'mL',
+    Implant: 'implant',
     Suppository: 'suppository',
     Enema: 'mL',
     Cream: 'application',
@@ -70,6 +85,7 @@ const formulationDoseUnits = {
     Gel: 'application',
     Lotion: 'application',
     Foam: 'application',
+    Aerosol: 'application',
     Shampoo: 'application',
     'Topical Packet': 'application',
     'Topical Solution': 'application',
@@ -80,11 +96,24 @@ const formulationDoseUnits = {
     Drops: 'drop',
     'Eye Drops': 'drop',
     'Ear Drops': 'drop',
+    'Eye Ointment': 'application',
+    'Rectal Cream': 'application',
+    'Vaginal Cream': 'application',
+    'Vaginal Tablet': 'tablet',
+    'Vaginal Ring': 'ring',
+    'Mouth Rinse': 'mL',
+    'Dental Paste': 'application',
     Other: 'unit'
 };
 const dosageFormDefinitions = {
     Tablets: { label: 'Tablets', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    'Extended-release Tablet': { label: 'Extended-release tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    'Delayed-release Tablet': { label: 'Delayed-release / enteric tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    'Effervescent Tablet': { label: 'Effervescent tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    'Dispersible Tablet': { label: 'Dispersible tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
     Capsules: { label: 'Capsules', stockUnit: 'capsule', adminUnit: 'capsule', perUnit: 'capsule', strengthStyle: 'per-unit' },
+    'Extended-release Capsule': { label: 'Extended-release capsule', stockUnit: 'capsule', adminUnit: 'capsule', perUnit: 'capsule', strengthStyle: 'per-unit' },
+    'Delayed-release Capsule': { label: 'Delayed-release capsule', stockUnit: 'capsule', adminUnit: 'capsule', perUnit: 'capsule', strengthStyle: 'per-unit' },
     Caplet: { label: 'Caplet', stockUnit: 'caplet', adminUnit: 'caplet', perUnit: 'caplet', strengthStyle: 'per-unit' },
     Softgel: { label: 'Softgel', stockUnit: 'softgel', adminUnit: 'softgel', perUnit: 'softgel', strengthStyle: 'per-unit' },
     Chewable: { label: 'Chewable tablet', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
@@ -100,13 +129,19 @@ const dosageFormDefinitions = {
     'Oral Solution': { label: 'Oral solution', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
     Suspension: { label: 'Suspension', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
     Syrup: { label: 'Syrup', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
+    Elixir: { label: 'Elixir', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
+    Emulsion: { label: 'Emulsion', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
+    'Oral Drops': { label: 'Oral drops', stockUnit: 'drop', adminUnit: 'drop', perUnit: 'drop', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'bottle' },
     Powder: { label: 'Powder / Bulk Powder', stockUnit: 'g', adminUnit: 'g', perUnit: 'g', strengthStyle: 'bulk' },
     Granules: { label: 'Granules', stockUnit: 'packet', adminUnit: 'packet', perUnit: 'packet', strengthStyle: 'per-unit' },
     Packet: { label: 'Packet', stockUnit: 'packet', adminUnit: 'packet', perUnit: 'packet', strengthStyle: 'per-unit' },
     Sachet: { label: 'Sachet', stockUnit: 'sachet', adminUnit: 'sachet', perUnit: 'sachet', strengthStyle: 'per-unit' },
     Inhalations: { label: 'Inhalations', stockUnit: 'inhalation', adminUnit: 'inhalation', perUnit: 'inhalation', strengthStyle: 'per-unit' },
     Inhaler: { label: 'Inhaler', stockUnit: 'puff', adminUnit: 'puff', perUnit: 'puff', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'inhaler' },
+    'Metered-dose Inhaler': { label: 'Metered-dose inhaler', stockUnit: 'puff', adminUnit: 'puff', perUnit: 'actuation', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'inhaler' },
+    'Dry Powder Inhaler': { label: 'Dry powder inhaler', stockUnit: 'inhalation', adminUnit: 'inhalation', perUnit: 'dose', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'inhaler' },
     'Nebulizer Solution': { label: 'Nebulizer solution', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration' },
+    'Nebulizer Unit Dose': { label: 'Nebulizer unit-dose vial', stockUnit: 'vial', adminUnit: 'vial', perUnit: 'vial', strengthStyle: 'per-unit' },
     Sprays: { label: 'Sprays', stockUnit: 'spray', adminUnit: 'spray', perUnit: 'spray', strengthStyle: 'per-unit' },
     'Nasal Spray': { label: 'Nasal spray', stockUnit: 'spray', adminUnit: 'spray', perUnit: 'spray', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'bottle' },
     'Nasal Solution': { label: 'Nasal solution', stockUnit: 'bottle', adminUnit: 'application', perUnit: 'mL', strengthStyle: 'concentration', containerTracking: true, containerUnit: 'bottle' },
@@ -116,6 +151,9 @@ const dosageFormDefinitions = {
     'Prefilled Syringe': { label: 'Prefilled syringe', stockUnit: 'syringe', adminUnit: 'syringe', perUnit: 'syringe', strengthStyle: 'per-unit' },
     Pen: { label: 'Pen', stockUnit: 'pen', adminUnit: 'unit', perUnit: 'dose', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'pen' },
     'Auto-injector': { label: 'Auto-injector', stockUnit: 'unit', adminUnit: 'unit', perUnit: 'unit', strengthStyle: 'per-unit' },
+    Cartridge: { label: 'Cartridge', stockUnit: 'cartridge', adminUnit: 'unit', perUnit: 'mL', strengthStyle: 'concentration', containerTracking: true, containerUnit: 'cartridge' },
+    'Infusion Bag': { label: 'Infusion bag', stockUnit: 'bag', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration', containerTracking: true, containerUnit: 'bag' },
+    Implant: { label: 'Implant', stockUnit: 'implant', adminUnit: 'implant', perUnit: 'implant', strengthStyle: 'per-unit' },
     Suppository: { label: 'Suppository', stockUnit: 'suppository', adminUnit: 'suppository', perUnit: 'suppository', strengthStyle: 'per-unit' },
     Enema: { label: 'Enema', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration', containerTracking: true, containerUnit: 'bottle' },
     Cream: { label: 'Cream', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
@@ -123,6 +161,7 @@ const dosageFormDefinitions = {
     Gel: { label: 'Gel', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
     Lotion: { label: 'Lotion', stockUnit: 'bottle', adminUnit: 'application', perUnit: 'mL', strengthStyle: 'topical', containerTracking: true, containerUnit: 'bottle' },
     Foam: { label: 'Foam', stockUnit: 'canister', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'canister' },
+    Aerosol: { label: 'Topical aerosol', stockUnit: 'canister', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'canister' },
     Shampoo: { label: 'Shampoo', stockUnit: 'bottle', adminUnit: 'application', perUnit: 'mL', strengthStyle: 'topical', containerTracking: true, containerUnit: 'bottle' },
     'Topical Packet': { label: 'Topical Packet', stockUnit: 'packet', adminUnit: 'application', perUnit: 'packet', strengthStyle: 'topical', containerTracking: true, containerUnit: 'packet' },
     'Topical Solution': { label: 'Topical Solution', stockUnit: 'bottle', adminUnit: 'application', perUnit: 'mL', strengthStyle: 'topical', containerTracking: true, containerUnit: 'bottle' },
@@ -133,6 +172,13 @@ const dosageFormDefinitions = {
     Drops: { label: 'Drops', stockUnit: 'drop', adminUnit: 'drop', perUnit: 'drop', strengthStyle: 'per-unit' },
     'Eye Drops': { label: 'Eye drops', stockUnit: 'drop', adminUnit: 'drop', perUnit: 'drop', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'bottle' },
     'Ear Drops': { label: 'Ear drops', stockUnit: 'drop', adminUnit: 'drop', perUnit: 'drop', strengthStyle: 'per-unit', containerTracking: true, containerUnit: 'bottle' },
+    'Eye Ointment': { label: 'Eye ointment', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
+    'Rectal Cream': { label: 'Rectal cream', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
+    'Vaginal Cream': { label: 'Vaginal cream', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
+    'Vaginal Tablet': { label: 'Vaginal tablet / insert', stockUnit: 'tablet', adminUnit: 'tablet', perUnit: 'tablet', strengthStyle: 'per-unit' },
+    'Vaginal Ring': { label: 'Vaginal ring', stockUnit: 'ring', adminUnit: 'ring', perUnit: 'ring', strengthStyle: 'per-unit' },
+    'Mouth Rinse': { label: 'Mouth rinse', stockUnit: 'mL', adminUnit: 'mL', perUnit: 'mL', strengthStyle: 'concentration', containerTracking: true, containerUnit: 'bottle' },
+    'Dental Paste': { label: 'Dental paste', stockUnit: 'tube', adminUnit: 'application', perUnit: 'g', strengthStyle: 'topical', containerTracking: true, containerUnit: 'tube' },
     Other: { label: 'Unit Dose', stockUnit: 'unit', adminUnit: 'unit', perUnit: 'unit', strengthStyle: 'per-unit' }
 };
 const glucoseGoalPresets = {
@@ -272,9 +318,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     const completionStatesAdded = updateScheduleCompletionStates();
     const prepackRetentionUpdated = maintainPrepackRetention();
     renderAll();
+    populateDosageFormSelects();
+    populateMedicationUnitControls();
     refreshDataLocation();
     maybeOpenFirstRunSetupGuide();
     renderFrequencyControls('sched');
+    initializeInAppWindows();
     updateInventoryEntryMode();
     setupImageDropzone('med-image-dropzone', image => { pendingNewMedImage = image; });
     setupImageDropzone('modal-image-dropzone', image => {
@@ -1554,7 +1603,7 @@ const guidedHelpTips = [
     { selector: '#vital-member', text: 'Select the member before entering readings so graphs, goals, PDFs, and provider-send reports stay attached to the correct profile.' },
     { selector: '#vital-type', text: 'Choose the monitoring type. PharmAtlas supports vitals and medication/lab monitoring such as INR, drug levels, and custom therapeutic goals.' },
     { selector: '#member-calendar-grid', text: 'The member calendar mirrors scheduled doses for this person. Upcoming doses turn orange near due time, overdue doses turn red, and completed days turn green.' },
-    { selector: '#member-active-meds', text: 'Active medications show timelines, linked medication groups, labels, administration, discontinuation, and order-specific audit history.' },
+    { selector: '#member-active-meds', text: 'Active medications show timelines, linked medication groups, labels, administration, discontinuation, and medication-specific audit history.' },
     { selector: '#member-med-review', text: 'Medication/Supplements Summary is a practical current list for caregivers or providers. Choose what medications and columns to include before printing or saving PDF.' },
     { selector: '#m-progress-note-template', text: 'Templates insert reusable diary structures. Built-in templates can be copied, and custom templates can be edited with the rich text toolbar.' },
     { selector: '#m-progress-note-editor', text: 'Write searchable progress notes here. Use flags, tags, scales, links, attachments, and private caregiver notes when helpful.' },
@@ -1766,10 +1815,12 @@ window.renderFrequencyControls = function(prefix, existingTimes = null, existing
     container.innerHTML = '';
     if (freq === 'CUSTOM') {
         renderCustomScheduleEditor(prefix, existingCustomSchedule);
+        if (prefix === 'sched') updateScheduleStartPreview();
         return;
     }
     if (rawFreq === 'PRN' && !freq) {
         container.innerHTML = '<span style="font-size:11px;">No scheduled PRN frequency selected.</span>';
+        if (prefix === 'sched') updateScheduleStartPreview();
         return;
     }
 
@@ -1783,18 +1834,25 @@ window.renderFrequencyControls = function(prefix, existingTimes = null, existing
         row.innerHTML = `<label>${label}</label><input class="${prefix}-time-input" type="time" value="${times[i] || defaultTimeForIndex(i, freq)}">`;
         container.appendChild(row);
     }
+    if (prefix === 'sched') {
+        container.querySelectorAll('.sched-time-input').forEach(input => input.addEventListener('input', updateScheduleStartPreview));
+    }
     if (freq === 'QXH') {
         const preview = document.createElement('div');
         preview.id = `${prefix}-interval-preview`;
         preview.className = 'interval-preview sunken-panel';
         container.appendChild(preview);
-        const update = () => renderIntervalPreview(prefix);
+        const update = () => {
+            renderIntervalPreview(prefix);
+            if (prefix === 'sched') updateScheduleStartPreview();
+        };
         container.querySelector(`.${prefix}-time-input`)?.addEventListener('input', update);
         document.getElementById(ids.intervalHours)?.addEventListener('input', update);
         document.getElementById(prefix === 'mod' ? 'mod-start' : 'sched-start')?.addEventListener('input', update);
         document.getElementById(prefix === 'mod' ? 'mod-end' : 'sched-end')?.addEventListener('input', update);
         renderIntervalPreview(prefix);
     }
+    if (prefix === 'sched') updateScheduleStartPreview();
 };
 
 function collectFrequencyDetails(prefix) {
@@ -4016,6 +4074,216 @@ function scheduleOverrideInstancesForDate(schedule, dateStr) {
         }));
 }
 
+function futureSafeTime(now = new Date()) {
+    const next = new Date(now.getTime() + 60 * 1000);
+    next.setSeconds(0, 0);
+    const roundedMinutes = Math.ceil(next.getMinutes() / 5) * 5;
+    if (roundedMinutes >= 60) {
+        next.setHours(next.getHours() + 1, 0, 0, 0);
+    } else {
+        next.setMinutes(roundedMinutes, 0, 0);
+    }
+    return `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`;
+}
+
+function futureSafeTimeToday(now = new Date()) {
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    if (currentMinutes >= 1439) return '';
+    let nextMinutes = Math.ceil((currentMinutes + 1) / 5) * 5;
+    if (nextMinutes >= 1440) nextMinutes = 1439;
+    if (nextMinutes <= currentMinutes) nextMinutes = currentMinutes + 1;
+    return `${String(Math.floor(nextMinutes / 60)).padStart(2, '0')}:${String(nextMinutes % 60).padStart(2, '0')}`;
+}
+
+function normalizedIncludeTodayTime(value, now = new Date()) {
+    const candidate = /^\d{2}:\d{2}$/.test(String(value || '')) ? String(value).slice(0, 5) : '';
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    return candidate && timeToMinutes(candidate) > currentMinutes
+        ? candidate
+        : futureSafeTimeToday(now);
+}
+
+function normalizeNewScheduleStart(schedule, behavior = 'remaining', now = new Date()) {
+    if (!schedule?.startDate) return schedule;
+    const today = localDateKey(now);
+    const originalStart = schedule.startDate;
+    const originalEnd = schedule.endDate;
+    const finiteDurationDays = originalEnd && originalEnd !== 'Ongoing' && originalEnd >= originalStart
+        ? Math.max(0, daysBetween(originalEnd, originalStart))
+        : null;
+    if (schedule.startDate < today) schedule.startDate = today;
+
+    const timingFreq = scheduleTimingFrequency(schedule);
+    const useTomorrow = behavior === 'next-day';
+    if (schedule.startDate === today && useTomorrow) schedule.startDate = addDaysKey(today, 1);
+
+    if (schedule.startDate === today && timingFreq === 'QXH') {
+        const requested = schedule.startTime || getScheduleTimes(schedule)[0] || futureSafeTime(now);
+        if (behavior === 'include-now') {
+            const includeTime = normalizedIncludeTodayTime(schedule.includeTodayTime, now);
+            if (includeTime) {
+                schedule.includeTodayTime = includeTime;
+                schedule.startTime = includeTime;
+            } else {
+                schedule.startDate = addDaysKey(today, 1);
+                schedule.startTime = requested;
+                schedule.includeTodayTime = '';
+            }
+        }
+        else if (timeToMinutes(requested) <= (now.getHours() * 60 + now.getMinutes())) {
+            const interval = Math.max(1, parseInt(schedule.intervalHours, 10) || 1);
+            let nextMinutes = timeToMinutes(requested);
+            while (nextMinutes <= (now.getHours() * 60 + now.getMinutes())) nextMinutes += interval * 60;
+            if (nextMinutes >= 1440) {
+                schedule.startDate = addDaysKey(today, 1);
+                schedule.startTime = requested;
+            } else {
+                schedule.startTime = `${String(Math.floor(nextMinutes / 60)).padStart(2, '0')}:${String(nextMinutes % 60).padStart(2, '0')}`;
+            }
+        }
+        schedule.times = generateIntervalTimes(schedule.startTime || requested, intervalHoursForSchedule(schedule));
+    } else if (schedule.startDate === today && timingFreq && schedule.freq !== 'PRN') {
+        const allTimes = getScheduleTimesForDate(schedule, today);
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const remaining = allTimes.filter(time => timeToMinutes(time) > currentMinutes);
+        if (behavior === 'include-now') {
+            const includeTime = normalizedIncludeTodayTime(schedule.includeTodayTime, now);
+            if (includeTime) {
+                schedule.includeTodayTime = includeTime;
+                schedule.firstDayTimes = uniqueValues([includeTime, ...remaining]).sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+            } else if (remaining.length) {
+                schedule.includeTodayTime = '';
+                schedule.firstDayTimes = remaining;
+            } else {
+                schedule.includeTodayTime = '';
+                schedule.startDate = addDaysKey(today, 1);
+                delete schedule.firstDayTimes;
+            }
+        } else if (remaining.length) {
+            schedule.includeTodayTime = '';
+            schedule.firstDayTimes = remaining;
+        } else {
+            let nextDueDate = '';
+            const cursor = parseLocal(today);
+            for (let offset = 1; cursor && offset <= 370; offset += 1) {
+                cursor.setDate(cursor.getDate() + 1);
+                const candidate = localDateKey(cursor);
+                if (isScheduleDueOnDate(schedule, candidate) && getScheduleTimesForDate(schedule, candidate).length) {
+                    nextDueDate = candidate;
+                    break;
+                }
+            }
+            schedule.startDate = nextDueDate || addDaysKey(today, 1);
+            delete schedule.firstDayTimes;
+        }
+    } else {
+        schedule.includeTodayTime = '';
+        delete schedule.firstDayTimes;
+    }
+
+    if (finiteDurationDays !== null) schedule.endDate = addDaysKey(schedule.startDate, finiteDurationDays);
+    if (timingFreq === 'ONCE') schedule.endDate = schedule.startDate;
+    if (timingFreq === 'QOD') schedule.qodStart = schedule.startDate;
+    if (timingFreq === 'Monthly' && (!schedule.monthlyAnchor || schedule.monthlyAnchor < schedule.startDate)) schedule.monthlyAnchor = schedule.startDate;
+    schedule.startAdjustedFrom = originalStart !== schedule.startDate ? originalStart : '';
+    schedule.startBehavior = behavior;
+    return schedule;
+}
+
+const startBehaviorFrequencies = new Set(['QD', 'Nightly', 'BID', 'TID', 'QID', 'QOD', 'QXH']);
+
+function compactScheduleDateLabel(dateKey) {
+    const value = parseLocal(dateKey);
+    return value ? `${value.getMonth() + 1}/${value.getDate()}` : dateKey;
+}
+
+function scheduleStartBehaviorIsRelevant(schedule, now = new Date()) {
+    if (!schedule || schedule.freq === 'PRN') return false;
+    const timingFreq = scheduleTimingFrequency(schedule);
+    return startBehaviorFrequencies.has(timingFreq) && schedule.startDate === localDateKey(now);
+}
+
+function scheduleStartCalendarPreviewHtml(sourceSchedule, behavior = 'remaining', now = new Date()) {
+    if (!scheduleStartBehaviorIsRelevant(sourceSchedule, now)) return '';
+    const schedule = JSON.parse(JSON.stringify(sourceSchedule));
+    schedule.id = `start-preview-${Date.now()}`;
+    normalizeNewScheduleStart(schedule, behavior, now);
+    const firstDate = localDateKey(now);
+    const days = Array.from({ length: 5 }, (_, index) => addDaysKey(firstDate, index));
+    const cells = days.map(date => {
+        const instances = getScheduleInstancesForDate(schedule, date).filter(instance => instance.time !== 'PRN');
+        const shown = instances.slice(0, 4);
+        const overflow = Math.max(0, instances.length - shown.length);
+        return `<div class="schedule-start-day${date === schedule.startDate ? ' schedule-start-day-first' : ''}">
+            <div class="schedule-start-day-heading"><strong>${escapeHtml(parseLocal(date)?.toLocaleDateString(undefined, { weekday: 'short' }) || '')}</strong><span>${escapeHtml(compactScheduleDateLabel(date))}</span></div>
+            <div class="schedule-start-dose-list">${shown.length
+                ? shown.map(instance => `<span class="schedule-start-dose">${escapeHtml(String(instance.time || '').slice(0, 5))}</span>`).join('')
+                : '<span class="schedule-start-no-dose">No dose</span>'}${overflow ? `<span class="schedule-start-more">+${overflow}</span>` : ''}</div>
+        </div>`;
+    }).join('');
+    const adjusted = schedule.startDate !== sourceSchedule.startDate
+        ? `First dose moves to ${compactScheduleDateLabel(schedule.startDate)} because no valid dose remains today.`
+        : behavior === 'include-now'
+            ? `Includes an extra dose today at ${schedule.includeTodayTime || 'the next available time'}; the regular schedule continues afterward.`
+            : behavior === 'next-day'
+                ? 'The full schedule begins tomorrow.'
+                : 'Only scheduled times that have not passed are used today.';
+    return `<div class="schedule-start-preview-title"><strong>First doses</strong><span>${escapeHtml(adjusted)}</span></div><div class="schedule-start-calendar">${cells}</div>`;
+}
+
+function mainScheduleStartPreviewDraft() {
+    const rawFreq = document.getElementById('sched-freq')?.value || '';
+    const freq = rawFreq === 'PRN' ? (document.getElementById('sched-prn-schedule-freq')?.value || '') : rawFreq;
+    const startDate = freq === 'QOD'
+        ? (document.getElementById('qod-start-date')?.value || document.getElementById('sched-start')?.value || '')
+        : (document.getElementById('sched-start')?.value || '');
+    const times = Array.from(document.querySelectorAll('#sched-time-fields .sched-time-input')).map(input => input.value).filter(Boolean);
+    const startTime = times[0] || '';
+    return {
+        id: 'main-start-preview',
+        freq: rawFreq,
+        prnScheduleFreq: rawFreq === 'PRN' ? freq : '',
+        startDate,
+        endDate: document.getElementById('sched-end')?.value || 'Ongoing',
+        qodStart: freq === 'QOD' ? startDate : '',
+        times,
+        startTime,
+        includeTodayTime: document.getElementById('sched-include-today-time')?.value || '',
+        intervalHours: freq === 'QXH' ? parseInt(document.getElementById('sched-interval-hours')?.value, 10) || 8 : null
+    };
+}
+
+window.updateScheduleStartPreview = function() {
+    const wrap = document.getElementById('sched-start-behavior-wrap');
+    const preview = document.getElementById('sched-start-calendar-preview');
+    const select = document.getElementById('sched-start-behavior');
+    const includeTimeWrap = document.getElementById('sched-include-today-time-wrap');
+    const includeTimeInput = document.getElementById('sched-include-today-time');
+    if (!wrap || !preview) return;
+    const schedule = mainScheduleStartPreviewDraft();
+    const relevant = scheduleStartBehaviorIsRelevant(schedule);
+    if (select) {
+        select.disabled = !relevant;
+        if (!relevant) select.value = 'remaining';
+    }
+    const includeTimeVisible = relevant && select?.value === 'include-now';
+    if (includeTimeWrap) includeTimeWrap.style.display = includeTimeVisible ? '' : 'none';
+    if (includeTimeInput && includeTimeVisible) {
+        const safeTime = normalizedIncludeTodayTime(includeTimeInput.value);
+        if (includeTimeInput.value !== safeTime) includeTimeInput.value = safeTime;
+        schedule.includeTodayTime = safeTime;
+    }
+    wrap.style.display = relevant ? '' : 'none';
+    preview.style.display = relevant ? '' : 'none';
+    preview.innerHTML = relevant
+        ? scheduleStartCalendarPreviewHtml(schedule, document.getElementById('sched-start-behavior')?.value || 'remaining')
+        : '';
+};
+
+function intervalHoursForSchedule(schedule) {
+    return Math.max(1, parseInt(schedule?.intervalHours, 10) || 1);
+}
+
 function getScheduleTimesForDate(schedule, dateStr) {
     if (scheduleTimingFrequency(schedule) !== 'CUSTOM') return getScheduleTimes(schedule);
     const date = parseLocal(dateStr);
@@ -4059,7 +4327,9 @@ function getBaseScheduleInstancesForDate(schedule, dateStr) {
             }));
         return baseInstances;
     }
-    const times = getScheduleTimesForDate(schedule, dateStr);
+    const times = dateStr === schedule.startDate && Array.isArray(schedule.firstDayTimes)
+        ? schedule.firstDayTimes.filter(Boolean)
+        : getScheduleTimesForDate(schedule, dateStr);
     if (times.length === 0) {
         return [
             { date: dateStr, time: 'PRN', key: scheduleInstanceKey(schedule.id, dateStr, 'PRN') }
@@ -4261,17 +4531,70 @@ function getLabelClass(parts, lineCount = 0) {
     return 'label-page';
 }
 
-function printPreparedArea() {
+function normalizedLabelPrintSize(size = {}) {
+    const width = Math.max(0.5, Math.min(20, Number(size.width) || 2.25));
+    const height = Math.max(0.5, Math.min(20, Number(size.height) || 1.25));
+    return { width, height };
+}
+
+function labelPrintSizeFromHtml(labelHtml = '') {
+    const width = String(labelHtml).match(/--custom-label-width\s*:\s*([\d.]+)in/i)?.[1];
+    const height = String(labelHtml).match(/--custom-label-height\s*:\s*([\d.]+)in/i)?.[1];
+    return normalizedLabelPrintSize({ width, height });
+}
+
+function setActivePrintPageSize(size = {}) {
+    const normalized = normalizedLabelPrintSize(size);
+    let style = document.getElementById('active-label-page-size');
+    if (!style) {
+        style = document.createElement('style');
+        style.id = 'active-label-page-size';
+        document.head.appendChild(style);
+    }
+    style.textContent = window.api?.printLabel
+        ? ''
+        : `@media print { @page { size: ${normalized.width}in ${normalized.height}in; margin: 0; } }`;
+    document.documentElement.style.setProperty('--print-label-width', `${normalized.width}in`);
+    document.documentElement.style.setProperty('--print-label-height', `${normalized.height}in`);
+    return normalized;
+}
+
+async function printPreparedArea(size = {}, options = {}) {
     const printArea = document.getElementById('print-area');
     document.body.appendChild(printArea);
     printArea.style.display = 'block';
-    setTimeout(() => window.print(), 50);
+    const printSize = setActivePrintPageSize(size);
+    await Promise.resolve(document.fonts?.ready);
+    const images = Array.from(printArea.querySelectorAll('img'));
+    await Promise.all(images.map(image => {
+        if (image.complete && image.naturalWidth) return Promise.resolve();
+        if (typeof image.decode === 'function') return image.decode().catch(() => {});
+        return new Promise(resolve => {
+            const done = () => resolve();
+            image.addEventListener('load', done, { once: true });
+            image.addEventListener('error', done, { once: true });
+            window.setTimeout(done, 3000);
+        });
+    }));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    if (window.api?.printLabel) {
+        const result = await window.api.printLabel({ ...printSize, ...options, html: printArea.innerHTML });
+        if (result && result.success === false && result.error && !/canceled/i.test(result.error)) {
+            await appAlert(result.error, 'Unable to print label');
+        }
+        return result;
+    }
+    window.print();
+    return { success: true };
 }
 
 let pendingLabelHtml = '';
 let pendingPrepackDefinition = null;
+let pendingLabelPrintSize = normalizedLabelPrintSize();
+let pendingLabelPreviewToken = 0;
 
-function fitLabelPages(container) {
+function fitLabelPages(container, captureForPrint = false) {
+    if (!container) return;
     const densityClasses = ['label-compact', 'label-dense', 'label-ultra-dense', 'label-micro'];
     container.querySelectorAll('.label-page').forEach(page => {
         const textElements = page.querySelectorAll('.label-date, .label-title, .label-small, .label-med-row, .compound-label-strength, .med-kit-label-row');
@@ -4295,36 +4618,43 @@ function fitLabelPages(container) {
             });
         }
     });
-    pendingLabelHtml = container.innerHTML;
+    if (captureForPrint) pendingLabelHtml = container.innerHTML;
 }
 
-function previewLabelHtml(labelHtml, prepackDefinition = null) {
+function previewLabelHtml(labelHtml, prepackDefinition = null, printSize = null) {
+    const previewToken = ++pendingLabelPreviewToken;
     pendingLabelHtml = labelHtml;
     pendingPrepackDefinition = prepackDefinition;
+    pendingLabelPrintSize = normalizedLabelPrintSize(printSize || labelPrintSizeFromHtml(labelHtml));
     const modal = document.getElementById('label-preview-modal');
     const content = document.getElementById('label-preview-content');
     if (!modal || !content) {
         const printArea = document.getElementById('print-area');
         printArea.innerHTML = labelHtml;
-        printPreparedArea();
+        printPreparedArea(pendingLabelPrintSize);
         return;
     }
     content.innerHTML = labelHtml;
     modal.style.display = 'flex';
     const scheduleButton = document.getElementById('schedule-prepack-button');
     if (scheduleButton) scheduleButton.style.display = prepackDefinition && !prepackDefinition.existingQueueId ? 'inline-block' : 'none';
-    fitLabelPages(content);
+    fitLabelPages(content, true);
     requestAnimationFrame(() => {
-        fitLabelPages(content);
+        if (previewToken !== pendingLabelPreviewToken || modal.style.display === 'none') return;
+        fitLabelPages(content, true);
         if (document.fonts?.ready) {
-            document.fonts.ready.then(() => fitLabelPages(content));
+            document.fonts.ready.then(() => {
+                if (previewToken === pendingLabelPreviewToken && modal.style.display !== 'none') fitLabelPages(content, true);
+            });
         }
     });
 }
 
 window.closeLabelPreview = function() {
+    pendingLabelPreviewToken += 1;
     pendingLabelHtml = '';
     pendingPrepackDefinition = null;
+    pendingLabelPrintSize = normalizedLabelPrintSize();
     const modal = document.getElementById('label-preview-modal');
     if (modal) modal.style.display = 'none';
     const scheduleButton = document.getElementById('schedule-prepack-button');
@@ -4416,14 +4746,152 @@ window.printPreviewedLabel = async function() {
     const printArea = document.getElementById('print-area');
     printArea.innerHTML = pendingLabelHtml;
     const prepackDefinition = pendingPrepackDefinition;
+    const printSize = pendingLabelPrintSize;
     window.closeLabelPreview();
     if (prepackDefinition?.existingQueueId && !prepackDefinition.reprintOnly) await commitPrepackPrint(prepackDefinition);
-    printPreparedArea();
+    await printPreparedArea(printSize);
 };
+
+window.toggleInAppWindowMaximize = function(trigger) {
+    const windowElement = trigger?.closest?.('.window');
+    if (!windowElement) return;
+    const willMaximize = !windowElement.classList.contains('in-app-maximized');
+    if (willMaximize) {
+        const rect = windowElement.getBoundingClientRect();
+        windowElement.dataset.restoreBounds = JSON.stringify({
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height
+        });
+        windowElement.style.position = 'fixed';
+    }
+    const maximized = windowElement.classList.toggle('in-app-maximized', willMaximize);
+    if (!maximized) {
+        try {
+            const bounds = JSON.parse(windowElement.dataset.restoreBounds || '{}');
+            if (Number.isFinite(bounds.left)) windowElement.style.left = `${bounds.left}px`;
+            if (Number.isFinite(bounds.top)) windowElement.style.top = `${bounds.top}px`;
+            if (Number.isFinite(bounds.width)) windowElement.style.width = `${bounds.width}px`;
+            if (Number.isFinite(bounds.height)) windowElement.style.height = `${bounds.height}px`;
+        } catch (_) {}
+    }
+    trigger.setAttribute('aria-label', maximized ? 'Restore' : 'Maximize');
+    trigger.title = maximized ? 'Restore window' : 'Maximize window';
+};
+
+function makeInAppWindowInteractive(windowElement) {
+    if (!windowElement || windowElement.dataset.interactiveWindow === 'true') return;
+    if (document.body.classList.contains('mobile-runtime')) return;
+    windowElement.dataset.interactiveWindow = 'true';
+    windowElement.classList.add('interactive-window');
+    const directions = ['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'];
+    directions.forEach(direction => {
+        const handle = document.createElement('span');
+        handle.className = `window-resize-handle window-resize-${direction}`;
+        handle.dataset.resizeDirection = direction;
+        handle.setAttribute('aria-hidden', 'true');
+        windowElement.appendChild(handle);
+    });
+
+    const beginInteraction = (event, mode, direction = '') => {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (windowElement.classList.contains('in-app-maximized')) return;
+        const rect = windowElement.getBoundingClientRect();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const minWidth = Math.min(420, Math.max(300, window.innerWidth - 24));
+        const minHeight = Math.min(260, Math.max(220, window.innerHeight - 24));
+        windowElement.style.position = 'fixed';
+        windowElement.style.left = `${rect.left}px`;
+        windowElement.style.top = `${rect.top}px`;
+        windowElement.style.width = `${rect.width}px`;
+        windowElement.style.height = `${rect.height}px`;
+        windowElement.style.maxWidth = 'none';
+        windowElement.style.maxHeight = 'none';
+        windowElement.style.margin = '0';
+        windowElement.classList.add('window-interacting');
+        document.body.classList.add('window-pointer-active');
+
+        const move = moveEvent => {
+            const dx = moveEvent.clientX - startX;
+            const dy = moveEvent.clientY - startY;
+            if (mode === 'move') {
+                const left = Math.min(window.innerWidth - 80, Math.max(8 - rect.width, rect.left + dx));
+                const top = Math.min(window.innerHeight - 34, Math.max(0, rect.top + dy));
+                windowElement.style.left = `${left}px`;
+                windowElement.style.top = `${top}px`;
+                return;
+            }
+            let left = rect.left;
+            let top = rect.top;
+            let width = rect.width;
+            let height = rect.height;
+            if (direction.includes('e')) width = Math.max(minWidth, Math.min(window.innerWidth - rect.left - 4, rect.width + dx));
+            if (direction.includes('s')) height = Math.max(minHeight, Math.min(window.innerHeight - rect.top - 4, rect.height + dy));
+            if (direction.includes('w')) {
+                const proposedLeft = Math.max(4, Math.min(rect.right - minWidth, rect.left + dx));
+                left = proposedLeft;
+                width = rect.right - proposedLeft;
+            }
+            if (direction.includes('n')) {
+                const proposedTop = Math.max(4, Math.min(rect.bottom - minHeight, rect.top + dy));
+                top = proposedTop;
+                height = rect.bottom - proposedTop;
+            }
+            windowElement.style.left = `${left}px`;
+            windowElement.style.top = `${top}px`;
+            windowElement.style.width = `${width}px`;
+            windowElement.style.height = `${height}px`;
+        };
+        const end = () => {
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', end);
+            document.removeEventListener('pointercancel', end);
+            windowElement.classList.remove('window-interacting');
+            document.body.classList.remove('window-pointer-active');
+        };
+        document.addEventListener('pointermove', move);
+        document.addEventListener('pointerup', end, { once: true });
+        document.addEventListener('pointercancel', end, { once: true });
+        event.preventDefault();
+    };
+
+    const titleBar = windowElement.querySelector(':scope > .title-bar');
+    titleBar?.addEventListener('pointerdown', event => {
+        if (event.target.closest('.title-bar-controls, button, input, select, textarea, a')) return;
+        beginInteraction(event, 'move');
+    });
+    windowElement.querySelectorAll('.window-resize-handle').forEach(handle => {
+        handle.addEventListener('pointerdown', event => beginInteraction(event, 'resize', handle.dataset.resizeDirection));
+    });
+}
+
+function initializeInAppWindows(root = document) {
+    root.querySelectorAll([
+        '#med-modal > .window',
+        '#member-modal > .window',
+        '#order-modifier-modal > .window',
+        '#label-preview-modal > .window',
+        '#action-modal > .window',
+        '.child-action-modal > .window'
+    ].join(',')).forEach(makeInAppWindowInteractive);
+}
+
+function resetInAppWindowBounds(windowElement) {
+    if (!windowElement) return;
+    windowElement.classList.remove('in-app-maximized', 'window-interacting');
+    ['position', 'left', 'top', 'right', 'bottom', 'width', 'height', 'maxWidth', 'maxHeight', 'margin', 'inset']
+        .forEach(property => { windowElement.style[property] = ''; });
+    delete windowElement.dataset.restoreBounds;
+}
 
 function ensureActionModal() {
     let modal = document.getElementById('action-modal');
-    if (modal) return modal;
+    if (modal) {
+        makeInAppWindowInteractive(modal.querySelector('.window'));
+        return modal;
+    }
 
     modal = document.createElement('div');
     modal.id = 'action-modal';
@@ -4435,6 +4903,7 @@ function ensureActionModal() {
                 <div class="title-bar-text" id="action-modal-title">Action</div>
                 <div class="title-bar-controls">
                     <button aria-label="Minimize" id="action-modal-min"></button>
+                    <button aria-label="Maximize" id="action-modal-max" title="Maximize window"></button>
                     <button aria-label="Close" id="action-modal-x"></button>
                 </div>
             </div>
@@ -4447,6 +4916,7 @@ function ensureActionModal() {
             </div>
         </div>`;
     document.body.appendChild(modal);
+    makeInAppWindowInteractive(modal.querySelector('.window'));
     return modal;
 }
 
@@ -4599,11 +5069,14 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
     const cancel = modal.querySelector('#action-modal-cancel');
     const close = modal.querySelector('#action-modal-x');
     const minimize = modal.querySelector('#action-modal-min');
+    const maximize = modal.querySelector('#action-modal-max');
     const isTaskbarWindow = bodyHtml.includes('data-action-modal-size="wide"') || bodyHtml.includes('bulk-container-preview-shell');
     const taskId = 'action-modal';
 
+    resetInAppWindowBounds(windowEl);
     modal.querySelector('#action-modal-title').innerText = title;
     body.innerHTML = bodyHtml;
+    windowEl?.classList.remove('in-app-maximized');
     windowEl?.classList.toggle('action-modal-window-wide', isTaskbarWindow);
     const hideOk = confirmText === false || confirmText === null || confirmText === '';
     ok.style.display = hideOk ? 'none' : '';
@@ -4612,7 +5085,13 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
     enhanceButtonIcons(body);
     renderGuidedHelpTips(body);
     if (minimize) minimize.style.display = isTaskbarWindow ? '' : 'none';
+    if (maximize) {
+        maximize.setAttribute('aria-label', 'Maximize');
+        maximize.title = 'Maximize window';
+        maximize.onclick = () => window.toggleInAppWindowMaximize(maximize);
+    }
     modal.style.display = 'flex';
+    makeInAppWindowInteractive(windowEl);
     if (isTaskbarWindow) {
         registerWorkspaceTask(taskId, title, () => {
             modal.style.display = 'flex';
@@ -4633,6 +5112,8 @@ function showActionModal(title, bodyHtml, confirmText = 'OK', collectFn = null) 
             cancel.onclick = null;
             close.onclick = null;
             if (minimize) minimize.onclick = null;
+            if (maximize) maximize.onclick = null;
+            resetInAppWindowBounds(windowEl);
             windowEl?.classList.remove('action-modal-window-wide');
             removeWorkspaceTask(taskId);
             modal.style.display = 'none';
@@ -4663,6 +5144,7 @@ function showChildActionModal(title, bodyHtml, confirmText = 'OK', collectFn = n
             <div class="title-bar">
                 <div class="title-bar-text">${escapeHtml(title)}</div>
                 <div class="title-bar-controls">
+                    <button aria-label="Maximize" title="Maximize window" onclick="toggleInAppWindowMaximize(this)"></button>
                     <button aria-label="Close" data-child-modal-close></button>
                 </div>
             </div>
@@ -4675,6 +5157,7 @@ function showChildActionModal(title, bodyHtml, confirmText = 'OK', collectFn = n
             </div>
         </div>`;
     document.body.appendChild(modal);
+    makeInAppWindowInteractive(modal.querySelector('.window'));
     enhanceButtonIcons(modal);
     const body = modal.querySelector('.child-action-modal-body');
     const ok = modal.querySelector('[data-child-modal-ok]');
@@ -4716,7 +5199,7 @@ function dosageFormDefinition(formulation = 'Other') {
 }
 
 function isTopicalFormulation(formulation = '') {
-    return ['Cream', 'Ointment', 'Gel', 'Lotion', 'Foam', 'Shampoo', 'Topical Packet', 'Topical Solution', 'Tube', 'Jar'].includes(formulation);
+    return ['Cream', 'Ointment', 'Gel', 'Lotion', 'Foam', 'Aerosol', 'Shampoo', 'Topical Packet', 'Topical Solution', 'Tube', 'Jar', 'Eye Ointment', 'Rectal Cream', 'Vaginal Cream', 'Dental Paste'].includes(formulation);
 }
 
 function dosageFormUsesContainerTracking(formulation = '') {
@@ -4758,9 +5241,7 @@ function defaultStrengthUnitForFormulation(formulation = 'Other') {
 
 function dosageFormMeasurementProfile(formulation = 'Other', behavior = '') {
     const def = dosageFormDefinition(formulation);
-    const inventoryBehavior = dosageFormUsesContainerTracking(formulation)
-        ? 'container-finish'
-        : (behavior || defaultInventoryBehaviorForFormulation(formulation));
+    const inventoryBehavior = behavior || defaultInventoryBehaviorForFormulation(formulation);
     const perUnit = def.perUnit || '';
     const strengthUnit = defaultStrengthUnitForFormulation(formulation);
     const stockUnit = defaultInventoryUnitForFormulation(formulation, inventoryBehavior);
@@ -4790,7 +5271,8 @@ function isTopicalMedication(med) {
 }
 
 function usesContainerTracking(med) {
-    return med?.inventoryBehavior === 'container-finish' || dosageFormUsesContainerTracking(med?.formulation || '');
+    if (med?.inventoryBehavior) return med.inventoryBehavior === 'container-finish';
+    return dosageFormUsesContainerTracking(med?.formulation || '');
 }
 
 function isReturnPrepackExcludedMedication(med, schedule = null, item = null) {
@@ -5719,6 +6201,8 @@ function defaultCurrentMedicationListForMember(memberId) {
 
 window.switchMemberProfileTab = function(tab = 'main') {
     captureMemberProfileState(currentEditingMemberId, { activeTab: tab });
+    const profileBody = document.querySelector('.member-profile-body');
+    if (profileBody) profileBody.dataset.activeTab = tab;
     document.querySelectorAll('.member-profile-tab').forEach(button => {
         button.classList.toggle('active', button.dataset.memberProfileTab === tab);
     });
@@ -8658,7 +9142,7 @@ function renderLinkChoicePanel(panel, choices, selected = [], pickerAction = '',
     const disabled = choices.length === 0 ? 'disabled' : '';
     panel.innerHTML = `
         <div class="link-choice-summary">${summary}</div>
-        <button type="button" class="link-choice-button" ${disabled} onclick="event.stopPropagation(); ${pickerAction}">Link Orders...</button>
+        <button type="button" class="link-choice-button" ${disabled} onclick="event.stopPropagation(); ${pickerAction}">Link Medications...</button>
     `;
 }
 
@@ -8686,8 +9170,8 @@ function linkOrderDialogHtml(choices, selectedValues, options = {}) {
         <fieldset class="link-type-fieldset"><legend>Select link type</legend><div class="link-type-grid">${linkRelationshipOptionsHtml(selectedMode)}</div></fieldset>
         <div data-follow-delay class="link-follow-delay" style="${selectedMode === 'followed-by' ? '' : 'display:none;'}">
             <strong>Follow interval</strong>
-            <label>Selected order starts <input name="followDelayAmount" type="number" min="1" step="1" value="${escapeHtml(delayAmount)}">
-                <select name="followDelayUnit"><option value="minutes" ${delayUnit === 'minutes' ? 'selected' : ''}>minutes</option><option value="hours" ${delayUnit === 'hours' ? 'selected' : ''}>hours</option><option value="days" ${delayUnit === 'days' ? 'selected' : ''}>days</option></select> after this order</label>
+            <label>Selected medication starts <input name="followDelayAmount" type="number" min="1" step="1" value="${escapeHtml(delayAmount)}">
+                <select name="followDelayUnit"><option value="minutes" ${delayUnit === 'minutes' ? 'selected' : ''}>minutes</option><option value="hours" ${delayUnit === 'hours' ? 'selected' : ''}>hours</option><option value="days" ${delayUnit === 'days' ? 'selected' : ''}>days</option></select> after this medication</label>
         </div>
         <fieldset><legend>Select existing order</legend>
             <div class="link-order-search-row"><input name="linkSearch" type="search" placeholder="Search medication, strength, frequency, or time" oninput="filterLinkOrderChoices(this.value)"><button type="button" onclick="filterLinkOrderChoices(this.previousElementSibling.value)">Search</button><button type="button" onclick="clearLinkOrderSelection()">Clear</button></div>
@@ -8701,7 +9185,7 @@ function linkOrderDialogHtml(choices, selectedValues, options = {}) {
                     </div>`;
                 }).join('')}
             </div>
-            <div class="form-help">Pending orders remain available here. Followed-by links accept one next order; And/Or links may include multiple orders.</div>
+            <div class="form-help">Pending medications remain available here. Followed-by links accept one next medication; And/Or links may include multiple medications.</div>
         </fieldset>
     </div>`;
 }
@@ -8720,7 +9204,7 @@ function collectLinkOrderDialog(body) {
     const linkIds = Array.from(body.querySelectorAll('input[name="linkIds"]:checked')).map(input => input.value);
     if (!mode) return showError('Choose And, Or, or Followed by.');
     if (!linkIds.length) return showError('Select at least one order to link.');
-    if (mode === 'followed-by' && linkIds.length !== 1) return showError('Followed by links require exactly one next order.');
+    if (mode === 'followed-by' && linkIds.length !== 1) return showError('Followed by links require exactly one next medication.');
     const amount = parseInt(body.querySelector('[name="followDelayAmount"]')?.value, 10);
     const unit = body.querySelector('[name="followDelayUnit"]')?.value || 'minutes';
     if (mode === 'followed-by' && (!Number.isInteger(amount) || amount < 1)) return showError('Enter how long after this order the selected order should follow.');
@@ -9259,6 +9743,10 @@ window.applyMobileSyncedDatabase = function(data) {
     updateScheduleCompletionStates();
     maintainPrepackRetention();
     renderAll();
+    if (currentEditingMemberId && document.getElementById('member-modal')?.style.display === 'flex') {
+        refreshOpenMemberMedicationViews(currentEditingMemberId);
+        renderMemberOrderWorklist(currentEditingMemberId);
+    }
 };
 
 async function sync() {
@@ -9341,6 +9829,15 @@ window.openDesktopDeviceSync = async function() {
                 </ol>
                 <p>Medication data is encrypted before it crosses the local network. It is not routed through email or a PharmAtlas cloud server.</p>
                 <div class="sunken-panel device-sync-address">${escapeHtml(info.host)}:${escapeHtml(info.port)}</div>
+                <details class="device-sync-manual-pairing">
+                    <summary>Simulator / manual pairing</summary>
+                    <p>Use this when the Xcode Simulator cannot scan the QR. Treat this text like a password.</p>
+                    <textarea id="desktop-pairing-text" rows="3" readonly>${escapeHtml(info.pairingPayload)}</textarea>
+                    <div class="field-row">
+                        <button type="button" onclick="copyDesktopPairingText()"><span class="win98-icon icon-view"></span> Copy Pairing Text</button>
+                        <span id="desktop-pairing-copy-status" aria-live="polite"></span>
+                    </div>
+                </details>
                 <div class="field-row">
                     <button type="button" onclick="resetDesktopDeviceSyncPairing()"><span class="win98-icon icon-view"></span> New Pairing Code</button>
                     <button type="button" onclick="stopDesktopDeviceSync()"><span class="win98-icon icon-clear"></span> Stop Sync</button>
@@ -9348,6 +9845,22 @@ window.openDesktopDeviceSync = async function() {
             </div>
         </div>
     `, 'Done');
+};
+
+window.copyDesktopPairingText = async function() {
+    const input = document.getElementById('desktop-pairing-text');
+    const status = document.getElementById('desktop-pairing-copy-status');
+    if (!input?.value) return;
+    let copied = false;
+    try {
+        await navigator.clipboard.writeText(input.value);
+        copied = true;
+    } catch (_error) {
+        input.focus();
+        input.select();
+        copied = document.execCommand?.('copy') === true;
+    }
+    if (status) status.textContent = copied ? 'Copied.' : 'Select the text and copy it manually.';
 };
 
 window.stopDesktopDeviceSync = async function() {
@@ -9373,7 +9886,7 @@ async function reloadDatabaseFromMobileSync(details = {}) {
         await openMemberModal(currentEditingMemberId, activeTab);
     }
     const source = details.deviceName || 'paired iPhone or iPad';
-    await appAlert(`Changes from ${source} are now reflected on this desktop.${details.backupPath ? '\nA pre-sync safety backup was created.' : ''}`, 'Companion Sync Complete');
+    console.info(`Changes from ${source} were applied live.${details.backupPath ? ` Backup: ${details.backupPath}` : ''}`);
 }
 
 window.api.onDatabaseUpdatedFromMobile?.(details => {
@@ -9422,7 +9935,7 @@ function renderMemberPrnMedicationOrders(memberId) {
                 <button onclick="event.stopPropagation(); documentPastDose('${escapeHtml(schedule.id)}')">Past Dose</button>
                 <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${escapeHtml(schedule.id)}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                 <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${escapeHtml(schedule.id)}')">Waste</button>
-                <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>
+                <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Schedule Again</button>
                 ${containerOpenStatusButtonHtml(schedule, med)}
                 ${usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${escapeHtml(schedule.id)}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                 ${set
@@ -9441,7 +9954,7 @@ function completedScheduleSummaryHtml(schedule, candidates = null, showRegimenSo
         : null;
     const statusText = schedule.status === 'discontinued' ? 'Discontinued' : 'Completed';
     const linked = linkedSchedulesFor(schedule, candidates || db.schedules.filter(item => item.memberId === schedule.memberId));
-    const reorderAction = `<button type="button" class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Reorder</button>`;
+    const reorderAction = `<button type="button" class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${escapeHtml(schedule.id)}')">&#8635; Schedule Again</button>`;
     const linkedRemoveAction = linked.length > 0
         ? `<button type="button" onclick="event.stopPropagation(); removeCompletedLinkedSchedules('${escapeHtml(schedule.id)}')">Remove All Linked Meds</button>`
         : '';
@@ -9579,6 +10092,22 @@ function calculateBmiValue(heightValue, heightUnit, weightValue, weightUnit) {
     return (weightKg / (heightMeters * heightMeters)).toFixed(1);
 }
 
+function calculateClinicalBodySizes(heightValue, heightUnit, weightValue, weightUnit, sex) {
+    const height = parseAmount(heightValue, NaN);
+    const weight = parseAmount(weightValue, NaN);
+    if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(weight) || weight <= 0) {
+        return { ibw: '', adjustedWeight: '', bsa: '' };
+    }
+    const heightInches = heightUnit === 'cm' ? height / 2.54 : height;
+    const heightCm = heightUnit === 'cm' ? height : height * 2.54;
+    const weightKg = weightUnit === 'kg' ? weight : weight * 0.45359237;
+    const ibwBase = sex === 'Female' ? 45.5 : 50;
+    const ibw = Math.max(1, ibwBase + (2.3 * (heightInches - 60)));
+    const adjustedWeight = weightKg > ibw * 1.2 ? ibw + (0.4 * (weightKg - ibw)) : weightKg;
+    const bsa = Math.sqrt((heightCm * weightKg) / 3600);
+    return { ibw: ibw.toFixed(1), adjustedWeight: adjustedWeight.toFixed(1), bsa: bsa.toFixed(2) };
+}
+
 function latestWeightReadingForMember(memberId) {
     return db.vitals
         .filter(reading => reading.memberId === memberId && reading.type === 'weight' && reading.weight !== undefined && reading.weight !== '')
@@ -9587,14 +10116,24 @@ function latestWeightReadingForMember(memberId) {
 }
 
 window.updateMemberBmiPreview = function() {
+    const height = document.getElementById('m-height')?.value;
+    const heightUnit = document.getElementById('m-height-unit')?.value || 'in';
+    const weight = document.getElementById('m-current-weight')?.value;
+    const weightUnit = document.getElementById('m-current-weight-unit')?.value || 'lb';
     const bmi = calculateBmiValue(
-        document.getElementById('m-height')?.value,
-        document.getElementById('m-height-unit')?.value || 'in',
-        document.getElementById('m-current-weight')?.value,
-        document.getElementById('m-current-weight-unit')?.value || 'lb'
+        height,
+        heightUnit,
+        weight,
+        weightUnit
     );
     const input = document.getElementById('m-bmi');
     if (input) input.value = bmi || '';
+    const sizes = calculateClinicalBodySizes(height, heightUnit, weight, weightUnit, document.getElementById('m-sex')?.value || 'Male');
+    const fields = { 'm-ibw': sizes.ibw, 'm-adjusted-weight': sizes.adjustedWeight, 'm-bsa': sizes.bsa };
+    Object.entries(fields).forEach(([id, value]) => {
+        const field = document.getElementById(id);
+        if (field) field.value = value;
+    });
 };
 
 function collectMemberFormData() {
@@ -9628,6 +10167,9 @@ function collectMemberFormData() {
         currentWeight: document.getElementById('m-current-weight')?.value || '',
         currentWeightUnit: document.getElementById('m-current-weight-unit')?.value || 'lb',
         bmi: document.getElementById('m-bmi')?.value || '',
+        idealBodyWeight: document.getElementById('m-ibw')?.value || '',
+        adjustedBodyWeight: document.getElementById('m-adjusted-weight')?.value || '',
+        bodySurfaceArea: document.getElementById('m-bsa')?.value || '',
         providers: document.getElementById('m-providers').value,
         diagnoses: diagnosesList.join(', '),
         diagnosesList,
@@ -9727,7 +10269,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
     };
 
     // 1. Clear all fields safely
-    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-height', 'm-current-weight', 'm-bmi', 'm-addr', 'm-phone', 'm-email', 'm-care-notes', 'member-lab-title', 'member-lab-notes', 'm-progress-note-title', 'm-care-reminder-note', 'm-care-reminder-edit-id'];
+    const fields = ['m-first', 'm-middle', 'm-last', 'm-age', 'm-dob', 'm-height', 'm-current-weight', 'm-bmi', 'm-ibw', 'm-adjusted-weight', 'm-bsa', 'm-addr', 'm-phone', 'm-email', 'm-care-notes', 'member-lab-title', 'member-lab-notes', 'm-progress-note-title', 'm-care-reminder-note', 'm-care-reminder-edit-id'];
     fields.forEach(f => safeSet(f, ''));
     safeSet('m-height-unit', 'in');
     safeSet('m-current-weight-unit', 'lb');
@@ -9914,7 +10456,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                             <button onclick="event.stopPropagation(); documentPastDose('${schedule.id}')">Past Dose</button>
                             <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${schedule.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                             <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${schedule.id}')">Waste</button>
-                            <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${schedule.id}')">&#8635; Reorder</button>
+                            <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${schedule.id}')">&#8635; Schedule Again</button>
                             ${med ? containerOpenStatusButtonHtml(schedule, med) : ''}
                             ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${schedule.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         </div>
@@ -9963,7 +10505,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                         <button onclick="event.stopPropagation(); openOrderModifier('${s.id}')">Modify</button>
                         <button class="hold-med-button" onclick="event.stopPropagation(); toggleMedicationHold('${s.id}')">&#10074;&#10074; ${held ? 'Remove Hold' : 'Hold'}</button>
                         <button class="waste-med-button" onclick="event.stopPropagation(); wasteScheduledMedicationDose('${s.id}')">Waste</button>
-                        <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${s.id}')">&#8635; Reorder</button>
+                        <button class="reorder-med-button" onclick="event.stopPropagation(); reorderMedicationSchedule('${s.id}')">&#8635; Schedule Again</button>
                         ${med ? containerOpenStatusButtonHtml(s, med) : ''}
                         ${med && usesContainerTracking(med) ? `<button onclick="event.stopPropagation(); finishTopicalContainer('${s.id}')">${escapeHtml(finishedContainerButtonText(med))}</button>` : ''}
                         <button onclick="event.stopPropagation(); deleteSchedule('${s.id}')">Discontinue</button>
@@ -10052,7 +10594,7 @@ window.openOrderModifier = function(scheduleId) {
     }
 
     document.getElementById('mod-sched-id').value = scheduleId;
-    document.getElementById('mod-title').innerText = `Modify Order: ${med ? med.name : 'Unknown medication'}`;
+    document.getElementById('mod-title').innerText = `Modify Medication: ${med ? med.name : 'Unknown medication'}`;
     document.getElementById('mod-start').value = sched.startDate;
     document.getElementById('mod-end').value = sched.endDate === "Ongoing" ? '' : sched.endDate;
     document.getElementById('mod-dose-qty').value = sched.doseQty || '';
@@ -10213,7 +10755,7 @@ window.saveOrderModification = async function() {
             }
             if (linkMode === 'followed-by' && (linkTargetIds.length !== 1 || !followDelayMinutes || followedByWouldCreateCycle(sched.id, linkTargetIds[0]))) {
                 Object.assign(sched, beforeModification);
-                await appAlert('Followed by requires one next order, a valid follow interval, and a chain without circular links.');
+                await appAlert('Followed by requires one next medication, a valid follow interval, and a chain without circular links.');
                 return;
             }
             removeScheduleLinkReferences(sched.id);
@@ -10316,9 +10858,8 @@ window.addInventory = async function() {
     const formulation = document.getElementById('med-formulation').value;
     const prescriberId = document.getElementById('med-prescriber')?.value || '';
     const pharmacyId = document.getElementById('med-pharmacy')?.value || '';
-    const inventoryBehavior = dosageFormUsesContainerTracking(formulation)
-        ? 'container-finish'
-        : (document.getElementById('med-inventory-behavior')?.value || defaultInventoryBehaviorForFormulation(formulation));
+    const inventoryBehavior = document.getElementById('med-inventory-behavior')?.value
+        || defaultInventoryBehaviorForFormulation(formulation);
     const inventoryUnit = document.getElementById('med-inventory-unit')?.value.trim()
         || defaultInventoryUnitForFormulation(formulation, inventoryBehavior);
     const administrationUnit = document.getElementById('med-administration-unit')?.value.trim()
@@ -10327,7 +10868,10 @@ window.addInventory = async function() {
     const expiry = document.getElementById('med-expiry').value;
     const barcodeCode = normalizeMedicationCode(document.getElementById('med-barcode-code')?.value) || createMedicationCode();
     const inventoryAssignedMemberIds = collectMedicationAssignment('med');
-    if (!name || isNaN(qty)) return void appAlert("Name and Qty required.");
+    if (!name || !Number.isFinite(qty) || qty < 0) return void appAlert("Enter a medication name and a quantity on hand of 0 or more.");
+    if (!inventoryUnit || !administrationUnit) {
+        return void appAlert('Stock unit and give/apply unit are required. Choose units that match how inventory is counted and how each dose is documented.');
+    }
     if (document.getElementById('med-assignment-mode')?.value === 'selected' && inventoryAssignedMemberIds.length === 0) {
         return void appAlert("Select at least one member or change assignment to all members.");
     }
@@ -11198,7 +11742,6 @@ window.updateMedProfileMode = function() {
     const formulationSelect = document.getElementById('modal-formulation');
     const formulation = formulationSelect?.value || '';
     const isCombo = document.getElementById('modal-is-combination')?.checked;
-    const isContainerDefault = dosageFormUsesContainerTracking(formulation);
     const behavior = document.getElementById('modal-inventory-behavior');
     const inventoryUnit = document.getElementById('modal-inventory-unit');
     const administrationUnit = document.getElementById('modal-administration-unit');
@@ -11232,8 +11775,7 @@ window.updateMedProfileMode = function() {
             });
         }
     }
-    if (isContainerDefault && behavior) behavior.value = 'container-finish';
-    if (behavior) behavior.disabled = isContainerDefault;
+    if (behavior) behavior.disabled = false;
     const behaviorChanged = behavior?.dataset.behavior !== behavior?.value;
     if (!formulationChanged && behaviorChanged && inventoryUnit) {
         inventoryUnit.value = defaultInventoryUnitForFormulation(formulation, behavior.value);
@@ -11326,6 +11868,9 @@ window.saveMedProfile = async function() {
         let activeUnit = '';
         let perAmount = null;
         let perUnit = '';
+        let nextStrength = '';
+        let nextUnits = '';
+        let nextDisplayStrength = '';
 
         if (isCombination) {
             const combo = collectCombinationComponents('modal');
@@ -11340,9 +11885,9 @@ window.saveMedProfile = async function() {
                 return;
             }
             const combinationMed = { ...med, isCombination: true, components };
-            med.strength = formatCombinationStrength(combinationMed);
-            med.units = formatInventoryUnits(combinationMed);
-            med.displayStrength = med.strength;
+            nextStrength = formatCombinationStrength(combinationMed);
+            nextUnits = formatInventoryUnits(combinationMed);
+            nextDisplayStrength = nextStrength;
         } else {
             strengthAmount = parseAmount(document.getElementById('modal-strength').value, NaN);
             activeUnit = document.getElementById('modal-units').value.trim();
@@ -11362,12 +11907,31 @@ window.saveMedProfile = async function() {
             activeUnit = singleSpec.activeUnit;
             perAmount = singleSpec.perAmount;
             perUnit = singleSpec.perUnit;
-            med.strength = singleSpec.strength;
-            med.units = singleSpec.units;
-            med.displayStrength = singleSpec.displayStrength;
+            nextStrength = singleSpec.strength;
+            nextUnits = singleSpec.units;
+            nextDisplayStrength = singleSpec.displayStrength;
+        }
+        const nextStock = parseAmount(document.getElementById('modal-stock').value, NaN);
+        const nextThreshold = parseAmount(document.getElementById('modal-threshold').value, NaN);
+        if (!Number.isFinite(nextStock) || nextStock < 0 || !Number.isFinite(nextThreshold) || nextThreshold < 0) {
+            await appAlert('Stock and low-stock alert quantities must be 0 or more.');
+            return;
+        }
+        const selectedInventoryBehavior = document.getElementById('modal-inventory-behavior').value
+            || defaultInventoryBehaviorForFormulation(formulation);
+        const selectedInventoryUnit = document.getElementById('modal-inventory-unit').value.trim()
+            || defaultInventoryUnitForFormulation(formulation, selectedInventoryBehavior);
+        const selectedAdministrationUnit = document.getElementById('modal-administration-unit').value.trim()
+            || defaultAdministrationUnitForFormulation(formulation);
+        if (!selectedInventoryUnit || !selectedAdministrationUnit) {
+            await appAlert('Stock unit and give/apply unit are required.');
+            return;
         }
         med.name = updatedName;
-        med.stock = parseAmount(document.getElementById('modal-stock').value, med.stock);
+        med.strength = nextStrength;
+        med.units = nextUnits;
+        med.displayStrength = nextDisplayStrength;
+        med.stock = nextStock;
         med.notes = document.getElementById('modal-notes').value;
         med.storage = document.getElementById('modal-storage').value;
         med.controlLevel = document.getElementById('modal-control-level').value;
@@ -11384,14 +11948,10 @@ window.saveMedProfile = async function() {
         med.activeUnit = isCombination ? null : activeUnit;
         med.perAmount = isCombination ? null : perAmount;
         med.perUnit = isCombination ? '' : perUnit;
-        med.minThreshold = parseAmount(document.getElementById('modal-threshold').value, 0);
-        med.inventoryBehavior = dosageFormUsesContainerTracking(formulation)
-            ? 'container-finish'
-            : (document.getElementById('modal-inventory-behavior').value || defaultInventoryBehaviorForFormulation(formulation));
-        med.inventoryUnit = document.getElementById('modal-inventory-unit').value.trim()
-            || defaultInventoryUnitForFormulation(formulation, med.inventoryBehavior);
-        med.administrationUnit = document.getElementById('modal-administration-unit').value.trim()
-            || defaultAdministrationUnitForFormulation(formulation);
+        med.minThreshold = nextThreshold;
+        med.inventoryBehavior = selectedInventoryBehavior;
+        med.inventoryUnit = selectedInventoryUnit;
+        med.administrationUnit = selectedAdministrationUnit;
         med.isLiquid = formulation === 'mL' || (!isCombination && med.units.includes('/'));
         if (parseAmount(med.stock) > parseAmount(med.maxCapacity)) med.maxCapacity = med.stock;
 
@@ -11624,13 +12184,46 @@ function renderOrderSetBuilderSummary() {
     renderOrderSetPdfPreview();
 }
 
+function orderSetBuilderDraftItems() {
+    return Array.from(document.querySelectorAll('#order-set-med-list .order-set-med-row'))
+        .map(collectOrderSetItem)
+        .filter(item => item && !item.error);
+}
+
+function orderSetBuilderEffectiveEndDate() {
+    const startDate = document.getElementById('order-set-start')?.value || localDateKey();
+    const mode = document.getElementById('order-set-duration-mode')?.value || 'range';
+    const count = Math.max(1, parseInt(document.getElementById('order-set-duration-count')?.value, 10) || 1);
+    if (mode === 'range') return document.getElementById('order-set-end')?.value || 'Ongoing';
+    if (mode === 'days') return addDaysKey(startDate, count - 1);
+    const memberId = document.getElementById('order-set-member')?.value || '';
+    const items = orderSetBuilderDraftItems();
+    return items.length
+        ? regimenEndDateForDoseCount({ id: 'regimen-builder-preview', name: 'Preview', items }, memberId, startDate, count)
+        : startDate;
+}
+
+function renderOrderSetDurationResult() {
+    const target = document.getElementById('order-set-duration-result');
+    if (!target) return;
+    const startDate = document.getElementById('order-set-start')?.value || localDateKey();
+    const endDate = orderSetBuilderEffectiveEndDate();
+    const mode = document.getElementById('order-set-duration-mode')?.value || 'range';
+    const count = Math.max(1, parseInt(document.getElementById('order-set-duration-count')?.value, 10) || 1);
+    target.textContent = mode === 'range'
+        ? (endDate === 'Ongoing' ? `Starts ${compactScheduleDateLabel(startDate)} and continues until stopped` : `${compactScheduleDateLabel(startDate)} through ${compactScheduleDateLabel(endDate)}`)
+        : mode === 'days'
+            ? `${count} calendar day${count === 1 ? '' : 's'}: ${compactScheduleDateLabel(startDate)} through ${compactScheduleDateLabel(endDate)}`
+            : `${count} dose${count === 1 ? '' : 's'} per scheduled medication; calculated regimen end ${compactScheduleDateLabel(endDate)}`;
+}
+
 function orderSetBuilderTitle() {
     const name = document.getElementById('order-set-name')?.value.trim() || 'Untitled regimen';
     const memberSelect = document.getElementById('order-set-member');
     const memberId = memberSelect?.value || '';
     const memberText = memberSelect?.selectedOptions?.[0]?.textContent || 'Reusable template';
     const startDate = document.getElementById('order-set-start')?.value || localDateKey();
-    const endDate = document.getElementById('order-set-end')?.value || 'Ongoing';
+    const endDate = orderSetBuilderEffectiveEndDate();
     return { name, memberId, memberText, startDate, endDate };
 }
 
@@ -11929,6 +12522,7 @@ function regimenReportBodyFromBuilder(options = {}) {
 window.renderOrderSetPdfPreview = function() {
     const preview = document.getElementById('order-set-pdf-preview');
     if (!preview) return;
+    renderOrderSetDurationResult();
     preview.innerHTML = regimenReportBodyFromBuilder();
 };
 
@@ -12613,6 +13207,9 @@ window.clearOrderSetBuilder = function() {
     document.getElementById('order-set-name').value = '';
     document.getElementById('order-set-start').value = localDateKey();
     document.getElementById('order-set-end').value = '';
+    document.getElementById('order-set-duration-mode').value = 'range';
+    document.getElementById('order-set-duration-count').value = '7';
+    updateOrderSetDurationUi();
     document.getElementById('order-set-med-list').innerHTML = '';
     setMonitoringReminderSelection('order-set', [], '', document.getElementById('order-set-member')?.value || '');
     syncMonitoringParameterScheduleUi('order-set');
@@ -12621,14 +13218,35 @@ window.clearOrderSetBuilder = function() {
     renderOrderSetBuilderSummary();
 };
 
+window.updateOrderSetDurationUi = function() {
+    const mode = document.getElementById('order-set-duration-mode')?.value || 'range';
+    const endWrap = document.getElementById('order-set-end-wrap');
+    const countWrap = document.getElementById('order-set-duration-count-wrap');
+    const suffix = document.getElementById('order-set-duration-suffix');
+    if (endWrap) endWrap.style.display = mode === 'range' ? '' : 'none';
+    if (countWrap) countWrap.style.display = mode === 'range' ? 'none' : '';
+    if (suffix) suffix.textContent = mode === 'doses' ? 'doses per medication' : 'days';
+    renderOrderSetDurationResult();
+    renderOrderSetPdfPreview();
+};
+
 window.saveOrderSet = async function() {
     const editId = document.getElementById('order-set-edit-id').value;
     const memberId = document.getElementById('order-set-member').value;
     const name = document.getElementById('order-set-name').value.trim();
-    const startDate = document.getElementById('order-set-start').value || localDateKey();
-    const endDate = document.getElementById('order-set-end').value || 'Ongoing';
+    const requestedStartDate = document.getElementById('order-set-start').value || localDateKey();
+    let startDate = requestedStartDate;
+    if (!editId && startDate < localDateKey()) startDate = localDateKey();
+    const durationMode = document.getElementById('order-set-duration-mode')?.value || 'range';
+    const durationCount = Math.max(1, parseInt(document.getElementById('order-set-duration-count')?.value, 10) || 1);
+    let endDate = durationMode === 'range'
+        ? (document.getElementById('order-set-end').value || 'Ongoing')
+        : (durationMode === 'days' ? addDaysKey(startDate, durationCount - 1) : 'Ongoing');
+    if (!editId && requestedStartDate < startDate && endDate !== 'Ongoing') {
+        endDate = addDaysKey(startDate, Math.max(0, daysBetween(endDate, requestedStartDate)));
+    }
     if (!name) {
-        await appAlert("Order set name is required.");
+        await appAlert("Regimen name is required.");
         document.getElementById('order-set-name').focus();
         return;
     }
@@ -12659,6 +13277,17 @@ window.saveOrderSet = async function() {
         await appAlert("Add at least one medication to the regimen.");
         return;
     }
+    if (durationMode === 'doses') {
+        endDate = regimenEndDateForDoseCount({ id: editId || 'preview', name, items }, memberId, startDate, durationCount);
+    }
+    const invalidItemWindow = items.find(item => {
+        const window = orderSetItemDateWindow(item, startDate, endDate);
+        return window.endDate !== 'Ongoing' && window.startDate > window.endDate;
+    });
+    if (invalidItemWindow) {
+        await appAlert('The selected regimen duration ends before one of its medications begins. Increase the days/doses or adjust that medication.');
+        return;
+    }
     const monitoringConfig = collectMonitoringScheduleConfig('order-set', memberId);
     if (monitoringConfig.error) {
         await appAlert(monitoringConfig.error);
@@ -12686,6 +13315,8 @@ window.saveOrderSet = async function() {
         name,
         startDate,
         endDate,
+        durationMode,
+        durationCount: durationMode === 'range' ? null : durationCount,
         items,
         monitoringReminders: monitoringConfig.types,
         monitoringReminderNote: monitoringConfig.note,
@@ -12738,6 +13369,9 @@ window.editOrderSet = function(id) {
     document.getElementById('order-set-name').value = set.name;
     document.getElementById('order-set-start').value = set.startDate;
     document.getElementById('order-set-end').value = set.endDate === 'Ongoing' ? '' : set.endDate;
+    document.getElementById('order-set-duration-mode').value = set.durationMode || 'range';
+    document.getElementById('order-set-duration-count').value = set.durationCount || '7';
+    updateOrderSetDurationUi();
     document.getElementById('order-set-med-list').innerHTML = '';
     setMonitoringReminderSelection('order-set', set.monitoringReminders || [], set.monitoringReminderNote || '', set.memberId || '', set.monitoringReminderSchedule || null, set.monitoringHoldRule || null);
     set.items.forEach(item => addOrderSetMedicationRow(item));
@@ -14441,20 +15075,106 @@ function returnPrepackUnitLabel(row, qtyReturned) {
     </div>`;
 }
 
+function returnPrepackMedicationAggregateKey(med = {}, fallback = {}) {
+    const name = String(med.name || fallback.medName || '').trim().toLowerCase();
+    const strength = String(med.id ? formatLabelMedStrength(med) : (fallback.strength || '')).trim().toLowerCase();
+    const form = String(med.formulation || fallback.formulation || '').trim().toLowerCase();
+    const unit = String(med.administrationUnit || fallback.unit || '').trim().toLowerCase();
+    return `${name}|${strength}|${form}|${unit}`;
+}
+
 function aggregateReturnPrepackLabels(labelRows = []) {
     const grouped = new Map();
     labelRows.forEach(entry => {
         const med = entry.row?.med || db.inventory.find(candidate => candidate.id === entry.row?.item?.medId);
         if (!med) return;
-        const key = med.id || `${med.name}|${formatLabelMedStrength(med)}`;
-        const existing = grouped.get(key) || { row: { ...entry.row, med }, qty: 0 };
+        const key = returnPrepackMedicationAggregateKey(med);
+        const existing = grouped.get(key) || { row: { ...entry.row, med }, qty: 0, expiries: new Set() };
         existing.qty += parseAmount(entry.qty, 0);
+        if (med.expiry) existing.expiries.add(med.expiry);
         grouped.set(key, existing);
     });
     return [...grouped.values()]
         .sort((a, b) => String(a.row.med?.name || '').localeCompare(String(b.row.med?.name || ''), undefined, { sensitivity: 'base' }))
-        .map(entry => returnPrepackUnitLabel(entry.row, entry.qty))
+        .map(entry => {
+            const labelMed = entry.expiries.size > 1
+                ? { ...entry.row.med, expiry: 'Mixed lots' }
+                : entry.row.med;
+            return returnPrepackUnitLabel({ ...entry.row, med: labelMed }, entry.qty);
+        })
         .join('');
+}
+
+let activeReturnPrepackSession = null;
+
+function createReturnPrepackSession() {
+    return {
+        labelRows: [],
+        events: [],
+        scannedPackageKeys: []
+    };
+}
+
+function currentReturnPrepackSession() {
+    if (!activeReturnPrepackSession) activeReturnPrepackSession = createReturnPrepackSession();
+    return activeReturnPrepackSession;
+}
+
+function returnPrepackSessionLabelHtml() {
+    return aggregateReturnPrepackLabels(currentReturnPrepackSession().labelRows);
+}
+
+function returnPrepackSessionSummaryHtml() {
+    const session = currentReturnPrepackSession();
+    if (!session.events.length) {
+        return '<div class="return-session-empty">No items processed in this return session yet.</div>';
+    }
+    const totals = new Map();
+    session.events.forEach(event => {
+        const key = returnPrepackMedicationAggregateKey({}, event);
+        const entry = totals.get(key) || {
+            medName: event.medName,
+            strength: event.strength,
+            unit: event.unit,
+            returned: 0,
+            wasted: 0,
+            packages: new Set(),
+            members: new Set()
+        };
+        if (event.handling === 'waste') entry.wasted += parseAmount(event.qty, 0);
+        else entry.returned += parseAmount(event.qty, 0);
+        if (event.packageKey) entry.packages.add(event.packageKey);
+        if (event.memberName) entry.members.add(event.memberName);
+        totals.set(key, entry);
+    });
+    return [...totals.values()]
+        .sort((a, b) => String(a.medName).localeCompare(String(b.medName), undefined, { sensitivity: 'base' }))
+        .map(entry => {
+            const amounts = [];
+            if (entry.returned > 0) amounts.push(`<strong>${escapeHtml(formatAmount(entry.returned))} ${escapeHtml(entry.unit)}</strong> returned`);
+            if (entry.wasted > 0) amounts.push(`<strong>${escapeHtml(formatAmount(entry.wasted))} ${escapeHtml(entry.unit)}</strong> wasted`);
+            return `<div class="return-session-total-row">
+                <span><strong>${escapeHtml(entry.medName)} ${escapeHtml(entry.strength || '')}</strong><small>${entry.packages.size} package${entry.packages.size === 1 ? '' : 's'} | ${entry.members.size} member${entry.members.size === 1 ? '' : 's'}</small></span>
+                <span>${amounts.join(' | ')}</span>
+            </div>`;
+        }).join('');
+}
+
+function updateReturnPrepackSessionPanels() {
+    const body = document.getElementById('action-modal-body');
+    if (!body) return;
+    const session = currentReturnPrepackSession();
+    const summary = body.querySelector('#return-prepack-session-summary');
+    if (summary) summary.innerHTML = returnPrepackSessionSummaryHtml();
+    const scanCount = body.querySelector('#return-prepack-scan-count');
+    if (scanCount) scanCount.textContent = `${session.scannedPackageKeys.length} package${session.scannedPackageKeys.length === 1 ? '' : 's'} scanned`;
+    const pending = body.querySelector('#return-prepack-pending-summary');
+    if (pending) {
+        const selectedCount = body.querySelectorAll('input[name="returnRows"]:checked').length;
+        pending.textContent = selectedCount
+            ? `${selectedCount} item${selectedCount === 1 ? '' : 's'} selected and waiting to be processed.`
+            : 'Scan another package or select items from the list.';
+    }
 }
 
 function markPrepackItemWasted(row, reason = 'wasted', note = '') {
@@ -14986,7 +15706,11 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
             prepackPriorScanCodes: [],
             status: 'pending',
             needsReprint: false,
-            items: items.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time) || a.medName.localeCompare(b.medName))
+            items: items.sort((a, b) => {
+                const aPrimary = a.scheduleId === selection?.primaryScheduleId ? 0 : 1;
+                const bPrimary = b.scheduleId === selection?.primaryScheduleId ? 0 : 1;
+                return aPrimary - bPrimary || timeToMinutes(a.time) - timeToMinutes(b.time) || a.medName.localeCompare(b.medName);
+            })
         }));
     days.forEach(day => {
         day.prepackScanCode = prepackPackageScanCode(memberId, day.date, selection?.prepackShift || 'all', `${queueSeed}|${prepackDayContentFingerprint(day)}`);
@@ -15030,7 +15754,7 @@ function buildPrepackDefinition(memberId, sourceLabel, rows, selection = null) {
         memberName: memberDisplayName(member),
         sourceLabel,
         queueId: queueSeed,
-        title: `${memberDisplayName(member)} | ${days[0]?.date || selection?.startDate || ''}${days.length > 1 ? ` - ${days[days.length - 1].date}` : (!days.length && selection?.endDate && selection.endDate !== selection.startDate ? ` - ${selection.endDate}` : '')}`,
+        title: `${selection?.primaryMedicationName ? `${selection.primaryMedicationName} | ` : ''}${memberDisplayName(member)} | ${days[0]?.date || selection?.startDate || ''}${days.length > 1 ? ` - ${days[days.length - 1].date}` : (!days.length && selection?.endDate && selection.endDate !== selection.startDate ? ` - ${selection.endDate}` : '')}`,
         selection: selection || {
             kind: 'schedule-list',
             scheduleIds: Array.from(new Set(rows.map(row => row.schedule?.id).filter(Boolean))),
@@ -15259,7 +15983,10 @@ function prepackSelectionFingerprint(selection) {
         containerCount: selection.containerCount || '',
         containerType: selection.containerType || '',
         expirationDate: selection.expirationDate || '',
-        labelName: selection.labelName || ''
+        labelName: selection.labelName || '',
+        primaryScheduleId: selection.primaryScheduleId || '',
+        primaryMedId: selection.primaryMedId || '',
+        primaryMedicationName: selection.primaryMedicationName || ''
     });
 }
 
@@ -15821,6 +16548,7 @@ window.filterReturnPrepackList = function() {
     const count = body.querySelector('#return-prepack-filter-count');
     if (count) count.textContent = `${visible} package${visible === 1 ? '' : 's'} shown`;
     updateReturnPrepackLabelPreview(false);
+    updateReturnPrepackSessionPanels();
 };
 
 window.toggleReturnPrepackPackage = function(input) {
@@ -15886,12 +16614,15 @@ window.selectReturnPrepackByCode = function() {
     }
     body.querySelector('[name="returnMemberFilter"]').value = '';
     body.querySelector('[name="returnPackageStatus"]').value = 'all';
-    const matchedDate = matched.dataset.date || '';
     const fromInput = body.querySelector('[name="returnFromDate"]');
     const toInput = body.querySelector('[name="returnToDate"]');
-    if (matchedDate && fromInput && toInput) {
-        fromInput.value = matchedDate;
-        toInput.value = matchedDate;
+    const allDates = [...body.querySelectorAll('.return-prepack-group')]
+        .map(group => group.dataset.date || '')
+        .filter(Boolean)
+        .sort();
+    if (fromInput && toInput && allDates.length) {
+        fromInput.value = allDates[0];
+        toInput.value = allDates[allDates.length - 1];
     }
     const doseStatusFilter = body.querySelector('[name="returnDoseStatus"]');
     if (doseStatusFilter) doseStatusFilter.value = 'all';
@@ -15899,14 +16630,25 @@ window.selectReturnPrepackByCode = function() {
     matched.open = true;
     matched.scrollIntoView({ block: 'center' });
     const packageCheck = matched.querySelector('.return-prepack-package-check');
+    const wasSelected = !!packageCheck?.checked;
     if (packageCheck) {
         packageCheck.checked = true;
         packageCheck.indeterminate = false;
         toggleReturnPrepackPackage(packageCheck);
     }
+    const session = currentReturnPrepackSession();
+    const packageKey = matched.dataset.returnKey || matched.dataset.prepackCode || code;
+    if (packageKey && !session.scannedPackageKeys.includes(packageKey)) session.scannedPackageKeys.push(packageKey);
     const status = body.querySelector('#return-prepack-scan-status');
-    if (status) status.textContent = 'Package selected. Review items, then process the return or waste.';
+    if (status) status.textContent = wasSelected
+        ? 'This package is already selected. Scan another package or review the selected items.'
+        : 'Package added to this return session. Scan another package or process the selected items.';
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
     updateReturnPrepackLabelPreview(false);
+    updateReturnPrepackSessionPanels();
 };
 
 function selectedReturnPrepackLabelRows(body = document.getElementById('action-modal-body')) {
@@ -15943,21 +16685,14 @@ window.updateReturnPrepackLabelPreview = function(processed = false) {
     const preview = body.querySelector('#return-prepack-label-preview');
     const printButton = body.querySelector('#return-print-label-button');
     if (!preview || !printButton) return;
-    const result = collectNamedInputs(body);
-    if (processed === false) printButton.dataset.returnProcessed = 'false';
-    if ((result.handling || 'return') === 'waste') {
-        preview.innerHTML = '<div class="return-label-preview-empty">Waste entries do not generate return labels.</div>';
-        printButton.disabled = true;
-        printButton.classList.remove('return-print-ready');
-        return;
-    }
-    const labelRows = selectedReturnPrepackLabelRows(body);
-    const html = aggregateReturnPrepackLabels(labelRows);
-    preview.innerHTML = html || '<div class="return-label-preview-empty">Select returnable prepack items to preview their return labels. Printing unlocks after Process Selected.</div>';
+    const html = returnPrepackSessionLabelHtml();
+    preview.innerHTML = html || '<div class="return-label-preview-empty">Processed returns will build one combined label per medication here. Waste entries are tracked but do not generate return labels.</div>';
     fitLabelPages(preview);
-    const canPrint = printButton.dataset.returnProcessed === 'true' && !!html;
+    const canPrint = !!html;
     printButton.disabled = !canPrint;
     printButton.classList.toggle('return-print-ready', canPrint);
+    printButton.dataset.returnProcessed = canPrint ? 'true' : 'false';
+    updateReturnPrepackSessionPanels();
 };
 
 function returnPrepackChoicesHtml(rows, groups) {
@@ -16021,6 +16756,7 @@ function returnPrepackChoicesHtml(rows, groups) {
 }
 
 function returnPrepackModalContent(labelHtml = '', statusText = '') {
+    labelHtml = labelHtml || returnPrepackSessionLabelHtml();
     const rows = returnablePrepackItems();
     if (rows.length === 0) {
         return `<div data-action-modal-size="wide" class="return-prepack-modal return-prepack-modal-grid">
@@ -16030,9 +16766,10 @@ function returnPrepackModalContent(labelHtml = '', statusText = '') {
             </div>
             <div class="return-prepack-preview-panel">
                 <div class="return-preview-header">
-                    <strong>Return label preview</strong>
+                    <strong>Return session totals</strong>
                     <button id="return-print-label-button" type="button" class="${labelHtml ? 'return-print-ready' : ''}" data-return-processed="${labelHtml ? 'true' : 'false'}" onclick="printReturnPrepackLabels()" ${labelHtml ? '' : 'disabled'}>Print Return Labels</button>
                 </div>
+                <div id="return-prepack-session-summary" class="return-prepack-session-summary">${returnPrepackSessionSummaryHtml()}</div>
                 <div id="return-prepack-label-preview" class="return-prepack-label-preview">${labelHtml || '<div class="return-label-preview-empty">Returned-medication labels appear here after processing a return.</div>'}</div>
             </div>
         </div>`;
@@ -16053,9 +16790,9 @@ function returnPrepackModalContent(labelHtml = '', statusText = '') {
             <div class="form-help" style="margin-bottom:8px;">Use this when a prepacked dose was missed, refused, held, broken, lost, or otherwise not used. Return adds eligible quantities back to inventory. Waste documents the loss and does not change inventory.</div>
             <div class="return-prepack-filter-panel">
                 <label>Scan package QR
-                    <input name="returnPrepackCode" type="text" placeholder="PA-PREP..." onkeydown="if(event.key==='Enter'){event.preventDefault();selectReturnPrepackByCode()}" style="width:150px;">
+                    <input name="returnPrepackCode" type="text" placeholder="PA-PREP..." autocomplete="off" autofocus onkeydown="if(event.key==='Enter'){event.preventDefault();selectReturnPrepackByCode()}" style="width:150px;">
                 </label>
-                <button type="button" onclick="selectReturnPrepackByCode()">Select Package</button>
+                <button type="button" onclick="selectReturnPrepackByCode()">Add Scanned Package</button>
                 <label>Member
                     <select name="returnMemberFilter" onchange="filterReturnPrepackList()">
                         <option value="">All members</option>
@@ -16111,8 +16848,10 @@ function returnPrepackModalContent(labelHtml = '', statusText = '') {
                     </select>
                 </label>
                 <span id="return-prepack-filter-count">${groups.length} package${groups.length === 1 ? '' : 's'} shown</span>
+                <span id="return-prepack-scan-count" class="return-prepack-scan-count">${currentReturnPrepackSession().scannedPackageKeys.length} package${currentReturnPrepackSession().scannedPackageKeys.length === 1 ? '' : 's'} scanned</span>
             </div>
-            <div id="return-prepack-scan-status" class="form-help" style="margin-top:4px;">Scan a package QR to open/select that day. Nothing is returned until you click Process Selected.</div>
+            <div id="return-prepack-scan-status" class="form-help" style="margin-top:4px;">Scan packages one after another. Each scan adds that package to the selection; nothing changes until you click Process Selected.</div>
+            <div id="return-prepack-pending-summary" class="return-prepack-pending-summary">Scan a package or select items from the list.</div>
             <div class="field-row-stacked" style="margin-top:8px;">
                 <label>Note:</label><textarea name="note" rows="2" style="width:100%; resize:none;" placeholder="Optional return note"></textarea>
             </div>
@@ -16124,9 +16863,10 @@ function returnPrepackModalContent(labelHtml = '', statusText = '') {
             </div>
             <div class="return-prepack-preview-panel">
                 <div class="return-preview-header">
-                    <strong>Return label preview</strong>
+                    <strong>Return session totals</strong>
                     <button id="return-print-label-button" type="button" class="${labelHtml ? 'return-print-ready' : ''}" data-return-processed="${labelHtml ? 'true' : 'false'}" onclick="printReturnPrepackLabels()" ${labelHtml ? '' : 'disabled'}>Print Return Labels</button>
                 </div>
+                <div id="return-prepack-session-summary" class="return-prepack-session-summary">${returnPrepackSessionSummaryHtml()}</div>
                 <div id="return-prepack-label-preview" class="return-prepack-label-preview">${labelHtml || '<div class="return-label-preview-empty">Returned-medication labels appear here after processing a return. Waste entries do not generate labels.</div>'}</div>
             </div>
         </div>
@@ -16139,7 +16879,12 @@ window.returnPrepackedDispense = async function() {
         await appAlert('No prepared prepack doses are available to return.');
         return;
     }
-    await showActionModal('Return / Waste Prepacked Dose(s)', returnPrepackModalContent(), 'Close');
+    activeReturnPrepackSession = createReturnPrepackSession();
+    try {
+        await showActionModal('Return / Waste Prepacked Dose(s)', returnPrepackModalContent(), 'Close');
+    } finally {
+        activeReturnPrepackSession = null;
+    }
 };
 
 function commandScanMedFilterButtons(scan = activeCommandScan) {
@@ -16330,6 +17075,28 @@ window.openReturnForCommandScan = function() {
     }, 75);
 };
 
+let memberBarcodeScanTimer = null;
+
+window.scheduleMemberBarcodeScan = function(rawCode = '') {
+    clearTimeout(memberBarcodeScanTimer);
+    const code = String(rawCode || '').trim();
+    if (!code) return;
+    memberBarcodeScanTimer = setTimeout(() => {
+        if (!resolveCommandScan(code, { memberId: currentEditingMemberId, source: 'member' })) return;
+        scanDailyCommandCode(code, { source: 'member' });
+    }, 220);
+};
+
+window.scheduleDashboardBarcodeScan = function(rawCode = '') {
+    clearTimeout(memberBarcodeScanTimer);
+    const code = String(rawCode || '').trim();
+    if (!code) return;
+    memberBarcodeScanTimer = setTimeout(() => {
+        if (!resolveCommandScan(code, { source: 'dashboard' })) return;
+        scanDailyCommandCode(code, { source: 'dashboard' });
+    }, 220);
+};
+
 window.scanDailyCommandCode = async function(rawCode = '', options = {}) {
     const inputCode = String(rawCode || document.getElementById('daily-command-scan-code')?.value || '').trim();
     const resolved = resolveCommandScan(inputCode, { memberId: currentEditingMemberId, ...options });
@@ -16347,6 +17114,7 @@ window.scanDailyCommandCode = async function(rawCode = '', options = {}) {
         await openMemberModal(resolved.memberId, 'orders');
     }
     renderMemberCommandScanPanel();
+    document.getElementById('member-command-scan-panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 };
 
 window.updateReturnPrepackActionUi = function() {
@@ -16376,7 +17144,7 @@ window.printReturnPrepackLabels = function() {
     const printArea = document.getElementById('print-area');
     if (printArea) {
         printArea.innerHTML = pendingLabelHtml;
-        fitLabelPages(printArea);
+        fitLabelPages(printArea, true);
     }
     printPreparedArea();
 };
@@ -16391,7 +17159,7 @@ window.processReturnPrepackSelection = async function() {
         setReturnPrepackStatus('Select at least one prepacked dose to return or waste.');
         return;
     }
-    const labelRows = [];
+    const operations = [];
     for (const value of selected) {
         const index = parseInt(value, 10);
         const row = rows[index];
@@ -16404,6 +17172,7 @@ window.processReturnPrepackSelection = async function() {
             return;
         }
         const qtyOverride = result[`returnQty_${row.returnIndex ?? index}`];
+        let requestedQty = prepackItemReturnableQty(row);
         if (isRangePrepackItem(row.item)) {
             const qty = parseAmount(qtyOverride, NaN);
             const max = prepackItemReturnableQty(row);
@@ -16411,19 +17180,45 @@ window.processReturnPrepackSelection = async function() {
                 setReturnPrepackStatus(`Enter a return quantity greater than 0 and up to ${formatAmount(max)} for ${row.item.medName}.`);
                 return;
             }
+            requestedQty = qty;
         }
+        operations.push({ row, qtyOverride, requestedQty });
+    }
+    const labelRows = [];
+    const processedEvents = [];
+    const handling = result.handling === 'waste' ? 'waste' : 'return';
+    operations.forEach(({ row, qtyOverride, requestedQty }) => {
+        let processedQty = requestedQty;
         if (result.handling === 'waste') {
             markPrepackItemWasted(row, result.wasteReason || 'wasted', result.note || '');
         } else {
             const returnedQty = markPrepackItemReturned(row, result.returnReason || 'returned', result.note || '', qtyOverride);
             const labelQty = returnedQty || parseAmount(qtyOverride, 0) || prepackItemReturnableQty(row);
+            processedQty = labelQty;
             if (labelQty > 0) labelRows.push({ row, qty: labelQty });
         }
-    }
+        const med = row.med || db.inventory.find(candidate => candidate.id === row.item?.medId);
+        processedEvents.push({
+            handling,
+            medId: med?.id || row.item?.medId || '',
+            medName: med?.name || row.item?.medName || 'Medication',
+            strength: med ? formatLabelMedStrength(med) : (row.item?.strength || ''),
+            formulation: med?.formulation || '',
+            unit: med?.administrationUnit || (med ? inventoryUnitFor(med) : 'unit(s)'),
+            qty: processedQty,
+            memberName: row.queue?.memberName || row.queue?.title || '',
+            packageKey: `${row.queue?.id || ''}:${row.day?.date || ''}`,
+            date: row.day?.date || '',
+            reason: handling === 'waste' ? (result.wasteReason || 'wasted') : (result.returnReason || 'returned')
+        });
+    });
+    const session = currentReturnPrepackSession();
+    session.labelRows.push(...labelRows);
+    session.events.push(...processedEvents);
     await sync();
     renderMemberCommandScanPanel();
     renderDashboardCommandScanStatus();
-    const labelHtml = result.handling === 'waste' ? '' : aggregateReturnPrepackLabels(labelRows);
+    const labelHtml = returnPrepackSessionLabelHtml();
     const status = `${selected.length} prepacked dose${selected.length === 1 ? '' : 's'} ${result.handling === 'waste' ? 'marked wasted. No return labels were generated.' : 'returned to inventory.'}`;
     const actionBody = document.getElementById('action-modal-body');
     if (actionBody) {
@@ -16431,6 +17226,8 @@ window.processReturnPrepackSelection = async function() {
         enhanceButtonIcons(actionBody);
         fitLabelPages(actionBody.querySelector('#return-prepack-label-preview'));
         updateReturnPrepackActionUi();
+        updateReturnPrepackSessionPanels();
+        setTimeout(() => actionBody.querySelector('[name="returnPrepackCode"]')?.focus(), 0);
     }
 };
 
@@ -17089,11 +17886,11 @@ window.removePrepackItem = async function(queueId, date, itemId) {
     const result = await showActionModal(`Remove From Prepack: ${item.medName}`, `
         <div class="prepack-remove-option">
             <input id="prepack-remove-dose" name="removeAction" type="radio" value="prepack-dose" checked>
-            <label for="prepack-remove-dose">Remove only this ${escapeHtml(date)} dose from the prepack. Keep the member order unchanged.</label>
+            <label for="prepack-remove-dose">Remove only this ${escapeHtml(date)} dose from the prepack. Keep the medication schedule unchanged.</label>
         </div>
         <div class="prepack-remove-option">
             <input id="prepack-remove-all" name="removeAction" type="radio" value="prepack-all">
-            <label for="prepack-remove-all">Remove this medication from every date in this prepack. Keep the member order unchanged.</label>
+            <label for="prepack-remove-all">Remove this medication from every date in this prepack. Keep the medication schedule unchanged.</label>
         </div>
         ${discontinueOption}
     `, 'Continue');
@@ -17593,7 +18390,7 @@ window.reprintPrepackLabels = async function(queueId) {
     }).join('');
     const result = await showActionModal('Reprint Prepack Labels', `
         <div data-action-modal-size="wide" class="prepack-reprint-modal">
-        <div class="form-help">Select exactly which prepack day labels to preview and reprint. This is useful when a label is lost, torn, or only a few days changed after an order update.</div>
+        <div class="form-help">Select exactly which prepack day labels to preview and reprint. This is useful when a label is lost, torn, or only a few days changed after a medication update.</div>
         <div class="sunken-panel label-selection-list prepack-reprint-list">${choices}</div>
         </div>
     `, 'Preview Labels');
@@ -19145,7 +19942,7 @@ function memberMedicationTimelineHtml(schedule) {
                     const given = isGivenStatus(entry.doseStatus || 'given');
                     return `<button type="button" class="timeline-dose ${given ? 'timeline-given' : 'timeline-not-given'}" title="${escapeHtml(doseStatusLabel(entry.doseStatus || 'given'))}. Click to edit." onclick="event.stopPropagation(); editAdministration('${entry.id}')">${escapeHtml(time)}</button>`;
                 }).join('')
-                : `<span class="timeline-dose" title="${isPrnActiveOnDate(schedule, dateKey) ? 'No PRN administrations documented' : 'PRN order not active'}">${isPrnActiveOnDate(schedule, dateKey) ? 'PRN' : '-'}</span>`;
+                : `<span class="timeline-dose" title="${isPrnActiveOnDate(schedule, dateKey) ? 'No PRN administrations documented' : 'PRN medication not active'}">${isPrnActiveOnDate(schedule, dateKey) ? 'PRN' : '-'}</span>`;
         } else {
             const instances = getScheduleInstancesForDate(schedule, dateKey);
             doses = instances.length
@@ -19324,13 +20121,10 @@ function todayDoseRows() {
     db.schedules
         .filter(schedule => !isScheduleArchived(schedule))
         .forEach(schedule => {
+            if (schedule.freq === 'PRN' || activeMedicationHoldInfo(schedule)?.active) return;
             const member = db.family.find(item => item.id === schedule.memberId);
             const med = db.inventory.find(item => item.id === schedule.medId);
             if (!member || !med) return;
-            if (schedule.freq === 'PRN' && !hasScheduledPrnReminders(schedule)) {
-                rows.push({ type: 'prn', status: 'PRN', schedule, member, med, instance: { date: today, time: 'PRN' }, minutes: 99999 });
-                return;
-            }
             getScheduleInstancesForDate(schedule, today).forEach(instance => {
                 const documented = findHistoryForScheduleInstance(schedule, instance);
                 const doseStatus = documented?.doseStatus || '';
@@ -19528,9 +20322,9 @@ function renderDashboardRightPanel(rows = todayDoseRows(), counts = null) {
             <div class="rail-list">${nextHtml}</div>
         </fieldset>
         <fieldset class="rail-section command-scan-terminal">
-            <legend>Scan Terminal</legend>
-            <label>Prepack / label code
-                <input id="daily-command-scan-code" type="text" placeholder="Scan Aztec code"
+            <legend>Barcode Scan</legend>
+            <label>Prepack / label barcode
+                <input id="daily-command-scan-code" type="text" placeholder="Scan package or medication code" oninput="scheduleDashboardBarcodeScan(this.value)"
                     onkeydown="if(event.key==='Enter'){event.preventDefault();scanDailyCommandCode(this.value, { source: 'dashboard' });}">
             </label>
             <div class="rail-action-grid compact">
@@ -19836,7 +20630,7 @@ window.viewAuditTrail = async function() {
 window.viewMedicationOrderAudit = async function(scheduleId) {
     const schedule = db.schedules.find(item => item.id === scheduleId);
     if (!schedule) {
-        await appAlert('That medication order is no longer available.', 'Medication Audit');
+        await appAlert('That medication schedule is no longer available.', 'Medication Audit');
         return;
     }
     const med = db.inventory.find(item => item.id === schedule.medId);
@@ -21200,8 +21994,8 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
     const linkGroup = linkMode && targetChoice ? linkGroupFromTarget(targetChoice.id) : '';
     if (selectedLinkTargetIds.length > 0 && !validLinkModes.includes(linkMode)) return void appAlert("Choose what the medication link means: And, Or, or Followed by.");
     if (linkMode && linkTargetIds.length === 0) return void appAlert("Select the medication this one is linked to.");
-    if (linkMode === 'followed-by' && (linkTargetIds.length !== 1 || !followDelayMinutes)) return void appAlert('Followed by requires one next order and a follow interval.');
-    if (linkMode === 'followed-by' && followedByWouldCreateCycle(id, linkTargetIds[0])) return void appAlert('This Followed by link would create a circular order chain. Choose a different next order.');
+    if (linkMode === 'followed-by' && (linkTargetIds.length !== 1 || !followDelayMinutes)) return void appAlert('Followed by requires one next medication and a follow interval.');
+    if (linkMode === 'followed-by' && followedByWouldCreateCycle(id, linkTargetIds[0])) return void appAlert('This Followed by link would create a circular medication chain. Choose a different next medication.');
 
     const schedule = {
         id,
@@ -21237,16 +22031,18 @@ function buildScheduleFromEntry(id = `pending-${Date.now()}-${Math.random().toSt
         monitoringReminderSchedule: monitoringConfig.schedule,
         monitoringHoldRule: monitoringConfig.holdRule,
         reorderSourceId: scheduleReorderSourceId || '',
+        includeTodayTime: document.getElementById('sched-include-today-time')?.value || '',
         startTime: frequencyDetails.startTime || frequencyDetails.times[0] || "",
         isOneTime: frequencyDetails.timingFreq === 'ONCE' || (startDate === endDate && endDate !== "Ongoing")
     };
+    normalizeNewScheduleStart(schedule, document.getElementById('sched-start-behavior')?.value || 'remaining');
     if (linkMode === 'together') {
         const allChoices = [...db.schedules, ...pendingScheduleOrders];
         const mismatchedTarget = linkTargetIds
             .map(targetId => allChoices.find(choice => choice.id === targetId))
             .find(target => target && !schedulesHaveAlignedTiming(schedule, target));
         if (mismatchedTarget) {
-            return void appAlert(`Must-take-together medications need the same date, frequency, and administration time.\n\nThis order: ${timingMismatchLabel(schedule)}\nLinked order: ${timingMismatchLabel(mismatchedTarget)}`);
+            return void appAlert(`Must-take-together medications need the same date, frequency, and administration time.\n\nThis medication: ${timingMismatchLabel(schedule)}\nLinked medication: ${timingMismatchLabel(mismatchedTarget)}`);
         }
     }
     return schedule;
@@ -21258,6 +22054,10 @@ function clearScheduleEntryFields() {
     document.getElementById('sched-freq').value = 'QD';
     document.getElementById('sched-start').value = '';
     document.getElementById('sched-end').value = '';
+    const startBehavior = document.getElementById('sched-start-behavior');
+    if (startBehavior) startBehavior.value = 'remaining';
+    const includeTodayTime = document.getElementById('sched-include-today-time');
+    if (includeTodayTime) includeTodayTime.value = '';
     document.getElementById('sched-dose-qty').value = '';
     document.getElementById('sched-calculated-dose').value = '';
     const indication = document.getElementById('sched-indication');
@@ -21442,7 +22242,7 @@ window.renderPendingScheduleOrders = function() {
         const originalIndex = pendingScheduleOrders.findIndex(item => item.id === order.id);
         const summary = scheduleSummaryLine(order);
         return `<div class="pending-order-row">
-            <input class="pending-order-check" type="checkbox" name="pendingScheduleIds" value="${escapeHtml(order.id)}" checked aria-label="Sign this pending order">
+            <input class="pending-order-check" type="checkbox" name="pendingScheduleIds" value="${escapeHtml(order.id)}" checked aria-label="Approve this pending medication">
             <div class="pending-order-copy">${summary.html}</div>
             <div class="pending-order-actions">
                 <button type="button" onclick="editPendingScheduleOrder(${originalIndex})">Modify</button>
@@ -21540,7 +22340,7 @@ window.reorderMedicationSchedule = async function(scheduleId) {
         captureMemberProfileState(currentEditingMemberId, { activeTab: 'orders' });
         window.switchMemberProfileTab('orders');
         openMemberMedicationWorkPanel(currentEditingMemberId);
-        await appAlert('This medication was added to Orders to Modify / Reorder. Approve Changes when ready.', 'Reorder Staged');
+        await appAlert('This medication was added to Medication Work. Approve Changes when ready.', 'Schedule Again Staged');
         return;
     }
     switchTab('schedules');
@@ -21555,7 +22355,9 @@ function setMemberMedicationWorkPanelOpen(open) {
     const modal = document.getElementById('member-modal');
     const profileWindow = modal?.querySelector('.member-profile-window');
     if (!body || !dock) return;
-    if (open && window.matchMedia?.('(max-width: 760px)').matches) hideProgressNoteSidePanel(true, true);
+    // Both editors are substantial work surfaces. Keep one dock open at a time
+    // so neither can cover medication controls or the profile scroll bar.
+    if (open) hideProgressNoteSidePanel(true, true);
     if (profileWindow && dock.parentElement !== profileWindow) profileWindow.appendChild(dock);
     body.classList.toggle('order-work-open', Boolean(open));
     modal?.classList.toggle('order-dock-open', Boolean(open));
@@ -21889,7 +22691,7 @@ async function promptReprintLabelsForModifiedSchedules(modified = []) {
 
 async function commitPendingScheduleOrderIds(selectedIds, { silent = false } = {}) {
     if (selectedIds.length === 0) {
-        await appAlert('Check at least one pending order to sign.');
+        await appAlert('Check at least one pending medication to approve.');
         return;
     }
     const selectedSet = new Set(selectedIds);
@@ -22235,6 +23037,61 @@ function reusableRegimenOptionsHtml(selected = '') {
         .join('');
 }
 
+window.toggleProfileRegimenDurationFields = function(select) {
+    const body = select?.closest?.('.profile-regimen-stage-modal');
+    if (!body) return;
+    const mode = select.value || 'range';
+    body.querySelector('[data-regimen-end-date]').style.display = mode === 'range' ? '' : 'none';
+    body.querySelector('[data-regimen-duration-count]').style.display = mode === 'range' ? 'none' : '';
+    const suffix = body.querySelector('[data-regimen-duration-suffix]');
+    if (suffix) suffix.textContent = mode === 'doses' ? 'doses per scheduled medication' : 'calendar days';
+    window.updateProfileRegimenDurationPreview(body);
+};
+
+window.updateProfileRegimenDurationPreview = function(body = document.querySelector('.profile-regimen-stage-modal')) {
+    if (!body) return;
+    const preview = body.querySelector('[data-regimen-duration-preview]');
+    if (!preview) return;
+    const source = db.orderSets.find(set => set.id === body.querySelector('[name="templateId"]')?.value);
+    const memberId = body.querySelector('[name="memberId"]')?.value || currentEditingMemberId || '';
+    const startDate = body.querySelector('[name="startDate"]')?.value || localDateKey();
+    const mode = body.querySelector('[name="durationMode"]')?.value || 'range';
+    const count = Math.max(1, parseInt(body.querySelector('[name="durationCount"]')?.value, 10) || 1);
+    let endDate = body.querySelector('[name="endDate"]')?.value || 'Ongoing';
+    if (mode === 'days') endDate = addDaysKey(startDate, count - 1);
+    if (mode === 'doses' && source) endDate = regimenEndDateForDoseCount(source, memberId, startDate, count);
+    const invalid = endDate !== 'Ongoing' && endDate < startDate;
+    preview.classList.toggle('invalid', invalid);
+    preview.innerHTML = invalid
+        ? '<strong>Check dates:</strong> the regimen end date is before its start date.'
+        : mode === 'range'
+            ? `<strong>Date range:</strong> ${escapeHtml(compactScheduleDateLabel(startDate))} ${endDate === 'Ongoing' ? 'until stopped' : `through ${escapeHtml(compactScheduleDateLabel(endDate))}`}`
+            : mode === 'days'
+                ? `<strong>${count} calendar day${count === 1 ? '' : 's'}:</strong> ${escapeHtml(compactScheduleDateLabel(startDate))} through ${escapeHtml(compactScheduleDateLabel(endDate))}`
+                : `<strong>${count} dose${count === 1 ? '' : 's'} per scheduled medication:</strong> calculated regimen end ${escapeHtml(compactScheduleDateLabel(endDate))}`;
+};
+
+function regimenEndDateForDoseCount(source, memberId, startDate, doseCount) {
+    const count = Math.max(1, parseInt(doseCount, 10) || 1);
+    const preview = buildAssignedOrderSetFromTemplate(source, memberId, startDate, 'Ongoing');
+    const schedules = (preview.items || [])
+        .map((item, index) => orderSetItemToSchedule(preview, item, index))
+        .filter(schedule => schedule.freq !== 'PRN');
+    if (!schedules.length) return startDate;
+    let latestDate = startDate;
+    for (const schedule of schedules) {
+        let found = 0;
+        let cursor = parseLocal(startDate);
+        for (let day = 0; cursor && day < 1826 && found < count; day += 1) {
+            const date = localDateKey(cursor);
+            found += getScheduleInstancesForDate(schedule, date).length;
+            if (found >= count && date > latestDate) latestDate = date;
+            cursor.setDate(cursor.getDate() + 1);
+        }
+    }
+    return latestDate;
+}
+
 window.openProfileRegimenAssignment = async function(memberId = currentEditingMemberId) {
     if (!memberId) return;
     const templates = db.orderSets.filter(set => !set.memberId);
@@ -22248,23 +23105,45 @@ window.openProfileRegimenAssignment = async function(memberId = currentEditingMe
         }
         return;
     }
-    const result = await showActionModal('Add Regimen to Pending Changes', `
+    const modalPromise = showActionModal('Add Regimen to Pending Changes', `
         <div data-action-modal-size="medium" class="profile-regimen-stage-modal">
+            <input type="hidden" name="memberId" value="${escapeHtml(memberId)}">
             <div class="form-help">Choose a reusable regimen and review it with this member's medication changes before approving.</div>
             <label>Regimen
-                <select name="templateId">${reusableRegimenOptionsHtml()}</select>
+                <select name="templateId" onchange="updateProfileRegimenDurationPreview()">${reusableRegimenOptionsHtml()}</select>
             </label>
             <div class="profile-modal-date-grid">
-                <label>Start<input name="startDate" type="date" value="${escapeHtml(localDateKey())}"></label>
-                <label>End<input name="endDate" type="date"></label>
+                <label>Start<input name="startDate" type="date" value="${escapeHtml(localDateKey())}" onchange="updateProfileRegimenDurationPreview()"></label>
+                <label>Duration<select name="durationMode" onchange="toggleProfileRegimenDurationFields(this)">
+                    <option value="range">Calendar date range</option>
+                    <option value="days">Number of days</option>
+                    <option value="doses">Number of doses</option>
+                </select></label>
+                <label data-regimen-end-date>End<input name="endDate" type="date" onchange="updateProfileRegimenDurationPreview()"></label>
+                <label data-regimen-duration-count style="display:none;">For<input name="durationCount" type="number" min="1" step="1" value="7" oninput="updateProfileRegimenDurationPreview()"><span data-regimen-duration-suffix>calendar days</span></label>
             </div>
+            <div data-regimen-duration-preview class="regimen-duration-result" aria-live="polite"></div>
             <button type="button" class="open-regimen-builder-button" onclick="document.getElementById('action-modal-cancel')?.click(); setTimeout(() => switchTab('order-sets'), 0)">Open Regimen Builder</button>
         </div>
     `, 'Stage Regimen');
+    window.updateProfileRegimenDurationPreview();
+    const result = await modalPromise;
     if (!result) return;
     const source = db.orderSets.find(set => set.id === result.templateId);
     if (!source || !result.startDate) {
         await appAlert('Choose a regimen and start date before staging it.');
+        return;
+    }
+    const effectiveStartDate = result.startDate < localDateKey() ? localDateKey() : result.startDate;
+    let endDate = result.endDate || 'Ongoing';
+    const durationCount = Math.max(1, parseInt(result.durationCount, 10) || 1);
+    if (result.durationMode === 'days') endDate = addDaysKey(effectiveStartDate, durationCount - 1);
+    if (result.durationMode === 'doses') endDate = regimenEndDateForDoseCount(source, memberId, effectiveStartDate, durationCount);
+    if (result.durationMode === 'range' && result.startDate < effectiveStartDate && endDate !== 'Ongoing') {
+        endDate = addDaysKey(effectiveStartDate, Math.max(0, daysBetween(endDate, result.startDate)));
+    }
+    if (endDate !== 'Ongoing' && endDate < effectiveStartDate) {
+        await appAlert('Regimen end date cannot be before its start date.');
         return;
     }
     pendingProfileScheduleActions.push({
@@ -22272,8 +23151,10 @@ window.openProfileRegimenAssignment = async function(memberId = currentEditingMe
         type: 'assignRegimen',
         memberId,
         templateId: source.id,
-        startDate: result.startDate,
-        endDate: result.endDate || 'Ongoing',
+        startDate: effectiveStartDate,
+        endDate,
+        durationMode: result.durationMode || 'range',
+        durationCount: result.durationMode === 'range' ? null : durationCount,
         snapshot: { ...source, items: (source.items || []).map(item => ({ ...item })) }
     });
     renderMemberOrderWorklist(memberId);
@@ -22644,9 +23525,55 @@ window.updateProfileScheduleComposer = function() {
     if (medPreview) medPreview.innerHTML = profileScheduleMedicationPreviewHtml(med, Number.isFinite(qty) ? qty : '');
 };
 
+function profileScheduleStartPreviewDraft(body) {
+    const freq = body?.querySelector('[name="freq"]')?.value || '';
+    const startDate = body?.querySelector('[name="startDate"]')?.value || '';
+    const times = Array.from(body?.querySelectorAll('input[name="time"]') || []).map(input => input.value).filter(Boolean);
+    return {
+        id: 'profile-start-preview',
+        freq,
+        startDate,
+        endDate: body?.querySelector('[name="endDate"]')?.value || 'Ongoing',
+        qodStart: freq === 'QOD' ? startDate : '',
+        times,
+        startTime: times[0] || '',
+        includeTodayTime: body?.querySelector('[name="includeTodayTime"]')?.value || '',
+        intervalHours: freq === 'QXH' ? parseInt(body?.querySelector('[name="intervalHours"]')?.value, 10) || 8 : null
+    };
+}
+
+window.renderProfileScheduleStartPreview = function() {
+    const body = document.getElementById('action-modal-body');
+    const choice = body?.querySelector('[data-profile-schedule-start-choice]');
+    const preview = body?.querySelector('[data-profile-schedule-start-preview]');
+    if (!body || !preview) return;
+    const schedule = profileScheduleStartPreviewDraft(body);
+    const relevant = !!choice && scheduleStartBehaviorIsRelevant(schedule);
+    const select = body.querySelector('[name="startBehavior"]');
+    const includeTimeWrap = body.querySelector('[data-profile-include-today-time]');
+    const includeTimeInput = body.querySelector('[name="includeTodayTime"]');
+    if (select) {
+        select.disabled = !relevant;
+        if (!relevant) select.value = 'remaining';
+    }
+    const includeTimeVisible = relevant && select?.value === 'include-now';
+    if (includeTimeWrap) includeTimeWrap.style.display = includeTimeVisible ? '' : 'none';
+    if (includeTimeInput && includeTimeVisible) {
+        const safeTime = normalizedIncludeTodayTime(includeTimeInput.value);
+        if (includeTimeInput.value !== safeTime) includeTimeInput.value = safeTime;
+        schedule.includeTodayTime = safeTime;
+    }
+    if (choice) choice.style.display = relevant ? '' : 'none';
+    preview.style.display = relevant ? '' : 'none';
+    preview.innerHTML = relevant
+        ? scheduleStartCalendarPreviewHtml(schedule, body.querySelector('[name="startBehavior"]')?.value || 'remaining')
+        : '';
+};
+
 function renderProfileScheduleIntervalPreview() {
     const body = document.getElementById('action-modal-body');
     const preview = body?.querySelector('[data-profile-schedule-interval-preview]');
+    window.renderProfileScheduleStartPreview();
     if (!body || !preview) return;
     const freq = body.querySelector('[name="freq"]')?.value || 'QD';
     if (freq !== 'QXH') {
@@ -22829,7 +23756,7 @@ function collectProfileScheduleComposer(body, memberId) {
         return false;
     }
     if (!preserveExistingLinks && selectedLinkMode === 'followed-by' && (linkTargetIds.length !== 1 || !selectedFollowDelayMinutes || followedByWouldCreateCycle(pendingOrderId || `pending-link-${Date.now()}`, linkTargetIds[0]))) {
-        appAlert('Followed by requires one next order, a valid follow interval, and a chain without circular links.');
+        appAlert('Followed by requires one next medication, a valid follow interval, and a chain without circular links.');
         return false;
     }
     const schedule = {
@@ -22872,9 +23799,11 @@ function collectProfileScheduleComposer(body, memberId) {
         monitoringHoldRule: null,
         reorderSourceId: body.querySelector('[name="reorderSourceId"]')?.value || '',
         modifySourceId,
+        includeTodayTime: body.querySelector('[name="includeTodayTime"]')?.value || '',
         startTime: freq === 'CUSTOM' ? (uniqueValues(Object.values(customTimesByWeekday).flat()).sort()[0] || '') : (times[0] || ''),
         isOneTime: freq === 'ONCE'
     };
+    if (!modifySourceId) normalizeNewScheduleStart(schedule, body.querySelector('[name="startBehavior"]')?.value || 'remaining');
     if (schedule.endDate !== 'Ongoing' && schedule.endDate < schedule.startDate) {
         appAlert('End date cannot be before start date.');
         return false;
@@ -22885,7 +23814,7 @@ function collectProfileScheduleComposer(body, memberId) {
             .map(targetId => allChoices.find(choice => choice.id === targetId))
             .find(target => target && !schedulesHaveAlignedTiming(schedule, target));
         if (mismatchedTarget) {
-            appAlert(`Must-take-together medications need the same date, frequency, and administration time.\n\nThis order: ${timingMismatchLabel(schedule)}\nLinked order: ${timingMismatchLabel(mismatchedTarget)}`);
+            appAlert(`Must-take-together medications need the same date, frequency, and administration time.\n\nThis medication: ${timingMismatchLabel(schedule)}\nLinked medication: ${timingMismatchLabel(mismatchedTarget)}`);
             return false;
         }
     }
@@ -22943,7 +23872,7 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
             <input type="hidden" name="preservedLinkState" value="${escapeHtml(preservedLinkState)}">
             <div class="profile-schedule-composer-banner">
                 <strong>${existingOrder ? 'Modify scheduled medication' : 'New medication schedule'}</strong>
-                <span>Review the order here, then add it to the worklist. The profile changes only after Approve Changes.</span>
+                <span>Review the medication here, then add it to the worklist. The profile changes only after Approve Changes.</span>
             </div>
             ${linkedImpact ? `<div class="linked-timing-impact">${linkedImpact}</div>` : ''}
             <div class="profile-schedule-form">
@@ -22982,6 +23911,16 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
                         <label>Start<input name="startDate" type="date" value="${escapeHtml(existingOrder?.startDate || today)}" onchange="renderProfileScheduleIntervalPreview()"></label>
                         <label>End<input name="endDate" type="date" value="${escapeHtml(existingOrder?.endDate === 'Ongoing' ? '' : (existingOrder?.endDate || ''))}" onchange="renderProfileScheduleIntervalPreview()"></label>
                     </div>
+                    ${existingOrder?.modifySourceId ? '' : `<div data-profile-schedule-start-choice class="profile-schedule-start-choice">
+                        <label>Starting today<select name="startBehavior" onchange="renderProfileScheduleStartPreview()">
+                            <option value="remaining">Use only the remaining scheduled dose(s) today</option>
+                            <option value="include-now">Include one dose now, then remaining dose(s)</option>
+                            <option value="next-day">Start the full frequency tomorrow</option>
+                        </select></label>
+                        <label data-profile-include-today-time style="display:none;">Extra dose time<input name="includeTodayTime" type="time" oninput="renderProfileScheduleStartPreview()" onchange="renderProfileScheduleStartPreview()"></label>
+                        <span>BID started tonight defaults to one remaining dose today. The full BID pattern begins tomorrow.</span>
+                    </div>`}
+                    <div data-profile-schedule-start-preview class="schedule-start-calendar-preview" style="display:none;"></div>
                     <div data-profile-schedule-interval style="display:none;"><label>Every <input name="intervalHours" type="number" min="1" max="24" value="${escapeHtml(existingOrder?.intervalHours || 8)}" oninput="renderProfileScheduleIntervalPreview()"> hours</label></div>
                     <div data-profile-schedule-monthly style="display:none;"><label>First monthly date <input name="monthlyAnchor" type="date" value="${escapeHtml(existingOrder?.monthlyAnchor || existingOrder?.startDate || today)}"></label></div>
                     <div data-profile-schedule-weekdays class="profile-schedule-weekdays" style="display:none;">
@@ -22996,7 +23935,7 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
                     </div>
                 </fieldset>
                 <fieldset class="profile-schedule-links-card">
-                    <legend>Linked Orders</legend>
+                    <legend>Linked Medications</legend>
                     <div class="profile-schedule-link-grid">
                         <label>Link meaning
                             <select name="linkMode" onchange="markProfileScheduleLinksEdited()">
@@ -23037,8 +23976,14 @@ window.openProfileScheduleComposer = async function(memberId = currentEditingMem
         });
     }
     window.updateProfileScheduleComposer();
+    window.renderProfileScheduleStartPreview();
     const result = await modalPromise;
+    if (!result && existingOrder?.modifySourceId) {
+        pendingScheduleOrders = pendingScheduleOrders.filter(order => order.id !== existingOrder.id && order.modifySourceId !== existingOrder.modifySourceId);
+        renderPendingScheduleOrders();
+    }
     renderMemberOrderWorklist(memberId);
+    refreshOpenMemberMedicationViews(memberId);
     return result;
 };
 
@@ -23344,6 +24289,7 @@ function removeActiveHoldFromSchedule(schedule, reason = '') {
 async function confirmMedicationHoldOverride(schedule, med, actual) {
     const status = actual?.doseStatus || 'given';
     if (['skipped', 'missed', 'refused', 'held'].includes(status)) return true;
+    if (actual?.holdOverride || actual?.holdPromptDocumented) return true;
     const info = activeMedicationHoldInfo(schedule);
     if (!info?.active && !info?.prompt) return true;
     const isAutoHold = !!info.active;
@@ -23516,7 +24462,7 @@ async function administerScheduleRecord(sched, actual, sourceLabel = 'Schedule',
         return false;
     }
 
-    if (isGivenDose && sched.freq === 'PRN') {
+    if (isGivenDose && sched.freq === 'PRN' && !actual.prnLimitOverride) {
         const allowed = await confirmPrnDoseLimitOverride(sched, med, actual);
         if (!allowed) return false;
     }
@@ -23687,6 +24633,9 @@ function recalculateIntervalAnchorFromHistory(schedule) {
 
 function actualForLinkedSchedule(linkedSchedule, actual) {
     const linkedActual = { ...actual };
+    // A kit/container choice belongs to the medication the user documented.
+    // Linked medications independently resolve to their own prepack or inventory.
+    delete linkedActual.inventorySource;
     if (!actual?.scheduledDate || !actual?.scheduledTime) return linkedActual;
 
     const sameTimeInstance = getScheduleInstancesForDate(linkedSchedule, actual.scheduledDate)
@@ -23702,8 +24651,49 @@ function actualForLinkedSchedule(linkedSchedule, actual) {
     if (actualTimeInstance) {
         linkedActual.scheduledDate = actualTimeInstance.date;
         linkedActual.scheduledTime = actualTimeInstance.time;
+        return linkedActual;
+    }
+    const nearest = getScheduleInstancesForDate(linkedSchedule, actual.scheduledDate)
+        .filter(instance => !findHistoryForScheduleInstance(linkedSchedule, instance))
+        .sort((a, b) => Math.abs(timeToMinutes(a.time) - timeToMinutes(actual.scheduledTime)) - Math.abs(timeToMinutes(b.time) - timeToMinutes(actual.scheduledTime)))[0];
+    if (nearest) {
+        linkedActual.scheduledDate = nearest.date;
+        linkedActual.scheduledTime = nearest.time;
     }
     return linkedActual;
+}
+
+async function chooseLinkedMedicationsForAdministration(schedule) {
+    const candidates = db.schedules.filter(item => item.memberId === schedule.memberId && !isScheduleArchived(item));
+    const linked = linkedScheduleComponent(schedule, candidates).filter(item => !isScheduleArchived(item));
+    const schedules = uniqueValues([schedule.id, ...linked.map(item => item.id)])
+        .map(id => candidates.find(item => item.id === id))
+        .filter(Boolean);
+    if (schedules.length <= 1) return [schedule];
+    activeAdminOrderSetSchedules = schedules;
+    const requiredIds = new Set([schedule.id, ...requiredTogetherSchedules(schedule, schedules).map(item => item.id)]);
+    const choices = schedules.map((item, index) => {
+        const med = db.inventory.find(candidate => candidate.id === item.medId);
+        const mode = item.id === schedule.id ? 'Selected medication' : scheduleLinkModeBetween(schedule, item);
+        return `<div class="linked-admin-choice">
+            <input id="linked-admin-${index}" class="admin-os-med" name="scheduleIds" type="checkbox" value="${escapeHtml(item.id)}" ${requiredIds.has(item.id) ? 'checked' : ''} onchange="adminOrderSetToggleLinked(this)">
+            <label for="linked-admin-${index}"><strong>${escapeHtml(med ? `${med.name} ${formatMedStrength(med)}` : 'Medication')}</strong><span>${escapeHtml(formatQtyForSchedule(item, med || {}))} | ${escapeHtml(mode || 'Linked')}</span></label>
+        </div>`;
+    }).join('');
+    const result = await showActionModal('Document Linked Medications', `
+        <div class="form-help">Select every linked medication that was actually given. Medications linked with And remain selected together; Or allows one choice.</div>
+        <div class="linked-admin-list">${choices}</div>
+    `, 'Continue', body => {
+        const ids = Array.from(body.querySelectorAll('.admin-os-med:checked')).map(input => input.value);
+        if (!ids.length) {
+            void appAlert('Select at least one medication that was given.');
+            return false;
+        }
+        return ids;
+    });
+    activeAdminOrderSetSchedules = [];
+    if (!result) return null;
+    return result.map(id => schedules.find(item => item.id === id)).filter(Boolean);
 }
 
 function historyEntryNote(entry) {
@@ -23932,6 +24922,9 @@ window.administerDose = async function(medId, scheduleId) {
         return;
     }
 
+    const selectedSchedules = await chooseLinkedMedicationsForAdministration(sched);
+    if (!selectedSchedules) return;
+
     const actual = sched.freq === 'PRN'
         ? await requestActualAdministration(`Administer: ${med.name}`, `
             <div class="field-row" style="margin-top:8px;">
@@ -23975,14 +24968,49 @@ window.administerDose = async function(medId, scheduleId) {
 
     const adjustPattern = await chooseAdministrationPatternAdjustment(sched, actual);
     if (adjustPattern === null) return;
-    const administered = await administerScheduleRecord(sched, actual, sched.orderSetName ? `Regimen (${sched.orderSetName})` : 'Schedule', { adjustPattern });
-    if (administered) {
-        const linkedSchedules = requiredTogetherSchedules(sched, [sched, ...activeScheduleCandidates]);
-        if (linkedSchedules.length > 0 && await appConfirm(`Also document ${linkedSchedules.length} linked medication${linkedSchedules.length === 1 ? '' : 's'} with the same administration date/time?`, 'Linked Medications')) {
-            for (const linkedSchedule of linkedSchedules) {
-                await administerScheduleRecord(linkedSchedule, actualForLinkedSchedule(linkedSchedule, actual), linkedSchedule.orderSetName ? `Regimen (${linkedSchedule.orderSetName})` : 'Linked Schedule', { adjustPattern });
-            }
+    const selectedActuals = selectedSchedules.map(selectedSchedule => ({
+        schedule: selectedSchedule,
+        actual: selectedSchedule.id === sched.id ? actual : actualForLinkedSchedule(selectedSchedule, actual)
+    }));
+    for (const { schedule, actual: selectedActual } of selectedActuals) {
+        const selectedMed = db.inventory.find(item => item.id === schedule.medId);
+        if (!selectedMed) return;
+        const status = selectedActual.doseStatus || 'given';
+        if (!isGivenStatus(status)) continue;
+        if (schedule.freq === 'PRN' && !selectedActual.prnLimitOverride) {
+            const allowed = await confirmPrnDoseLimitOverride(schedule, selectedMed, selectedActual);
+            if (!allowed) return;
         }
+        if (!await confirmMedicationHoldOverride(schedule, selectedMed, selectedActual)) return;
+    }
+    const mainStockNeeded = new Map();
+    selectedActuals.forEach(({ schedule, actual: selectedActual }) => {
+        const status = selectedActual.doseStatus || 'given';
+        if (!isGivenStatus(status) && status !== 'wasted') return;
+        const selectedMed = db.inventory.find(item => item.id === schedule.medId);
+        if (!selectedMed || usesContainerTracking(selectedMed) || prepackedDoseCovers(schedule.id, selectedActual.scheduledDate, selectedActual.scheduledTime, selectedMed)) return;
+        if (selectedActual.inventorySource && selectedActual.inventorySource !== 'main') return;
+        mainStockNeeded.set(selectedMed.id, (mainStockNeeded.get(selectedMed.id) || 0) + parseAmount(schedule.doseQty, 0));
+    });
+    const shortage = Array.from(mainStockNeeded.entries()).find(([selectedMedId, needed]) => {
+        const selectedMed = db.inventory.find(item => item.id === selectedMedId);
+        return !selectedMed || parseAmount(selectedMed.stock, 0) < needed;
+    });
+    if (shortage) {
+        const selectedMed = db.inventory.find(item => item.id === shortage[0]);
+        await appAlert(`Insufficient stock for linked administration. ${selectedMed?.name || 'Medication'} needs ${formatAmount(shortage[1])}, but only ${formatAmount(parseAmount(selectedMed?.stock, 0))} is available.`);
+        return;
+    }
+    let administered = false;
+    for (const { schedule: selectedSchedule, actual: selectedActual } of selectedActuals) {
+        const completed = await administerScheduleRecord(
+            selectedSchedule,
+            selectedActual,
+            selectedSchedule.orderSetName ? `Regimen (${selectedSchedule.orderSetName})` : (selectedSchedule.id === sched.id ? 'Schedule' : 'Linked medication'),
+            { adjustPattern }
+        );
+        if (!completed) break;
+        administered = true;
     }
     if (administered) await sync();
 };
@@ -24212,7 +25240,7 @@ window.deleteSchedule = async function(id) {
         `, 'Discontinue');
         if (!result) return;
         scope = result.scope || 'single';
-    } else if (!await appConfirm(`Discontinue ${medLabel}?`, 'Discontinue Order')) {
+    } else if (!await appConfirm(`Discontinue ${medLabel}?`, 'Discontinue Medication')) {
         return;
     }
 
@@ -24237,7 +25265,7 @@ window.deleteSchedule = async function(id) {
         window.switchMemberProfileTab('orders');
         openMemberMedicationWorkPanel(schedule.memberId);
         refreshOpenMemberMedicationViews(schedule.memberId);
-        await appAlert('Discontinuation added to Orders to Discontinue. Approve Changes when ready.', 'Discontinue Staged');
+        await appAlert('Discontinuation added to Medication Work. Approve Changes when ready.', 'Discontinue Staged');
         return;
     }
 
@@ -25727,7 +26755,6 @@ window.updateInventoryEntryMode = function() {
     const administrationUnitInput = document.getElementById('med-administration-unit');
     const inventoryGuidance = document.getElementById('med-inventory-guidance');
 
-    const isContainerDefault = dosageFormUsesContainerTracking(formulation);
     const defaultPerUnit = defaultPerUnitForFormulation(formulation);
     const profile = dosageFormMeasurementProfile(formulation, inventoryBehavior?.value);
     const usesBasis = !!(defaultPerUnit || unitParts[1] || profile.perUnit);
@@ -25753,8 +26780,7 @@ window.updateInventoryEntryMode = function() {
             });
         }
     }
-    if (isContainerDefault && inventoryBehavior) inventoryBehavior.value = 'container-finish';
-    if (inventoryBehavior) inventoryBehavior.disabled = isContainerDefault;
+    if (inventoryBehavior) inventoryBehavior.disabled = false;
     const behaviorChanged = inventoryBehavior?.dataset.behavior !== inventoryBehavior?.value;
     if (!formulationChanged && behaviorChanged && inventoryUnitInput) {
         inventoryUnitInput.value = defaultInventoryUnitForFormulation(formulation, inventoryBehavior.value);
@@ -26407,7 +27433,7 @@ window.addOrderCustomRow = function(values = {}) {
             <div class="order-custom-component-list"></div>
             <div class="order-custom-combo-preview combo-strength-preview">Add ingredients to preview the combined strength.</div>
         </div>
-        <label>Order quantity<input name="orderCustomQty" type="text" placeholder="Amount to order" value="${escapeHtml(values.requestedQty || '')}" oninput="renderOrderBuilderPreview()"></label>
+        <label>Requested quantity<input name="orderCustomQty" type="text" placeholder="Amount requested" value="${escapeHtml(values.requestedQty || '')}" oninput="renderOrderBuilderPreview()"></label>
         <label>Stock unit<input name="orderCustomInventoryUnit" type="text" placeholder="bottle, tablet, mL" value="${escapeHtml(values.inventoryUnit || profile.stockUnit || '')}" data-auto-filled="${values.inventoryUnit ? 'false' : 'true'}" oninput="this.dataset.autoFilled='false'; renderOrderBuilderPreview()"></label>
         <label>Estimated price<input name="orderCustomPrice" type="text" placeholder="Line price" value="${escapeHtml(values.estimatedUnitPrice || '')}" oninput="renderOrderBuilderPreview()"></label>
         <label>Purchase link<input name="orderCustomLink" type="url" placeholder="https://..." value="${escapeHtml(values.purchaseLink || '')}" oninput="renderOrderBuilderPreview()"></label>
@@ -26531,7 +27557,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
     const customExistingLines = existingLines.filter(line => !line.medId && !line.formularyId && line.status !== 'received');
     const candidates = inventoryReorderCandidates();
     const candidateIds = new Set(candidates.map(med => med.id));
-    const defaultOrderName = `Inventory Order ${new Date().toLocaleDateString()}`;
+    const defaultOrderName = `Restock Request ${new Date().toLocaleDateString()}`;
     const candidateChoices = sortByName(candidates, inventoryDisplayName).map((med, index) => {
         const inputId = `order-candidate-${index}`;
         const expired = getInventoryStatusGroups().expired.some(item => item.id === med.id);
@@ -26543,7 +27569,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
             <input id="${inputId}" name="candidateMedIds" data-order-source="true" data-med-id="${escapeHtml(med.id)}" type="checkbox" value="${escapeHtml(med.id)}" ${checked ? 'checked' : ''} onchange="orderBuilderSelectionChanged(this)">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(reason)} - ${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || med.minThreshold || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
+            <input name="candidateQty-${escapeHtml(med.id)}" type="text" placeholder="Request qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || med.minThreshold || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <input name="candidatePrice-${escapeHtml(med.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
             <input name="candidateLink-${escapeHtml(med.id)}" type="url" placeholder="Purchase link" value="${escapeHtml(link)}" style="width:150px;" oninput="renderOrderBuilderPreview()">
         </div>`;
@@ -26556,7 +27582,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(inventorySearchText(med))}">
             <input id="${inputId}" name="otherInventoryIds" data-order-source="true" data-med-id="${escapeHtml(med.id)}" type="checkbox" value="${escapeHtml(med.id)}" ${existing ? 'checked' : ''} onchange="orderBuilderSelectionChanged(this)">
             <label for="${inputId}"><strong>${escapeHtml(inventoryDisplayName(med))}</strong><br><span class="form-help">${escapeHtml(formatAmount(parseAmount(med.stock)))} ${escapeHtml(inventoryUnitFor(med))} on hand</span></label>
-            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
+            <input name="otherInventoryQty-${escapeHtml(med.id)}" type="text" placeholder="Request qty" value="${escapeHtml(existing?.requestedQty || med.maxCapacity || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <input name="otherInventoryPrice-${escapeHtml(med.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
             <input name="otherInventoryLink-${escapeHtml(med.id)}" type="url" placeholder="Purchase link" value="${escapeHtml(link)}" style="width:150px;" oninput="renderOrderBuilderPreview()">
         </div>`;
@@ -26570,19 +27596,19 @@ window.createInventoryOrder = async function(editOrderId = '') {
         return `<div class="formulary-item inventory-builder-source-item order-builder-source-item" data-search="${escapeHtml(formularyItemName(item).toLowerCase())} ${escapeHtml(String(item.notes || '').toLowerCase())}">
             <input id="${inputId}" name="formularyOrderIds" data-order-source="true" data-med-id="${escapeHtml(med?.id || '')}" type="checkbox" value="${escapeHtml(item.id)}" ${existing ? 'checked' : ''} onchange="orderBuilderSelectionChanged(this)">
             <label for="${inputId}"><strong>${escapeHtml(formularyItemName(item))}</strong><br><span class="form-help">${escapeHtml(item.notes || 'Formulary item')}</span></label>
-            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Order qty" value="${escapeHtml(existing?.requestedQty || item.targetQty || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
+            <input name="formularyQty-${escapeHtml(item.id)}" type="text" placeholder="Request qty" value="${escapeHtml(existing?.requestedQty || item.targetQty || '')}" style="width:90px;" oninput="renderOrderBuilderPreview()">
             <input name="formularyPrice-${escapeHtml(item.id)}" type="text" placeholder="Price" value="${escapeHtml(price)}" style="width:78px;" oninput="renderOrderBuilderPreview()">
             <input name="formularyLink-${escapeHtml(item.id)}" type="url" placeholder="Purchase link" value="${escapeHtml(link)}" style="width:150px;" oninput="renderOrderBuilderPreview()">
         </div>`;
     }).join('');
-    const modalTitle = isEdit ? `Edit Order: ${inventoryOrderName(editOrder)}` : 'Create Inventory Order';
-    const confirmText = isEdit ? 'Save Order' : 'Create Order';
+    const modalTitle = isEdit ? `Edit Restock Request: ${inventoryOrderName(editOrder)}` : 'Create Restock Request';
+    const confirmText = isEdit ? 'Save Request' : 'Create Request';
     const orderPromise = showActionModal(modalTitle, `
         <div data-action-modal-size="wide" class="inventory-builder-layout">
             <div class="inventory-builder-source">
-                <div style="font-size:11px; margin-bottom:6px;">${isEdit ? 'Edit this order with the same tools used to create it. Use the pending order panel to remove items quickly.' : 'Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary, current inventory, or new items as needed.'}</div>
+                <div style="font-size:11px; margin-bottom:6px;">${isEdit ? 'Edit this request with the same tools used to create it. Use the pending request panel to remove items quickly.' : 'Low-stock and expired medications are selected automatically. Remove anything you do not want, then add formulary, current inventory, or new items as needed.'}</div>
                 <div class="field-row" style="margin-bottom:6px;">
-                    <label>Order name:</label><input name="orderName" type="text" value="${escapeHtml(isEdit ? inventoryOrderName(editOrder) : defaultOrderName)}" style="width:260px;">
+                    <label>Request name:</label><input name="orderName" type="text" value="${escapeHtml(isEdit ? inventoryOrderName(editOrder) : defaultOrderName)}" style="width:260px;">
                 </div>
                 <div class="field-row" style="margin-bottom:6px;">
                     <label>Search:</label><input id="order-builder-search" class="inventory-builder-search" type="text" placeholder="Find inventory or formulary item..." oninput="filterOrderBuilder()">
@@ -26596,11 +27622,11 @@ window.createInventoryOrder = async function(editOrderId = '') {
                 <div class="field-row" style="margin-top:8px;"><button type="button" onclick="addOrderCustomRow()">Add New Non-Inventory Item</button></div>
                 <div id="order-custom-list"></div>
                 <div class="field-row-stacked" style="margin-top:8px;">
-                    <label>Order note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;">${escapeHtml(isEdit ? editOrder.note || '' : '')}</textarea>
+                    <label>Restock note:</label><textarea name="orderNote" rows="2" style="width:100%; resize:none;">${escapeHtml(isEdit ? editOrder.note || '' : '')}</textarea>
                 </div>
             </div>
             <div class="inventory-builder-selected">
-                <div class="inventory-builder-panel-title">${isEdit ? 'Edited order' : 'Pending order'}</div>
+                <div class="inventory-builder-panel-title">${isEdit ? 'Edited request' : 'Pending request'}</div>
                 <div id="order-builder-preview" class="inventory-builder-panel"></div>
             </div>
         </div>
@@ -26650,7 +27676,7 @@ window.createInventoryOrder = async function(editOrderId = '') {
 
     const lines = buildInventoryOrderLinesFromResult(result, editOrder);
     if (lines.length === 0) {
-        await appAlert(`Add at least one item to ${isEdit ? 'save' : 'create'} an order.`);
+        await appAlert(`Add at least one item to ${isEdit ? 'save' : 'create'} a restock request.`);
         if (isEdit) await viewInventoryOrderLog();
         return;
     }
@@ -26914,6 +27940,39 @@ function formulationOptionsHtml(selected = 'Other') {
     ).join('');
 }
 
+function populateDosageFormSelects() {
+    ['med-formulation', 'modal-formulation', 'recipe-formulation'].forEach(id => {
+        const select = document.getElementById(id);
+        if (!select) return;
+        const selected = select.value || (id === 'recipe-formulation' ? 'mL' : 'Tablets');
+        select.innerHTML = formulationOptionsHtml(selected);
+        if (!Array.from(select.options).some(option => option.value === selected)) {
+            select.add(new Option(selected, selected));
+        }
+        select.value = selected;
+    });
+}
+
+function replaceSelectOptions(select, html) {
+    if (!select) return;
+    const selected = select.value;
+    select.innerHTML = html;
+    if (selected && !Array.from(select.options).some(option => option.value === selected)) {
+        select.add(new Option(selected, selected));
+    }
+    if (selected) select.value = selected;
+}
+
+function populateMedicationUnitControls() {
+    replaceSelectOptions(document.getElementById('med-units'), strengthUnitOptionsHtml(document.getElementById('med-units')?.value || 'mg'));
+    ['med-per-unit', 'combo-shared-per-unit', 'modal-combo-shared-per-unit'].forEach(id => {
+        const select = document.getElementById(id);
+        replaceSelectOptions(select, perUnitOptionsHtml(select?.value || ''));
+    });
+    const dataList = document.getElementById('strength-unit-options');
+    if (dataList) dataList.innerHTML = componentUnitOptions.map(value => `<option value="${escapeHtml(value)}"></option>`).join('');
+}
+
 function strengthUnitOptionsHtml(selected = '') {
     return componentUnitOptions.map(value =>
         `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`
@@ -26930,12 +27989,9 @@ window.updateReceiveIntakeDefaults = function() {
     const formulation = document.getElementById('receive-new-formulation')?.value || 'Other';
     const behaviorSelect = document.getElementById('receive-new-inventory-behavior');
     const formulationChanged = behaviorSelect?.dataset.formulation !== formulation;
-    if (behaviorSelect && dosageFormUsesContainerTracking(formulation)) {
-        behaviorSelect.value = 'container-finish';
-        behaviorSelect.disabled = true;
-    } else if (behaviorSelect) {
+    if (behaviorSelect) {
         behaviorSelect.disabled = false;
-        if (!behaviorSelect.value) behaviorSelect.value = defaultInventoryBehaviorForFormulation(formulation);
+        if (formulationChanged || !behaviorSelect.value) behaviorSelect.value = defaultInventoryBehaviorForFormulation(formulation);
     }
     const behavior = behaviorSelect?.value || defaultInventoryBehaviorForFormulation(formulation);
     const stockUnit = document.getElementById('receive-new-inventory-unit');
@@ -27180,9 +28236,7 @@ async function promptNewInventoryFromOrderLine(line, barcode, qty) {
     const finalUnits = isCombination ? formatInventoryUnits(comboMed) : singleSpec.units;
     const displayStrength = isCombination ? finalStrength : singleSpec.displayStrength;
     const formulation = result.formulation || line.formulation || 'Other';
-    const inventoryBehavior = dosageFormUsesContainerTracking(formulation)
-        ? 'container-finish'
-        : (result.inventoryBehavior || defaultInventoryBehaviorForFormulation(formulation));
+    const inventoryBehavior = result.inventoryBehavior || defaultInventoryBehaviorForFormulation(formulation);
     const inventoryUnit = result.inventoryUnit || defaultInventoryUnitForFormulation(formulation, inventoryBehavior);
     const med = {
         id: Date.now().toString(),
@@ -27317,12 +28371,12 @@ window.receiveInventoryOrder = async function() {
         .slice()
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     if (orders.length === 0) {
-        await appAlert('No open inventory orders are ready to receive. Received orders are available in the Order Log.');
+        await appAlert('No open restock requests are ready to receive. Received requests are available in the Restock Log.');
         return;
     }
     const orderOptions = orders.map(order => `<option value="${escapeHtml(order.id)}">${escapeHtml(inventoryOrderLabel(order))}</option>`).join('');
-    const selectResult = await showActionModal('Receive Order', `
-        <div class="field-row"><label>Order:</label><select name="orderId" style="width:360px;">${orderOptions}</select></div>
+    const selectResult = await showActionModal('Receive Restock', `
+        <div class="field-row"><label>Request:</label><select name="orderId" style="width:360px;">${orderOptions}</select></div>
         <div class="field-row" style="margin-top:8px;">
             <label>Mode:</label>
             <select name="receiveMode">
@@ -27371,7 +28425,7 @@ window.receiveInventoryOrder = async function() {
             </div>
         </div>`
         : '';
-    const result = await showActionModal(`Receive Order: ${inventoryOrderName(order)}`, `
+    const result = await showActionModal(`Receive Restock: ${inventoryOrderName(order)}`, `
         <div data-action-modal-size="wide" class="receive-order-modal" data-order-id="${escapeHtml(order.id)}">
         ${scanPanel}
         <div class="order-line-list">${lineRows}</div>
@@ -27400,7 +28454,7 @@ window.receiveInventoryOrder = async function() {
         if (await receiveOrderLine(line, qty, received.barcode, received)) receivedCount++;
     }
     if (receivedCount === 0) {
-        await appAlert('No order lines were received.');
+        await appAlert('No restock items were received.');
         return;
     }
     refreshInventoryOrderReceiptStatus(order);
@@ -27437,12 +28491,12 @@ function inventoryOrderPdfBody(order) {
             Status: ${escapeHtml(order.status || 'open')}${order.receivedAt ? `<br>Received: ${escapeHtml(new Date(order.receivedAt).toLocaleString())}` : ''}<br>
             Estimated Total: <strong>${escapeHtml(formatCurrency(estimated))}</strong>${actual > 0 ? `<br>Actual Total: <strong>${escapeHtml(formatCurrency(actual))}</strong>` : ''}
         </p>
-        ${order.note ? `<p><strong>Order note:</strong> ${escapeHtml(order.note)}</p>` : ''}
+        ${order.note ? `<p><strong>Restock note:</strong> ${escapeHtml(order.note)}</p>` : ''}
         <table>
             <thead>
                 <tr><th>Item</th><th>Strength</th><th>Units</th><th>Requested</th><th>Received</th><th>Estimated Price</th><th>Actual Price</th><th>Status</th><th>Purchase Link</th><th>Notes</th></tr>
             </thead>
-            <tbody>${rows || '<tr><td colspan="10">No order lines saved.</td></tr>'}</tbody>
+            <tbody>${rows || '<tr><td colspan="10">No restock items saved.</td></tr>'}</tbody>
         </table>`;
 }
 
@@ -27478,13 +28532,13 @@ function inventoryOrderLogCard(order, receivedSection = false) {
                 <div class="order-total-line">Estimated ${escapeHtml(formatCurrency(estimated))}${actual > 0 ? ` | Actual ${escapeHtml(formatCurrency(actual))}` : ''}</div>
             </div>
             <div class="inventory-order-card-actions">
-                ${canEditActive ? `<button type="button" onclick="editActiveInventoryOrder('${escapeHtml(order.id)}')">Edit Order</button>` : ''}
+                ${canEditActive ? `<button type="button" onclick="editActiveInventoryOrder('${escapeHtml(order.id)}')">Edit Request</button>` : ''}
                 ${receivedSection && canEditReceived ? `<button type="button" onclick="editReceivedInventoryOrder('${escapeHtml(order.id)}')">Modify Received</button>` : ''}
                 <button type="button" onclick="printInventoryOrderPdf('${escapeHtml(order.id)}')">PDF</button>
                 <button type="button" onclick="deleteInventoryOrder('${escapeHtml(order.id)}')">Delete</button>
             </div>
         </div>
-        <div class="inventory-order-lines">${(order.lines || []).map(orderLineLogHtml).join('') || '<div class="empty-state">No order lines saved.</div>'}</div>
+        <div class="inventory-order-lines">${(order.lines || []).map(orderLineLogHtml).join('') || '<div class="empty-state">No restock items saved.</div>'}</div>
     </div>`;
 }
 
@@ -27494,24 +28548,24 @@ function inventoryOrderLogHtml() {
     const openOrders = orders.filter(order => order.status !== 'received');
     const receivedOrders = orders.filter(order => order.status === 'received');
     return `<div data-action-modal-size="wide" class="inventory-order-log">
-        <div class="form-help">Created orders can be deleted here. Received orders stay in this log and can be corrected after receiving.</div>
+        <div class="form-help">Created restock requests can be deleted here. Received requests stay in this log and can be corrected after receiving.</div>
         <fieldset>
-            <legend>Created Orders</legend>
-            ${openOrders.length ? openOrders.map(order => inventoryOrderLogCard(order, false)).join('') : '<div class="empty-state">No open created orders.</div>'}
+            <legend>Created Requests</legend>
+            ${openOrders.length ? openOrders.map(order => inventoryOrderLogCard(order, false)).join('') : '<div class="empty-state">No open restock requests.</div>'}
         </fieldset>
         <fieldset style="margin-top:8px;">
-            <legend>Received Order Log</legend>
-            ${receivedOrders.length ? receivedOrders.map(order => inventoryOrderLogCard(order, true)).join('') : '<div class="empty-state">No received orders logged yet.</div>'}
+            <legend>Received Restock Log</legend>
+            ${receivedOrders.length ? receivedOrders.map(order => inventoryOrderLogCard(order, true)).join('') : '<div class="empty-state">No received restocks logged yet.</div>'}
         </fieldset>
     </div>`;
 }
 
 window.viewInventoryOrderLog = async function() {
     if (!db.inventoryOrders?.length) {
-        await appAlert('No inventory orders have been created yet.');
+        await appAlert('No restock requests have been created yet.');
         return;
     }
-    await showActionModal('Inventory Order Log', inventoryOrderLogHtml(), 'Close');
+    await showActionModal('Restock Log', inventoryOrderLogHtml(), 'Close');
 };
 
 window.deleteInventoryOrder = async function(orderId) {
@@ -27520,9 +28574,9 @@ window.deleteInventoryOrder = async function(orderId) {
     closeActionModalForFollowup();
     const hasReceivedStock = (order.lines || []).some(line => parseAmount(line.receivedQty, 0) > 0);
     const message = hasReceivedStock
-        ? 'Delete this order record from the log? Inventory quantities that were already received will remain unchanged.'
-        : 'Delete this created order?';
-    if (!await appConfirm(message, 'Delete Inventory Order')) {
+        ? 'Delete this restock record from the log? Inventory quantities that were already received will remain unchanged.'
+        : 'Delete this restock request?';
+    if (!await appConfirm(message, 'Delete Restock Request')) {
         await viewInventoryOrderLog();
         return;
     }
@@ -27531,7 +28585,7 @@ window.deleteInventoryOrder = async function(orderId) {
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
         medName: inventoryOrderName(order),
-        details: 'Deleted inventory order record.'
+        details: 'Deleted inventory restock record.'
     });
     await sync();
     if (db.inventoryOrders.length) await viewInventoryOrderLog();
@@ -27542,7 +28596,7 @@ window.editActiveInventoryOrder = async function(orderId) {
     if (!order) return;
     closeActionModalForFollowup();
     if (order.status === 'received') {
-        await appAlert('This order has already been fully received. Use Modify Received instead.');
+        await appAlert('This restock request has already been fully received. Use Modify Received instead.');
         await viewInventoryOrderLog();
         return;
     }
@@ -27555,7 +28609,7 @@ window.editReceivedInventoryOrder = async function(orderId) {
     closeActionModalForFollowup();
     const receivedLines = (order.lines || []).filter(line => parseAmount(line.receivedQty, 0) > 0 || line.status === 'received');
     if (receivedLines.length === 0) {
-        await appAlert('No received items are available to modify for this order.');
+        await appAlert('No received items are available to modify for this request.');
         await viewInventoryOrderLog();
         return;
     }
@@ -27571,7 +28625,7 @@ window.editReceivedInventoryOrder = async function(orderId) {
             <label>Purchase link:<input name="editPurchaseLink" type="url" value="${escapeHtml(line.purchaseLink || '')}"></label>
             <label>Notes:<input name="editLineNotes" type="text" value="${escapeHtml(line.notes || '')}"></label>
         </div>`).join('');
-    const result = await showActionModal(`Modify Received Order: ${inventoryOrderName(order)}`, `
+    const result = await showActionModal(`Modify Received Restock: ${inventoryOrderName(order)}`, `
         <div data-action-modal-size="wide">
             <div class="form-help">Changing received quantity adjusts the linked inventory stock by the difference.</div>
             <div class="order-edit-list">${rows}</div>
@@ -28179,7 +29233,7 @@ window.printSingleLabel = async function(scheduleId) {
             </select>
         </div>
         <div class="form-help">${escapeHtml(linkedForLabel.length)} linked medication${linkedForLabel.length === 1 ? '' : 's'} will be listed under this medication.</div>` : ''}
-        ${!orderHasEndDate ? '<div class="form-help" style="margin-top:8px;">This order is ongoing, so use a specific date or custom date range.</div>' : ''}
+        ${!orderHasEndDate ? '<div class="form-help" style="margin-top:8px;">This medication is ongoing, so use a specific date or custom date range.</div>' : ''}
     `, 'Preview Labels');
     if (!result) return;
 
@@ -28220,7 +29274,10 @@ window.printSingleLabel = async function(scheduleId) {
         specificTime: result.labelDoseMode === 'specific' ? result.labelSpecificTime : '',
         labelLayout: result.labelLayout || 'daily',
         singleMedication: true,
-        prepackShift
+        prepackShift,
+        primaryScheduleId: s.id,
+        primaryMedId: med.id,
+        primaryMedicationName: `${med.name} ${formatLabelMedStrength(med)}`.trim()
     };
     const matchingQueue = (db.prepackQueues || []).find(queue =>
         queue.status !== 'completed' &&
@@ -28785,7 +29842,8 @@ const CUSTOM_LABEL_SIZE_PRESETS = [
     { id: 'dymo-30336', name: 'DYMO small 2.125 x 1.0 in', width: 2.125, height: 1 },
     { id: 'address-30252', name: 'Address 3.5 x 1.125 in', width: 3.5, height: 1.125 },
     { id: 'shipping-400-200', name: 'Wide 4 x 2 in', width: 4, height: 2 },
-    { id: 'shipping-400-600', name: 'Shipping 4 x 6 in', width: 4, height: 6 },
+    { id: 'shipping-400-600', name: 'Shipping 4 x 6 in (portrait)', width: 4, height: 6 },
+    { id: 'shipping-600-400', name: 'Shipping 6 x 4 in (landscape)', width: 6, height: 4 },
     { id: 'custom', name: 'Custom size', width: 2.25, height: 1.25 }
 ];
 
@@ -28798,6 +29856,57 @@ const CUSTOM_LABEL_FONT_PRESETS = [
 ];
 
 let customLabelSourceFile = null;
+let customLabelPrinters = [];
+
+function isThermalLabelPrinter(name = '') {
+    return /tapsin|zebra|rollo|dymo|munbyn|jadens|nelko|phomemo|brother\s*(ql|td)|labelwriter/i.test(String(name));
+}
+
+function customLabelPrinterOptionsHtml(selectedName = '') {
+    const options = ['<option value="">Windows print dialog</option>'];
+    customLabelPrinters.forEach(printer => {
+        const label = `${printer.displayName || printer.name}${isThermalLabelPrinter(printer.name) ? ' - direct exact-size' : ' - direct'}`;
+        options.push(`<option value="${escapeHtml(printer.name)}" ${printer.name === selectedName ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+    });
+    return options.join('');
+}
+
+async function loadCustomLabelPrinters() {
+    const select = document.getElementById('custom-label-printer');
+    if (!select) return;
+    try {
+        customLabelPrinters = window.api?.getPrinters ? await window.api.getPrinters() : [];
+    } catch (error) {
+        customLabelPrinters = [];
+    }
+    const saved = localStorage.getItem('pharmAtlasCustomLabelPrinter');
+    const savedPrinter = customLabelPrinters.find(printer => printer.name === saved);
+    const preferred = saved === 'dialog'
+        ? null
+        : (savedPrinter || customLabelPrinters.find(printer => /tapsin/i.test(printer.name)) || customLabelPrinters.find(printer => printer.isDefault) || null);
+    select.innerHTML = customLabelPrinterOptionsHtml(preferred?.name || '');
+    select.value = preferred?.name || '';
+    const dpi = document.getElementById('custom-label-dpi');
+    const savedDpi = localStorage.getItem('pharmAtlasCustomLabelDpi');
+    if (dpi) dpi.value = savedDpi || (isThermalLabelPrinter(preferred?.name) ? '203' : '');
+    updateCustomLabelPrinterSummary();
+}
+
+function updateCustomLabelPrinterSummary() {
+    const select = document.getElementById('custom-label-printer');
+    const dpi = document.getElementById('custom-label-dpi');
+    const note = document.getElementById('custom-label-printer-note');
+    if (!select || !note) return;
+    const direct = !!select.value;
+    const thermal = isThermalLabelPrinter(select.value);
+    localStorage.setItem('pharmAtlasCustomLabelPrinter', direct ? select.value : 'dialog');
+    localStorage.setItem('pharmAtlasCustomLabelDpi', dpi?.value || '');
+    note.textContent = direct
+        ? `${select.selectedOptions[0]?.textContent || select.value}: exact selected stock size, ${dpi?.value || 'driver'} DPI, one-sided${thermal ? ', monochrome thermal output' : ''}.`
+        : 'Windows print dialog: select stock matching the physical label size and use Actual Size / 100%.';
+}
+
+window.updateCustomLabelPrinterSummary = updateCustomLabelPrinterSummary;
 
 function customLabelSizeById(id) {
     return CUSTOM_LABEL_SIZE_PRESETS.find(size => size.id === id) || CUSTOM_LABEL_SIZE_PRESETS[0];
@@ -28929,6 +30038,9 @@ function customLabelValues() {
         size,
         font: customLabelFontById(value('custom-label-font-size')),
         copies: Math.max(1, Math.min(99, parseInt(value('custom-label-copies'), 10) || 1)),
+        printerName: value('custom-label-printer'),
+        printerDpi: Math.max(0, parseInt(value('custom-label-dpi'), 10) || 0),
+        thermalPrinter: isThermalLabelPrinter(value('custom-label-printer')),
         includeDividers: !!document.getElementById('custom-label-dividers')?.checked,
         includeBorder: !!document.getElementById('custom-label-border')?.checked,
         sourceFile: customLabelSourceFile,
@@ -28966,7 +30078,6 @@ function customLabelPrintSizeStyle(size) {
     const height = Number(size.height).toFixed(3);
     return `<style>
         @media print {
-            @page { size: ${width}in ${height}in; margin: 0 !important; }
             html, body, #print-area { width: ${width}in !important; min-height: ${height}in !important; }
             #print-area .label-page.custom-label-page,
             #print-area .label-page.auxiliary-label-page,
@@ -28979,11 +30090,6 @@ function customLabelSourceFileHtml(values) {
     const file = values.sourceFile;
     if (!file?.dataUrl) return '';
     const fitClass = values.sourceFit === 'cover' ? 'cover' : 'contain';
-    if (/pdf/i.test(file.type || file.name || '')) {
-        return `<div class="custom-label-source-layer ${fitClass}">
-            <embed src="${escapeHtml(file.dataUrl)}" type="application/pdf" title="${escapeHtml(file.name || 'Uploaded PDF')}">
-        </div>`;
-    }
     return `<div class="custom-label-source-layer ${fitClass}">
         <img src="${escapeHtml(file.dataUrl)}" alt="${escapeHtml(file.name || 'Uploaded label image')}">
     </div>`;
@@ -29062,6 +30168,12 @@ function updateCustomLabelPreview() {
     const preview = document.getElementById('custom-label-live-preview');
     const customSize = document.getElementById('custom-label-custom-size');
     const size = customLabelCurrentSize();
+    const sizeSelect = document.getElementById('custom-label-size');
+    if (sizeSelect) localStorage.setItem('pharmAtlasCustomLabelSize', sizeSelect.value);
+    if (sizeSelect?.value === 'custom') {
+        localStorage.setItem('pharmAtlasCustomLabelWidth', String(size.width));
+        localStorage.setItem('pharmAtlasCustomLabelHeight', String(size.height));
+    }
     if (customSize) customSize.style.display = document.getElementById('custom-label-size')?.value === 'custom' ? 'flex' : 'none';
     const codeType = document.getElementById('custom-label-code-type')?.value || 'inventory-aztec';
     const inventoryCodeRow = document.getElementById('custom-label-inventory-code-row');
@@ -29073,7 +30185,7 @@ function updateCustomLabelPreview() {
         fitLabelPages(preview);
     }
     const sizeCaption = document.getElementById('custom-label-size-caption');
-    if (sizeCaption) sizeCaption.textContent = `${formatAmount(size.width)} x ${formatAmount(size.height)} in`;
+    if (sizeCaption) sizeCaption.textContent = `Printer page: ${formatAmount(size.width)} x ${formatAmount(size.height)} in`;
     const dividerButton = document.getElementById('custom-label-divider-button');
     const dividers = document.getElementById('custom-label-dividers');
     if (dividerButton && dividers) {
@@ -29091,7 +30203,7 @@ function updateCustomLabelPreview() {
     const fileStatus = document.getElementById('custom-label-source-status');
     if (fileStatus) {
         fileStatus.textContent = customLabelSourceFile
-            ? `${customLabelSourceFile.name || 'Uploaded file'} loaded`
+            ? `${customLabelSourceFile.name || 'Uploaded file'} loaded${customLabelSourceFile.pageCount > 1 ? `; printing page 1 of ${customLabelSourceFile.pageCount}` : ''}`
             : 'No PDF or image loaded.';
     }
 }
@@ -29191,7 +30303,37 @@ window.clearCustomLabelInventorySelection = function() {
     updateCustomLabelPreview();
 };
 
-window.handleCustomLabelSourceFile = function(input) {
+async function flattenCustomLabelPdf(dataUrl) {
+    const mobileBundle = /(?:^|[\\/])www(?:[\\/]|$)/i.test(decodeURIComponent(location.pathname || '')) || location.protocol === 'capacitor:';
+    const modulePath = mobileBundle ? './vendor/pdf.min.mjs' : './node_modules/pdfjs-dist/build/pdf.min.mjs';
+    const workerPath = mobileBundle ? './vendor/pdf.worker.min.mjs' : './node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
+    const pdfjsLib = await import(modulePath);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(workerPath, location.href).href;
+    const encoded = String(dataUrl).split(',')[1] || '';
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const loadingTask = pdfjsLib.getDocument({ data: bytes, isEvalSupported: false });
+    const pdf = await loadingTask.promise;
+    const pageCount = pdf.numPages || 1;
+    const page = await pdf.getPage(1);
+    const initial = page.getViewport({ scale: 1 });
+    const scale = Math.min(5, Math.max(1, 2400 / Math.max(initial.width, initial.height)));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d', { alpha: false });
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: context, viewport, background: '#ffffff' }).promise;
+    const rendered = canvas.toDataURL('image/png');
+    if (typeof pdf.destroy === 'function') await pdf.destroy();
+    else if (typeof loadingTask.destroy === 'function') await loadingTask.destroy();
+    return { dataUrl: rendered, pageCount };
+}
+
+window.handleCustomLabelSourceFile = async function(input) {
     const file = input?.files?.[0];
     if (!file) return;
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
@@ -29201,18 +30343,32 @@ window.handleCustomLabelSourceFile = function(input) {
         input.value = '';
         return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
+    const status = document.getElementById('custom-label-source-status');
+    if (status) status.textContent = isPdf ? 'Flattening first PDF page...' : 'Loading image...';
+    try {
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error || new Error('Unable to read that file.'));
+            reader.readAsDataURL(file);
+        });
+        const flattened = isPdf ? await flattenCustomLabelPdf(dataUrl) : { dataUrl, pageCount: 1 };
         customLabelSourceFile = {
             name: file.name || 'Uploaded file',
-            type: file.type || (isPdf ? 'application/pdf' : 'image'),
-            dataUrl: reader.result
+            type: isPdf ? 'image/png' : (file.type || 'image'),
+            originalType: file.type || (isPdf ? 'application/pdf' : 'image'),
+            dataUrl: flattened.dataUrl,
+            pageCount: flattened.pageCount
         };
         const sizeSelect = document.getElementById('custom-label-size');
         if (sizeSelect && sizeSelect.value !== 'custom') sizeSelect.value = 'shipping-400-600';
         updateCustomLabelPreview();
-    };
-    reader.readAsDataURL(file);
+    } catch (error) {
+        customLabelSourceFile = null;
+        input.value = '';
+        if (status) status.textContent = 'Unable to load file.';
+        await appAlert(error.message || 'Unable to prepare that label file.', 'Label file error');
+    }
 };
 
 window.clearCustomLabelSourceFile = function() {
@@ -29261,6 +30417,25 @@ window.toggleCustomLabelDividers = function() {
 window.toggleCustomLabelBorder = function() {
     const input = document.getElementById('custom-label-border');
     if (input) input.checked = !input.checked;
+    updateCustomLabelPreview();
+};
+
+window.rotateCustomLabelSize = function() {
+    const sizeSelect = document.getElementById('custom-label-size');
+    if (!sizeSelect) return;
+    const current = customLabelCurrentSize();
+    const matchingPreset = CUSTOM_LABEL_SIZE_PRESETS.find(size =>
+        size.id !== 'custom' && size.width === current.height && size.height === current.width
+    );
+    if (matchingPreset) {
+        sizeSelect.value = matchingPreset.id;
+    } else {
+        sizeSelect.value = 'custom';
+        const width = document.getElementById('custom-label-width');
+        const height = document.getElementById('custom-label-height');
+        if (width) width.value = formatAmount(current.height);
+        if (height) height.value = formatAmount(current.width);
+    }
     updateCustomLabelPreview();
 };
 
@@ -29345,15 +30520,41 @@ window.printCustomBuiltLabels = async function() {
         await appAlert('Enter, scan, generate, or link a barcode code before printing a barcode.');
         return;
     }
-    const html = customLabelPrintSizeStyle(values.size) + Array.from({ length: values.copies }, () => customLabelHtml(values, false)).join('');
-    previewLabelHtml(html);
+    const printArea = document.getElementById('print-area');
+    if (!printArea) return;
+    const button = document.querySelector('.custom-label-print-button');
+    if (button?.disabled) return;
+    if (button) {
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+        button.textContent = 'Printing...';
+    }
+    printArea.innerHTML = customLabelHtml(values, false);
+    fitLabelPages(printArea);
+    try {
+        await printPreparedArea(values.size, {
+            deviceName: values.printerName,
+            dpi: values.printerDpi,
+            thermal: values.thermalPrinter,
+            copies: values.copies
+        });
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = button.dataset.originalText || '<span class="win98-icon icon-label"></span>Print';
+            delete button.dataset.originalText;
+        }
+    }
 };
 
 window.openCustomLabelBuilder = async function() {
     customLabelSourceFile = null;
     const defaults = defaultActualDateTime();
+    const savedSizeId = localStorage.getItem('pharmAtlasCustomLabelSize') || 'thermal-225-125';
+    const savedCustomWidth = Math.max(0.8, parseAmount(localStorage.getItem('pharmAtlasCustomLabelWidth'), 2.25));
+    const savedCustomHeight = Math.max(0.5, parseAmount(localStorage.getItem('pharmAtlasCustomLabelHeight'), 1.25));
     const sizeOptions = CUSTOM_LABEL_SIZE_PRESETS.map(size =>
-        `<option value="${escapeHtml(size.id)}">${escapeHtml(size.name)}</option>`
+        `<option value="${escapeHtml(size.id)}" ${size.id === savedSizeId ? 'selected' : ''}>${escapeHtml(size.name)}</option>`
     ).join('');
     const fontOptions = CUSTOM_LABEL_FONT_PRESETS.map(font =>
         `<option value="${escapeHtml(font.id)}" ${font.id === 'auto' ? 'selected' : ''}>${escapeHtml(font.name)}</option>`
@@ -29367,6 +30568,31 @@ window.openCustomLabelBuilder = async function() {
         <div data-action-modal-size="wide" class="custom-label-builder">
             <div class="custom-label-builder-grid">
                 <div class="custom-label-builder-form">
+                    <fieldset class="custom-label-print-setup">
+                        <legend>Print setup</legend>
+                        <div class="custom-label-print-toolbar">
+                            <label>Physical label size<select id="custom-label-size" onchange="updateCustomLabelPreview()">${sizeOptions}</select></label>
+                            <button type="button" onclick="rotateCustomLabelSize()" title="Swap label width and height">Rotate</button>
+                            <label>Font size<select id="custom-label-font-size" onchange="updateCustomLabelPreview()">${fontOptions}</select></label>
+                            <label>Copies<input id="custom-label-copies" type="number" min="1" max="99" value="1" oninput="updateCustomLabelPreview()"></label>
+                            <strong id="custom-label-size-caption" class="custom-label-size-caption"></strong>
+                        </div>
+                        <div class="custom-label-printer-row">
+                            <label>Printer<select id="custom-label-printer" onchange="updateCustomLabelPrinterSummary()"><option value="">Loading installed printers...</option></select></label>
+                            <label>Resolution<select id="custom-label-dpi" onchange="updateCustomLabelPrinterSummary()">
+                                <option value="">Printer default</option>
+                                <option value="203">203 DPI thermal</option>
+                                <option value="300">300 DPI</option>
+                                <option value="600">600 DPI</option>
+                            </select></label>
+                        </div>
+                        <div id="custom-label-custom-size" class="field-row label-custom-size-row" style="display:none;">
+                            <label>Width (in)<input id="custom-label-width" type="number" min="0.8" max="20" step="0.05" value="${escapeHtml(formatAmount(savedCustomWidth))}" oninput="updateCustomLabelPreview()"></label>
+                            <label>Height (in)<input id="custom-label-height" type="number" min="0.5" max="20" step="0.05" value="${escapeHtml(formatAmount(savedCustomHeight))}" oninput="updateCustomLabelPreview()"></label>
+                        </div>
+                        <div id="custom-label-printer-note" class="custom-label-printer-note">Loading printer configuration...</div>
+                    </fieldset>
+
                     <fieldset>
                         <legend>Inventory link</legend>
                         <div class="field-row">
@@ -29446,20 +30672,7 @@ window.openCustomLabelBuilder = async function() {
                     </fieldset>
 
                     <fieldset>
-                        <legend>Size and copies</legend>
-                        <div class="field-row">
-                            <label>Label size:</label>
-                            <select id="custom-label-size" onchange="updateCustomLabelPreview()">${sizeOptions}</select>
-                            <span id="custom-label-size-caption" class="custom-label-size-caption"></span>
-                            <label>Font size:</label>
-                            <select id="custom-label-font-size" onchange="updateCustomLabelPreview()">${fontOptions}</select>
-                            <label>Copies:</label>
-                            <input id="custom-label-copies" type="number" min="1" max="99" value="1" oninput="updateCustomLabelPreview()">
-                        </div>
-                        <div id="custom-label-custom-size" class="field-row" style="display:none;">
-                            <label>Width (in):</label><input id="custom-label-width" type="number" min="0.8" step="0.05" value="2.25" oninput="updateCustomLabelPreview()">
-                            <label>Height (in):</label><input id="custom-label-height" type="number" min="0.5" step="0.05" value="1.25" oninput="updateCustomLabelPreview()">
-                        </div>
+                        <legend>Finishing</legend>
                         <div class="field-row custom-label-layout-actions">
                             <input id="custom-label-dividers" type="checkbox" hidden>
                             <button type="button" id="custom-label-divider-button" class="custom-label-layout-button" onclick="toggleCustomLabelDividers()">Insert Divider Lines</button>
@@ -29469,7 +30682,7 @@ window.openCustomLabelBuilder = async function() {
                     </fieldset>
 
                     <div class="field-row custom-label-actions">
-                        <button type="button" class="custom-label-print-button" onclick="printCustomBuiltLabels()"><span class="win98-icon icon-label"></span>Preview / Print</button>
+                        <button type="button" class="custom-label-print-button" onclick="printCustomBuiltLabels()"><span class="win98-icon icon-label"></span>Print</button>
                         <button type="button" onclick="clearCustomLabelBuilder()"><span class="win98-icon icon-clear"></span>Clear Builder</button>
                     </div>
                 </div>
@@ -29489,6 +30702,7 @@ window.openCustomLabelBuilder = async function() {
     setTimeout(() => {
         setupCustomLabelBuilderEvents();
         updateCustomLabelPreview();
+        void loadCustomLabelPrinters();
     }, 0);
     await modalPromise;
 };

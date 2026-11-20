@@ -545,7 +545,7 @@
         applyMobileFeatureSet();
         setInterval(() => {
             if (document.visibilityState === 'visible' && mobileSettings.pairing) syncWithDesktop(lastMobileDatabase, true);
-        }, 20000);
+        }, 5000);
     }
 
     if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initializeMobileRuntime, { once: true });

@@ -11,6 +11,8 @@ const files = [
   ['mobile-api.js', 'mobile-api.js'],
   ['vendor/qrcode.js', 'vendor/qrcode.js'],
   ['node_modules/bwip-js/dist/bwip-js-min.js', 'vendor/bwip-js-min.js'],
+  ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'vendor/pdf.min.mjs'],
+  ['node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'vendor/pdf.worker.min.mjs'],
   ['node_modules/98.css/dist/98.css', 'vendor/98.css'],
   ['node_modules/98.css/dist/ms_sans_serif.woff', 'vendor/ms_sans_serif.woff'],
   ['node_modules/98.css/dist/ms_sans_serif.woff2', 'vendor/ms_sans_serif.woff2'],

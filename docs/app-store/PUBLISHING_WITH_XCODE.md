@@ -39,6 +39,22 @@ Always open the workspace, not the `.xcodeproj`, so CocoaPods dependencies are i
 6. Force-quit the iOS app and verify already-scheduled reminders still appear without email or a network connection.
 7. In Xcode, use **Product > Analyze** and resolve release-blocking findings.
 
+### Local Companion Sync From Xcode
+
+The iOS Simulator and a physical iPhone can pair with PharmAtlas running on a Mac or Windows PC. Both endpoints must be awake, have PharmAtlas open, and be on the same private Wi-Fi/LAN. VPN client isolation and guest Wi-Fi commonly block local connections.
+
+1. On the Mac, pull the latest repository and run `npm install`, `npm run cap:sync`, then `open ios/App/App.xcworkspace`.
+2. Start the desktop endpoint. For an all-Mac Simulator test, open a second Terminal in the repository and run `npm start`. For a Windows-to-iPhone test, leave the installed Windows PharmAtlas app open.
+3. In the desktop app, choose **Device Sync**. Allow Electron/PharmAtlas through the macOS or Windows firewall for private networks. Keep the pairing window open.
+4. In Xcode, select an iPhone Simulator and press **Run**. On the PharmAtlas Dashboard, locate **iPhone Companion**.
+5. The Simulator normally cannot scan the desktop QR. Expand **Simulator / manual pairing** on the desktop, choose **Copy Pairing Text**, paste it into the Simulator's pairing field, and tap **Pair Desktop**.
+6. For a physical iPhone, connect it to the Mac, enable Developer Mode, select it as Xcode's destination, press **Run**, then use **Pair Desktop** to scan the QR. Approve Camera and Local Network access.
+7. Create a uniquely named medication or schedule on iOS and tap **Sync Now**. Confirm it appears live on desktop. Modify it on desktop, save, then sync on iOS and confirm the change returns.
+8. Delete a test record on one device and confirm the deletion remains deleted after a round trip. Also edit different records offline on both devices, reconnect, and confirm both changes merge.
+9. On desktop, verify a pre-sync backup appears in the configured data folder under `sync-backups` after incoming mobile changes.
+
+If pairing fails, verify the desktop pairing address is a private address (`10.x`, `172.16-31.x`, or `192.168.x`), both devices are on the same non-guest network, the displayed port is allowed by the firewall, and VPN/Private Relay is temporarily disabled for the test.
+
 ## 5. Archive And Upload
 
 1. Select **Any iOS Device (arm64)** as the run destination.

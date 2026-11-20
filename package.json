@@ -23,6 +23,8 @@
     "make": "electron-forge make",
     "test:demo": "npm run mobile:build && electron tests/full-demo.cjs",
     "test:sync": "node tests/sync-core.cjs",
+    "test:labels": "npm run mobile:build && electron tests/label-formulation.cjs",
+    "test:label-layout": "electron tests/label-print-layout.cjs",
     "screenshots:iphone": "npm run mobile:build && electron tests/full-demo.cjs --device iphone --capture-dir docs/app-store/screenshots/iphone",
     "screenshots:ipad": "npm run mobile:build && electron tests/full-demo.cjs --device ipad --capture-dir docs/app-store/screenshots/ipad",
     "mobile:build": "node scripts/build-mobile.js",
@@ -40,6 +42,7 @@
     "bwip-js": "^4.11.2",
     "electron-squirrel-startup": "^1.0.1",
     "nodemailer": "^10.3.1",
+    "pdfjs-dist": "^6.5.438",
     "qrcode-generator": "^1.4.4"
   }
 }

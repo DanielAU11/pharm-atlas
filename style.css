@@ -1049,6 +1049,10 @@ button {
     background: linear-gradient(90deg, #dbeaff 0%, #ecf8ff 52%, #fff3cc 100%);
 }
 
+.member-profile-body:not([data-active-tab="main"]) > .profile-demographics-strip {
+    display: none;
+}
+
 .profile-name-grid,
 .profile-demo-grid {
     display: grid;
@@ -1061,7 +1065,7 @@ button {
 }
 
 .profile-demo-grid {
-    grid-template-columns: minmax(116px, 1.1fr) 56px 120px 72px 54px 72px 54px 58px 88px;
+    grid-template-columns: minmax(105px, 1.1fr) 52px 112px repeat(2, 68px 48px) repeat(4, 62px) 82px;
 }
 
 .profile-demo-grid label {
@@ -1080,7 +1084,10 @@ button {
     box-sizing: border-box;
 }
 
-#m-bmi {
+#m-bmi,
+#m-ibw,
+#m-adjusted-weight,
+#m-bsa {
     background: #e8e8e8;
     color: #000080;
     font-weight: bold;
@@ -1522,12 +1529,33 @@ button {
 
 .member-scan-terminal {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) auto;
+    grid-template-columns: minmax(260px, 760px);
     gap: 8px;
     align-items: end;
     padding: 6px;
     background: #eaf4ff;
     border: 1px inset #ffffff;
+}
+
+.member-scan-console {
+    max-width: 980px;
+}
+
+.profile-schedule-start-choice {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.7fr) minmax(280px, 1fr);
+    gap: 8px;
+    align-items: end;
+    margin-top: 7px;
+    padding: 6px;
+    border: 1px solid #9da9b5;
+    background: #fffde3;
+}
+
+.profile-schedule-start-choice span {
+    grid-column: 1 / -1;
+    color: #404040;
+    font-size: 10px;
 }
 
 .member-command-scan-panel {
@@ -3936,6 +3964,32 @@ button {
     font-family: monospace;
 }
 
+.device-sync-manual-pairing {
+    margin: 8px 0;
+    padding: 5px;
+    border: 1px solid #808080;
+    background: #fffde3;
+}
+
+.device-sync-manual-pairing summary {
+    color: #000080;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.device-sync-manual-pairing textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    font-family: monospace;
+    overflow-wrap: anywhere;
+}
+
+#desktop-pairing-copy-status {
+    color: #006000;
+    font-weight: bold;
+}
+
 .mobile-companion-panel {
     display: none;
 }
@@ -4100,6 +4154,11 @@ button {
 
 .action-modal-window-wide:has(.link-orders-dialog) {
     width: min(840px, calc(100vw - 26px));
+}
+
+.action-modal-window-wide:has(.custom-label-builder) {
+    width: min(1480px, calc(100vw - 18px));
+    height: min(900px, calc(100vh - 18px));
 }
 
 .return-prepack-modal {
@@ -6316,11 +6375,61 @@ button {
 
 .regimen-header-strip {
     display: grid;
-    grid-template-columns: minmax(130px, 0.75fr) minmax(170px, 0.9fr) repeat(2, minmax(110px, 0.55fr));
+    grid-template-columns: minmax(125px, 0.7fr) minmax(165px, 0.9fr) repeat(4, minmax(105px, 0.55fr));
     gap: 6px;
     padding: 7px;
     border: 2px inset #ffffff;
     background: #fffbe6;
+}
+
+.regimen-duration-result {
+    grid-column: 1 / -1;
+    padding: 5px 7px;
+    border: 1px solid #808080;
+    background: #eef8ff;
+    color: #000080;
+    font-weight: bold;
+    overflow-wrap: anywhere;
+}
+
+.regimen-duration-result.invalid {
+    border-color: #800000;
+    background: #ffe5e5;
+    color: #800000;
+}
+
+.linked-admin-list {
+    display: grid;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.linked-admin-choice {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 6px;
+    align-items: start;
+    padding: 6px;
+    border: 1px dotted #808080;
+    background: #f4fbff;
+}
+
+.linked-admin-choice input {
+    width: 14px;
+    height: 14px;
+    margin: 2px 0 0;
+}
+
+.linked-admin-choice label,
+.linked-admin-choice span {
+    display: block;
+    min-width: 0;
+}
+
+.linked-admin-choice span {
+    margin-top: 2px;
+    color: #404040;
+    font-size: 10px;
 }
 
 .regimen-header-strip label,
@@ -8406,6 +8515,24 @@ button {
     font-weight: bold;
 }
 
+.return-prepack-scan-count {
+    align-self: center;
+    padding: 4px 6px;
+    border: 1px solid #008000;
+    background: #e8ffe8;
+    color: #006000;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.return-prepack-pending-summary {
+    margin-top: 4px;
+    padding: 4px 6px;
+    border-left: 4px solid #000080;
+    background: #ffffe1;
+    color: #000080;
+}
+
 .return-prepack-group {
     background: #eeeeee;
     border-top: 1px solid #ffffff;
@@ -8567,6 +8694,40 @@ button {
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 8px;
+}
+
+.return-prepack-session-summary {
+    max-height: 190px;
+    overflow: auto;
+    margin-bottom: 8px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.return-session-total-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 6px;
+    border-bottom: 1px dotted #808080;
+}
+
+.return-session-total-row > span:first-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    overflow-wrap: anywhere;
+}
+
+.return-session-total-row small {
+    color: #555555;
+}
+
+.return-session-empty {
+    padding: 8px;
+    color: #555555;
+    background: #fffff0;
 }
 
 .return-prepack-label-preview {
@@ -8792,15 +8953,21 @@ button {
     height: calc(100vh - 86px) !important;
     padding: 0 8px 8px;
     box-sizing: border-box;
-    align-items: stretch !important;
-    justify-content: stretch !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
     background: transparent !important;
 }
 
 #member-modal.member-profile-workspace-shell .member-profile-window {
-    width: 100%;
+    width: calc(100% - 2px);
+    height: calc(100% - 2px);
+    min-width: min(760px, calc(100vw - 16px));
+    min-height: min(520px, calc(100vh - 94px));
+    max-width: 100%;
     max-height: 100%;
     margin: 0;
+    resize: both;
+    overflow: hidden;
 }
 
 #member-modal.member-profile-workspace-shell.note-dock-open .member-profile-window {
@@ -8865,7 +9032,9 @@ button {
 }
 
 #member-modal.member-profile-workspace-shell .member-profile-body {
-    max-height: calc(100vh - 142px);
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
 }
 
 .member-order-work-dock {
@@ -9252,6 +9421,80 @@ button {
 .interval-preview-administered {
     color: #008000;
     font-weight: bold;
+}
+
+.schedule-start-calendar-preview {
+    margin: 7px 0 3px;
+    padding: 6px;
+    border: 2px inset #ffffff;
+    background: #fffff0;
+}
+
+.schedule-start-preview-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: #000080;
+}
+
+.schedule-start-preview-title span {
+    color: #333333;
+    font-size: 10px;
+    text-align: right;
+}
+
+.schedule-start-calendar {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(74px, 1fr));
+    border-top: 1px solid #808080;
+    border-left: 1px solid #808080;
+}
+
+.schedule-start-day {
+    min-width: 0;
+    min-height: 60px;
+    border-right: 1px solid #808080;
+    border-bottom: 1px solid #808080;
+    background: #ffffff;
+}
+
+.schedule-start-day-first {
+    background: #ffffb8;
+    box-shadow: inset 0 0 0 2px #000080;
+}
+
+.schedule-start-day-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+    padding: 2px 4px;
+    background: #dcdcdc;
+    border-bottom: 1px solid #808080;
+}
+
+.schedule-start-dose-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 2px;
+    padding: 4px;
+}
+
+.schedule-start-dose {
+    display: inline-block;
+    padding: 1px 3px;
+    border: 1px solid #008000;
+    background: #b8e6b8;
+    color: #003c00;
+    font-weight: bold;
+}
+
+.schedule-start-no-dose,
+.schedule-start-more {
+    color: #666666;
+    font-size: 10px;
 }
 
 #member-prn-meds-list {
@@ -10178,6 +10421,13 @@ button {
     width: 420px;
 }
 
+.label-preview-window:has(.custom-label-page),
+.label-preview-window:has(.auxiliary-label-page),
+.label-preview-window:has(.med-kit-label-page) {
+    width: min(920px, calc(100vw - 30px));
+    height: min(760px, calc(100vh - 30px));
+}
+
 /* Keep the retro bitmap face consistent in preview and physical output. */
 #label-preview-content .label-page,
 #label-preview-content .label-page *,
@@ -10348,14 +10598,69 @@ button {
 }
 
 .custom-label-builder {
-    min-width: min(1180px, 92vw);
+    min-width: 0;
 }
 
 .custom-label-builder-grid {
     display: grid;
-    grid-template-columns: minmax(620px, 1fr) minmax(300px, 0.42fr);
+    grid-template-columns: minmax(640px, 1.15fr) minmax(390px, 0.85fr);
     gap: 10px;
     align-items: start;
+}
+
+.custom-label-builder-form,
+.custom-label-preview-pane,
+.custom-label-preview-pane fieldset,
+#custom-label-live-preview {
+    min-width: 0;
+}
+
+.custom-label-print-setup {
+    background: #eef7ff;
+    border-color: #ffffff #808080 #808080 #ffffff;
+}
+
+.custom-label-print-toolbar {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) auto minmax(130px, 0.45fr) 70px minmax(170px, auto);
+    align-items: end;
+    gap: 7px;
+}
+
+.custom-label-print-toolbar label {
+    display: grid;
+    gap: 2px;
+}
+
+.custom-label-print-toolbar input[type="number"] {
+    width: 100% !important;
+}
+
+.custom-label-printer-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(140px, 0.35fr);
+    gap: 7px;
+    margin-top: 7px;
+}
+
+.custom-label-printer-row label {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.custom-label-printer-note {
+    margin-top: 6px;
+    padding: 5px 7px;
+    border: 1px solid #808080;
+    background: #fffde1;
+    color: #303000;
+}
+
+@media (max-width: 900px) {
+    .custom-label-printer-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .custom-label-builder fieldset {
@@ -10608,12 +10913,135 @@ button {
 }
 
 .custom-label-preview-stage {
-    min-height: 260px;
-    max-height: 58vh;
+    min-height: 360px;
+    max-height: 72vh;
     overflow: auto;
     padding: 12px;
     background: #808080;
     border: inset 2px #dfdfdf;
+}
+
+@media screen and (min-width: 761px) {
+    .action-modal-window,
+    .medication-profile-window,
+    .order-modifier-window,
+    .label-preview-window,
+    .child-action-modal > .window {
+        min-width: 360px;
+        min-height: 240px;
+        resize: both;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .interactive-window {
+        position: relative;
+        isolation: isolate;
+    }
+
+    .interactive-window > .title-bar {
+        cursor: move;
+        user-select: none;
+        flex: 0 0 auto;
+    }
+
+    .window-resize-handle {
+        position: absolute;
+        z-index: 100;
+        display: block;
+        touch-action: none;
+    }
+
+    .window-resize-n,
+    .window-resize-s {
+        left: 8px;
+        right: 8px;
+        height: 7px;
+    }
+
+    .window-resize-e,
+    .window-resize-w {
+        top: 8px;
+        bottom: 8px;
+        width: 7px;
+    }
+
+    .window-resize-n { top: -3px; cursor: ns-resize; }
+    .window-resize-s { bottom: -3px; cursor: ns-resize; }
+    .window-resize-e { right: -3px; cursor: ew-resize; }
+    .window-resize-w { left: -3px; cursor: ew-resize; }
+
+    .window-resize-ne,
+    .window-resize-nw,
+    .window-resize-se,
+    .window-resize-sw {
+        width: 12px;
+        height: 12px;
+    }
+
+    .window-resize-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+    .window-resize-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+    .window-resize-se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+    .window-resize-sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+
+    .window-interacting,
+    .window-interacting * {
+        user-select: none !important;
+    }
+
+    body.window-pointer-active {
+        cursor: default;
+    }
+
+    .window.in-app-maximized {
+        position: fixed !important;
+        inset: 8px !important;
+        width: auto !important;
+        height: auto !important;
+        max-width: none !important;
+        max-height: none !important;
+        resize: none !important;
+        margin: 0 !important;
+    }
+
+    .window.in-app-maximized > .window-resize-handle {
+        display: none;
+    }
+
+    #member-modal.member-profile-workspace-shell .member-profile-window.in-app-maximized {
+        width: auto !important;
+        height: auto !important;
+    }
+
+    .action-modal-window > .window-body,
+    .medication-profile-window > .window-body,
+    .order-modifier-window > .window-body,
+    .label-preview-window > .window-body,
+    .child-action-modal > .window > .window-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+        overflow: auto;
+    }
+}
+
+@media screen and (max-width: 1120px) and (min-width: 761px) {
+    .custom-label-builder-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .custom-label-preview-pane {
+        position: static;
+    }
+
+    .custom-label-print-toolbar {
+        grid-template-columns: minmax(220px, 1fr) auto minmax(120px, 0.6fr) 70px;
+    }
+
+    .custom-label-print-toolbar .custom-label-size-caption {
+        grid-column: 1 / -1;
+    }
 }
 
 #custom-label-live-preview .label-page.custom-label-page,
@@ -12389,37 +12817,35 @@ button {
 }
 
 @media print {
-    @page {
-        size: 2.25in 1.25in;
-        margin: 0 !important; /* Forces the printer to ignore its own margins */
-    }
     * {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
         box-sizing: border-box;
     }
     html, body {
+        display: block !important;
         margin: 0 !important;
         padding: 0 !important;
-        width: 2.25in !important;
-        min-height: 1.25in !important;
+        width: var(--print-label-width, 2.25in) !important;
+        height: auto !important;
+        min-height: 0 !important;
         overflow: visible !important;
     }
     body > *:not(#print-area) { display: none !important; }
     #print-area, #print-area * { visibility: visible !important; }
     #print-area {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 2.25in !important;
+        position: static !important;
+        left: auto !important;
+        top: auto !important;
+        width: var(--print-label-width, 2.25in) !important;
         height: auto !important;
         margin: 0 !important;
         padding: 0 !important;
         display: block !important;
     }
     .label-page {
-        width: 2.25in !important;
-        height: 1.25in !important;
+        width: var(--print-label-width, 2.25in) !important;
+        height: var(--print-label-height, 1.25in) !important;
         display: block !important;
         position: relative;
         overflow: hidden !important;
@@ -12438,7 +12864,10 @@ button {
         image-rendering: pixelated;
     }
     .inventory-qr-label { display: flex !important; }
-    #print-area .label-page:last-of-type { page-break-after: avoid !important; }
+    #print-area .label-page:last-of-type {
+        break-after: auto !important;
+        page-break-after: auto !important;
+    }
     .label-date { font-weight: bold; border-bottom: 1px solid black; font-size: 8pt; margin-bottom: 1px; }
     .label-title { font-size: 11pt; font-weight: bold; line-height: 1.0; margin-top: 2px; overflow-wrap: anywhere; }
     .label-small { font-size: 9pt; line-height: 1.05; margin-top: 1px; word-wrap: break-word; overflow-wrap: anywhere; }

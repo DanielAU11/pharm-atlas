@@ -6,6 +6,7 @@ const http = require('http');
 const os = require('os');
 const nodemailer = require('nodemailer');
 const SyncCore = require('./sync-core');
+const { createLabelPrintSettings } = require('./print-settings');
 
 if (require('electron-squirrel-startup')) app.quit();
 
@@ -43,6 +44,7 @@ let dataDir = loadDataDirSetting();
 let dbPath = path.join(dataDir, 'db.json');
 const emailConfigPath = path.join(runtimeDataDir, 'email-config.json');
 const localSyncConfigPath = path.join(runtimeDataDir, 'local-sync.json');
+const windowStatePath = path.join(runtimeDataDir, 'window-state.json');
 let lastKnownDbMtimeMs = 0;
 let lastKnownDbFingerprint = '';
 let localSyncServer = null;
@@ -482,10 +484,35 @@ function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
     const appIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'pharmatlas.ico'));
+    let savedState = {};
+    try {
+        if (fs.existsSync(windowStatePath)) savedState = JSON.parse(fs.readFileSync(windowStatePath, 'utf8'));
+    } catch (error) {
+        console.error('Unable to restore window size:', error.message);
+    }
+    const savedBounds = savedState?.bounds || {};
+    const minWidth = Math.min(720, width);
+    const minHeight = Math.min(520, height);
+    const initialWidth = Math.min(Math.max(Number(savedBounds.width) || Math.round(width * 0.92), minWidth), width);
+    const initialHeight = Math.min(Math.max(Number(savedBounds.height) || Math.round(height * 0.9), minHeight), height);
+    const savedPositionIsVisible = screen.getAllDisplays().some(display => {
+        const bounds = display.workArea;
+        return Number.isFinite(savedBounds.x) && Number.isFinite(savedBounds.y)
+            && savedBounds.x < bounds.x + bounds.width - 80
+            && savedBounds.y < bounds.y + bounds.height - 40
+            && savedBounds.x + initialWidth > bounds.x + 80
+            && savedBounds.y + initialHeight > bounds.y + 40;
+    });
 
     win = new BrowserWindow({
-        width: width,
-        height: height,
+        width: initialWidth,
+        height: initialHeight,
+        x: savedPositionIsVisible ? savedBounds.x : undefined,
+        y: savedPositionIsVisible ? savedBounds.y : undefined,
+        minWidth,
+        minHeight,
+        resizable: true,
+        maximizable: true,
         icon: appIcon,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -496,6 +523,7 @@ function createWindow() {
     });
 
     win.loadFile('index.html');
+    if (savedState?.maximized) win.maximize();
     win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
         if (level >= 2) {
             console.error(`[renderer] ${message} (${sourceId}:${line})`);
@@ -504,6 +532,15 @@ function createWindow() {
 
     // FIX: Close logic must be inside createWindow so 'win' is defined
     win.on('close', function (event) {
+        try {
+            ensureDir(runtimeDataDir);
+            fs.writeFileSync(windowStatePath, JSON.stringify({
+                bounds: win.getNormalBounds(),
+                maximized: win.isMaximized()
+            }, null, 2));
+        } catch (error) {
+            console.error('Unable to save window size:', error.message);
+        }
         if (!app.isQuiting) {
             event.preventDefault();
             win.hide();
@@ -842,6 +879,91 @@ ipcMain.handle('email-pdf-report', async (event, { html, fileName, to, subject, 
 
 ipcMain.handle('notify', (event, title, body) => {
     new Notification({ title, body }).show();
+});
+
+ipcMain.handle('window-minimize', event => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+
+ipcMain.handle('window-toggle-maximize', event => {
+    const target = BrowserWindow.fromWebContents(event.sender);
+    if (!target) return false;
+    if (target.isMaximized()) target.unmaximize();
+    else target.maximize();
+    return target.isMaximized();
+});
+
+ipcMain.handle('window-close', event => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.handle('get-printers', async event => {
+    try {
+        const printers = await event.sender.getPrintersAsync();
+        return printers.map(printer => ({
+            name: printer.name,
+            displayName: printer.displayName || printer.name,
+            description: printer.description || '',
+            isDefault: !!printer.isDefault
+        }));
+    } catch (error) {
+        return [];
+    }
+});
+
+ipcMain.handle('print-label', async (event, details = {}) => {
+    const target = BrowserWindow.fromWebContents(event.sender);
+    if (!target) return { success: false, error: 'Print window is unavailable.' };
+    let printSettings;
+    try {
+        printSettings = createLabelPrintSettings(details);
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+    let printWindow = null;
+    let printTarget = target;
+    try {
+        if (details.html) {
+            printWindow = new BrowserWindow({
+                show: false,
+                width: Math.max(320, Math.round(Number(details.width) * 160)),
+                height: Math.max(240, Math.round(Number(details.height) * 160)),
+                webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+            });
+            await printWindow.loadFile(path.join(__dirname, 'label-print.html'));
+            const payload = JSON.stringify({
+                html: String(details.html || ''),
+                width: Number(details.width),
+                height: Number(details.height)
+            });
+            await printWindow.webContents.executeJavaScript(`(async () => {
+                const data = ${payload};
+                document.documentElement.style.setProperty('--print-label-width', data.width + 'in');
+                document.documentElement.style.setProperty('--print-label-height', data.height + 'in');
+                document.getElementById('exact-page-size').textContent = '@page { size: ' + data.width + 'in ' + data.height + 'in; margin: 0; }';
+                document.getElementById('print-area').innerHTML = data.html;
+                await document.fonts.ready;
+                await Promise.all(Array.from(document.images).map(image => image.complete ? Promise.resolve() : new Promise(resolve => {
+                    image.addEventListener('load', resolve, { once: true });
+                    image.addEventListener('error', resolve, { once: true });
+                    setTimeout(resolve, 3000);
+                })));
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                return true;
+            })()`);
+            printTarget = printWindow;
+            if (!details.deviceName) printWindow.showInactive();
+        }
+        return await new Promise(resolve => {
+            printTarget.webContents.print(printSettings, (success, failureReason) => {
+                if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+                resolve({ success, error: success ? '' : (failureReason || 'The print job was canceled or could not be started.') });
+            });
+        });
+    } catch (error) {
+        if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+        return { success: false, error: error.message || 'Unable to prepare the label print job.' };
+    }
 });
 
 app.whenReady().then(async () => {
