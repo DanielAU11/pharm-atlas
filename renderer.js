@@ -323,6 +323,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     refreshDataLocation();
     maybeOpenFirstRunSetupGuide();
     renderFrequencyControls('sched');
+    ensureMobileScheduleStepper();
     initializeInAppWindows();
     updateInventoryEntryMode();
     setupImageDropzone('med-image-dropzone', image => { pendingNewMedImage = image; });
@@ -6205,6 +6206,9 @@ window.switchMemberProfileTab = function(tab = 'main') {
     if (profileBody) profileBody.dataset.activeTab = tab;
     document.querySelectorAll('.member-profile-tab').forEach(button => {
         button.classList.toggle('active', button.dataset.memberProfileTab === tab);
+        if (button.dataset.memberProfileTab === tab && document.documentElement.classList.contains('mobile-runtime')) {
+            requestAnimationFrame(() => button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
+        }
     });
     document.querySelectorAll('[data-member-section]').forEach(section => {
         section.style.display = section.dataset.memberSection === tab ? '' : 'none';
@@ -6221,7 +6225,9 @@ window.switchMemberProfileTab = function(tab = 'main') {
         renderMemberCommandScanPanel();
         const hasPendingOrderWork = pendingScheduleOrders.some(order => order.memberId === currentEditingMemberId)
             || pendingProfileActionsForMember(currentEditingMemberId).length > 0;
-        if (hasPendingOrderWork) setMemberMedicationWorkPanelOpen(true);
+        if (hasPendingOrderWork && !document.documentElement.classList.contains('mobile-runtime')) {
+            setMemberMedicationWorkPanelOpen(true);
+        }
     } else {
         setMemberMedicationWorkPanelOpen(false);
     }
@@ -9735,6 +9741,53 @@ window.switchTab = function(tabName) {
     });
     applyCustomTabOrder();
     applyDashboardCommandPanelState();
+    if (tabName === 'schedules') ensureMobileScheduleStepper();
+};
+
+function ensureMobileScheduleStepper() {
+    const panel = document.getElementById('panel-schedules');
+    const fieldset = panel?.querySelector('.schedule-entry-column > fieldset');
+    if (!fieldset) return;
+
+    let stepper = fieldset.querySelector(':scope > .mobile-schedule-stepper');
+    if (!stepper) {
+        stepper = document.createElement('div');
+        stepper.className = 'mobile-schedule-stepper';
+        stepper.setAttribute('role', 'tablist');
+        stepper.setAttribute('aria-label', 'Medication scheduling steps');
+        stepper.innerHTML = `
+            <button type="button" role="tab" data-mobile-schedule-step-button="medication" onclick="setMobileScheduleStep('medication')"><span class="win98-icon icon-order"></span>Medication</button>
+            <button type="button" role="tab" data-mobile-schedule-step-button="timing" onclick="setMobileScheduleStep('timing')"><span class="win98-icon icon-calendar"></span>Timing</button>
+            <button type="button" role="tab" data-mobile-schedule-step-button="details" onclick="setMobileScheduleStep('details')"><span class="win98-icon icon-info"></span>Details</button>`;
+        const legend = fieldset.querySelector(':scope > legend');
+        legend?.insertAdjacentElement('afterend', stepper);
+    }
+
+    const frequencyRow = document.getElementById('sched-freq')?.closest('.field-row');
+    const detailsRow = document.getElementById('sched-indication')?.closest('.field-row-stacked');
+    let step = 'medication';
+    Array.from(fieldset.children).forEach(child => {
+        if (child === frequencyRow) step = 'timing';
+        if (child === detailsRow) step = 'details';
+        if (child === stepper || child.tagName === 'LEGEND') return;
+        child.dataset.mobileScheduleStep = step;
+    });
+    setMobileScheduleStep(localStorage.getItem('pharmAtlasMobileScheduleStep') || 'medication', false);
+}
+
+window.setMobileScheduleStep = function(stepName, persist = true) {
+    const safeStep = ['medication', 'timing', 'details'].includes(stepName) ? stepName : 'medication';
+    const fieldset = document.querySelector('#panel-schedules .schedule-entry-column > fieldset');
+    if (!fieldset) return;
+    fieldset.querySelectorAll(':scope > [data-mobile-schedule-step]').forEach(element => {
+        element.classList.toggle('mobile-schedule-step-active', element.dataset.mobileScheduleStep === safeStep);
+    });
+    fieldset.querySelectorAll('[data-mobile-schedule-step-button]').forEach(button => {
+        const selected = button.dataset.mobileScheduleStepButton === safeStep;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    if (persist) localStorage.setItem('pharmAtlasMobileScheduleStep', safeStep);
 };
 
 window.applyMobileSyncedDatabase = function(data) {
@@ -10465,6 +10518,17 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                     event.stopPropagation();
                     window.emailMemberSchedulePdfReport(m.id, startInput.value, endInput.value);
                 });
+                const reportTools = document.createElement('details');
+                reportTools.className = 'member-schedule-report-tools';
+                const reportSummary = document.createElement('summary');
+                reportSummary.innerHTML = '<span class="win98-icon icon-label"></span> Reports &amp; Labels';
+                const reportActions = document.createElement('div');
+                reportActions.className = 'member-schedule-report-actions';
+                reportActions.appendChild(printButton);
+                reportActions.appendChild(schedulePdfButton);
+                reportActions.appendChild(emailSchedulePdfButton);
+                reportTools.appendChild(reportSummary);
+                reportTools.appendChild(reportActions);
                 const viewLabel = document.createElement('label');
                 viewLabel.innerText = 'View:';
                 const viewSelect = document.createElement('select');
@@ -10478,9 +10542,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
                 printControls.appendChild(startInput);
                 printControls.appendChild(endLabel);
                 printControls.appendChild(endInput);
-                printControls.appendChild(printButton);
-                printControls.appendChild(schedulePdfButton);
-                printControls.appendChild(emailSchedulePdfButton);
+                printControls.appendChild(reportTools);
                 printControls.appendChild(viewLabel);
                 printControls.appendChild(viewSelect);
                 const timelineControls = document.createElement('div');
@@ -20026,6 +20088,8 @@ function memberMedicationTimelineHtml(schedule) {
 }
 
 function memberScheduleViewMode() {
+    const localPreference = localStorage.getItem('pharmAtlasMemberScheduleViewMode');
+    if (localPreference === 'grid' || localPreference === 'timeline') return localPreference;
     return db.settings?.memberScheduleViewMode === 'grid' ? 'grid' : 'timeline';
 }
 
@@ -20150,8 +20214,10 @@ window.shiftMemberTimeline = function(days) {
 };
 
 window.setMemberScheduleViewMode = async function(mode) {
+    const selectedMode = mode === 'grid' ? 'grid' : 'timeline';
+    localStorage.setItem('pharmAtlasMemberScheduleViewMode', selectedMode);
     db.settings = db.settings || {};
-    db.settings.memberScheduleViewMode = mode === 'grid' ? 'grid' : 'timeline';
+    db.settings.memberScheduleViewMode = selectedMode;
     renderMemberScheduleGrid();
     await sync();
 };
@@ -22413,6 +22479,47 @@ window.reorderMedicationSchedule = async function(scheduleId) {
     if (pendingList) pendingList.scrollIntoView({ block: 'nearest' });
 };
 
+function ensureMemberMedicationWorkMobileControls(profileWindow) {
+    if (!profileWindow) return;
+    let handle = profileWindow.querySelector('.member-medication-work-handle');
+    if (!handle) {
+        handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = 'member-medication-work-handle';
+        handle.setAttribute('aria-label', 'Open Medication Work');
+        handle.innerHTML = '<span class="win98-icon icon-order"></span><span>Work</span><strong>0</strong>';
+        handle.addEventListener('click', () => {
+            const modal = document.getElementById('member-modal');
+            setMemberMedicationWorkPanelOpen(!modal?.classList.contains('order-dock-open'));
+        });
+        const titleBar = profileWindow.querySelector(':scope > .title-bar');
+        const titleControls = titleBar?.querySelector('.title-bar-controls');
+        if (titleBar && titleControls) titleBar.insertBefore(handle, titleControls);
+        else profileWindow.appendChild(handle);
+    }
+    let scrim = profileWindow.querySelector('.member-medication-work-scrim');
+    if (!scrim) {
+        scrim = document.createElement('button');
+        scrim.type = 'button';
+        scrim.className = 'member-medication-work-scrim';
+        scrim.setAttribute('aria-label', 'Close Medication Work');
+        scrim.addEventListener('click', () => setMemberMedicationWorkPanelOpen(false));
+        profileWindow.appendChild(scrim);
+    }
+}
+
+function updateMemberMedicationWorkHandle(memberId = currentEditingMemberId) {
+    const handle = document.querySelector('#member-modal .member-medication-work-handle');
+    if (!handle) return;
+    const count = memberId
+        ? pendingScheduleOrders.filter(order => order.memberId === memberId).length + pendingProfileActionsForMember(memberId).length
+        : 0;
+    const countNode = handle.querySelector('strong');
+    if (countNode) countNode.textContent = String(count);
+    handle.classList.toggle('has-work', count > 0);
+    handle.setAttribute('aria-label', `${count ? `${count} pending change${count === 1 ? '' : 's'}. ` : ''}Open Medication Work`);
+}
+
 function setMemberMedicationWorkPanelOpen(open) {
     const body = document.querySelector('#member-modal .member-profile-body');
     const dock = document.getElementById('member-order-work-dock');
@@ -22423,9 +22530,12 @@ function setMemberMedicationWorkPanelOpen(open) {
     // so neither can cover medication controls or the profile scroll bar.
     if (open) hideProgressNoteSidePanel(true, true);
     if (profileWindow && dock.parentElement !== profileWindow) profileWindow.appendChild(dock);
+    ensureMemberMedicationWorkMobileControls(profileWindow);
     body.classList.toggle('order-work-open', Boolean(open));
     modal?.classList.toggle('order-dock-open', Boolean(open));
     dock.setAttribute('aria-hidden', open ? 'false' : 'true');
+    profileWindow?.querySelector('.member-medication-work-handle')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    updateMemberMedicationWorkHandle();
 }
 
 function updateMemberMedicationWorkDockGeometry() {
@@ -22441,6 +22551,32 @@ window.openMemberMedicationWorkPanel = function(memberId = currentEditingMemberI
 window.closeMemberMedicationWorkPanel = function() {
     setMemberMedicationWorkPanelOpen(false);
 };
+
+let memberMedicationWorkGesture = null;
+document.addEventListener('touchstart', event => {
+    if (!document.documentElement.classList.contains('mobile-runtime') || event.touches.length !== 1) return;
+    const modal = document.getElementById('member-modal');
+    if (!modal || modal.style.display !== 'flex') return;
+    const touch = event.touches[0];
+    const open = modal.classList.contains('order-dock-open');
+    const inDock = Boolean(event.target.closest?.('.member-order-work-dock'));
+    if ((!open && touch.clientX >= window.innerWidth - 24) || (open && inDock)) {
+        memberMedicationWorkGesture = { startX: touch.clientX, startY: touch.clientY, open };
+    }
+}, { passive: true, capture: true });
+
+document.addEventListener('touchend', event => {
+    if (!memberMedicationWorkGesture || !event.changedTouches.length) return;
+    const touch = event.changedTouches[0];
+    const deltaX = touch.clientX - memberMedicationWorkGesture.startX;
+    const deltaY = touch.clientY - memberMedicationWorkGesture.startY;
+    const horizontalSwipe = Math.abs(deltaX) > 54 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35;
+    if (horizontalSwipe) {
+        if (!memberMedicationWorkGesture.open && deltaX < 0) openMemberMedicationWorkPanel(currentEditingMemberId);
+        if (memberMedicationWorkGesture.open && deltaX > 0) setMemberMedicationWorkPanelOpen(false);
+    }
+    memberMedicationWorkGesture = null;
+}, { passive: true, capture: true });
 
 window.scheduleMedicationForCurrentMember = async function() {
     if (!currentEditingMemberId) {
@@ -23011,6 +23147,7 @@ function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
     if (!container) return;
     if (!memberId) {
         container.innerHTML = '<div class="empty-state">Save this member before managing scheduled medications.</div>';
+        updateMemberMedicationWorkHandle(null);
         return;
     }
     const member = db.family.find(item => item.id === memberId);
@@ -23091,6 +23228,9 @@ function renderMemberOrderWorklist(memberId = currentEditingMemberId) {
             </div>
         </aside>`;
     enhanceButtonIcons(container);
+    const profileWindow = document.querySelector('#member-modal .member-profile-window');
+    ensureMemberMedicationWorkMobileControls(profileWindow);
+    updateMemberMedicationWorkHandle(memberId);
 }
 
 function reusableRegimenOptionsHtml(selected = '') {

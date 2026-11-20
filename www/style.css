@@ -4095,6 +4095,39 @@ button {
     background: #fff0f0;
 }
 
+.mobile-sync-state {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 7px;
+    padding: 6px 8px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.mobile-sync-state strong {
+    color: #000080;
+    white-space: nowrap;
+}
+
+.mobile-sync-state span {
+    color: #404040;
+    text-align: right;
+}
+
+.mobile-sync-state.ready {
+    background: #e7ffe7;
+}
+
+.mobile-sync-state.waiting {
+    background: #fff6c9;
+}
+
+.mobile-sync-state.local {
+    background: #e6f1ff;
+}
+
 .barcode-warning {
     color: #b00000;
     font-weight: bold;
@@ -5483,6 +5516,19 @@ button {
 
 .schedule-side-panels fieldset {
     min-width: 0;
+}
+
+.mobile-schedule-stepper {
+    display: none;
+}
+
+.member-schedule-report-tools,
+.member-schedule-report-actions {
+    display: contents;
+}
+
+.member-schedule-report-tools > summary {
+    display: none;
 }
 
 .schedule-med-preview {
@@ -9096,6 +9142,11 @@ button {
     box-sizing: border-box;
 }
 
+.member-medication-work-handle,
+.member-medication-work-scrim {
+    display: none;
+}
+
 #member-modal.order-dock-open .member-order-work-dock {
     display: flex;
     flex-direction: column;
@@ -12675,7 +12726,6 @@ button {
     }
 
     .mobile-runtime #member-modal.member-profile-workspace-shell .member-profile-body,
-    .mobile-runtime #member-modal.member-profile-workspace-shell .member-order-work-dock,
     .mobile-runtime #member-modal.member-profile-workspace-shell #progress-note-side-panel {
         grid-column: 1 !important;
         grid-row: 2 !important;
@@ -12685,12 +12735,10 @@ button {
         min-width: 0 !important;
     }
 
-    .mobile-runtime #member-modal.member-profile-workspace-shell.order-dock-open .member-profile-body,
     .mobile-runtime #member-modal.member-profile-workspace-shell.note-dock-open .member-profile-body {
         display: none !important;
     }
 
-    .mobile-runtime .member-order-work-dock,
     .mobile-runtime .progress-note-side-panel {
         resize: none !important;
         overflow: hidden !important;
@@ -12960,7 +13008,11 @@ button {
         right: 8px;
         bottom: calc(68px + env(safe-area-inset-bottom));
         width: auto;
-        max-height: 60dvh;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: min(55dvh, 390px);
+        overflow: auto;
+        box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
     }
 
     .mobile-more-sheet[hidden] {
@@ -12981,6 +13033,12 @@ button {
         gap: 7px;
         min-height: 48px;
         white-space: normal;
+    }
+
+    .mobile-more-sheet > .title-bar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
     }
 
     .mobile-runtime fieldset {
@@ -13119,6 +13177,18 @@ button {
         font-size: 13px;
     }
 
+    .mobile-runtime .mobile-sync-state {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .mobile-runtime .mobile-sync-state span {
+        text-align: left;
+        font-size: 11px;
+        line-height: 14px;
+    }
+
     .mobile-runtime .mobile-companion-actions {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -13184,6 +13254,80 @@ button {
         margin-top: 5px;
         color: #000080;
         font-weight: bold;
+    }
+
+    /* Turn the long desktop prescription form into a short, explicit phone flow. */
+    .mobile-runtime #panel-schedules {
+        display: block !important;
+    }
+
+    .mobile-runtime #panel-schedules .schedule-entry-column,
+    .mobile-runtime #panel-schedules .schedule-side-panels {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .mobile-runtime #panel-schedules .mobile-schedule-stepper {
+        position: sticky;
+        z-index: 8;
+        top: 0;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        margin: -4px -4px 8px;
+        padding: 5px 4px;
+        border-bottom: 1px solid #808080;
+        background: #c0c0c0;
+    }
+
+    .mobile-runtime #panel-schedules .mobile-schedule-stepper button {
+        display: flex;
+        min-width: 0;
+        min-height: 42px;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 4px;
+        font-size: 12px;
+    }
+
+    .mobile-runtime #panel-schedules .mobile-schedule-stepper button.active {
+        color: #000080;
+        font-weight: bold;
+        background: #e6f1ff;
+        box-shadow: inset 1px 1px #000000, inset -1px -1px #ffffff;
+    }
+
+    .mobile-runtime #panel-schedules .schedule-entry-column > fieldset > [data-mobile-schedule-step]:not(.mobile-schedule-step-active) {
+        display: none !important;
+    }
+
+    .mobile-runtime #panel-schedules .schedule-entry-column > fieldset > .mobile-schedule-step-active {
+        max-width: 100%;
+    }
+
+    .mobile-runtime #panel-schedules .schedule-side-panels {
+        gap: 6px;
+    }
+
+    .mobile-runtime #panel-schedules .schedule-med-preview {
+        min-height: 80px;
+        grid-template-columns: 70px minmax(0, 1fr);
+    }
+
+    .mobile-runtime #panel-schedules .schedule-med-photo {
+        width: 66px;
+        height: 66px;
+    }
+
+    .mobile-runtime #panel-schedules .schedule-med-photo img {
+        max-width: 62px;
+        max-height: 62px;
+    }
+
+    .mobile-runtime #panel-schedules .pending-order-list {
+        min-height: 84px;
+        max-height: 32dvh;
     }
 
     .mobile-runtime .guide-tip {
@@ -13398,6 +13542,340 @@ button {
     .mobile-runtime .action-modal-window .field-row,
     .mobile-runtime .order-modifier-window .field-row {
         max-width: 100%;
+    }
+
+    /* Small decisions should feel like phone sheets, not empty desktop windows. */
+    .mobile-runtime #action-modal:has(.action-modal-window:not(.action-modal-window-wide)),
+    .mobile-runtime .child-action-modal {
+        align-items: flex-end !important;
+        justify-content: center !important;
+        padding: 10px 8px calc(76px + env(safe-area-inset-bottom)) !important;
+        background: rgba(0, 0, 0, 0.36) !important;
+    }
+
+    .mobile-runtime #action-modal .action-modal-window:not(.action-modal-window-wide),
+    .mobile-runtime .child-action-modal > .action-modal-window {
+        width: min(100%, 520px) !important;
+        height: auto !important;
+        max-height: min(74dvh, 620px) !important;
+        margin: 0 !important;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .mobile-runtime #action-modal .action-modal-window:not(.action-modal-window-wide) > .window-body,
+    .mobile-runtime .child-action-modal > .action-modal-window > .window-body {
+        flex: 0 1 auto;
+        min-height: 0;
+        max-height: calc(min(74dvh, 620px) - 28px) !important;
+        overflow-y: auto;
+    }
+
+    .mobile-runtime .dose-bar-action-picker {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 7px;
+    }
+
+    .mobile-runtime .dose-bar-action-picker button {
+        min-height: 48px;
+        width: 100%;
+        white-space: normal;
+        text-align: left;
+    }
+
+    /* Medication Work is an off-canvas workspace. The profile remains visible behind it. */
+    .mobile-runtime #member-modal.member-profile-workspace-shell .member-profile-window {
+        position: relative !important;
+    }
+
+    .mobile-runtime #member-modal.member-profile-workspace-shell .member-order-work-dock {
+        display: flex !important;
+        position: absolute !important;
+        z-index: 160;
+        top: 28px;
+        right: 0;
+        bottom: 0;
+        left: auto;
+        width: min(90vw, 410px) !important;
+        height: auto !important;
+        max-height: none !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        background: #ffffee;
+        border-left: 2px outset #ffffff;
+        box-shadow: -5px 0 0 rgba(0, 0, 0, 0.24);
+        transform: translateX(calc(100% + 8px));
+        visibility: hidden;
+        pointer-events: none;
+        transition: transform 180ms ease-out, visibility 0s linear 180ms;
+    }
+
+    .mobile-runtime #member-modal.member-profile-workspace-shell.order-dock-open .member-order-work-dock {
+        transform: translateX(0);
+        visibility: visible;
+        pointer-events: auto;
+        transition: transform 180ms ease-out;
+    }
+
+    .mobile-runtime .member-medication-work-handle {
+        position: static;
+        z-index: auto;
+        display: flex;
+        width: auto;
+        min-width: 58px;
+        min-height: 20px;
+        padding: 2px 5px;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        margin-left: auto;
+        margin-right: 3px;
+        color: #000080;
+        font-size: 10px;
+        font-weight: bold;
+        writing-mode: horizontal-tb;
+        background: #fff7b8;
+    }
+
+    .mobile-runtime .member-medication-work-handle strong {
+        min-width: 18px;
+        padding: 1px 3px;
+        border: 1px inset #ffffff;
+        background: #ffffff;
+        writing-mode: horizontal-tb;
+    }
+
+    .mobile-runtime .member-medication-work-handle.has-work strong {
+        color: #ffffff;
+        background: #b00000;
+    }
+
+    .mobile-runtime #member-modal.order-dock-open .member-medication-work-handle {
+        display: none;
+    }
+
+    .mobile-runtime #member-modal.note-dock-open .member-medication-work-handle {
+        display: none;
+    }
+
+    .mobile-runtime .member-medication-work-scrim {
+        display: block;
+        position: absolute;
+        z-index: 150;
+        inset: 28px 0 0;
+        width: auto;
+        height: auto;
+        padding: 0;
+        border: 0;
+        background: rgba(0, 0, 0, 0.24);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 180ms ease-out, visibility 0s linear 180ms;
+    }
+
+    .mobile-runtime #member-modal.order-dock-open .member-medication-work-scrim {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transition: opacity 180ms ease-out;
+    }
+
+    .mobile-runtime .member-order-work-dock .epic-side-titlebar {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+    }
+
+    .mobile-runtime .member-order-work-dock .epic-side-search-row,
+    .mobile-runtime .member-order-work-dock .profile-orders-overview.compact {
+        gap: 4px;
+    }
+
+    .mobile-runtime .member-order-work-dock .epic-side-search-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mobile-runtime .member-order-work-dock .epic-side-search-row > button:first-child {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-runtime .member-order-work-dock .profile-orders-overview.compact {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .mobile-runtime .member-order-work-dock .epic-side-search-row button,
+    .mobile-runtime .member-order-work-dock .profile-orders-overview button {
+        min-width: 0;
+        min-height: 42px;
+        padding: 4px;
+        white-space: normal;
+    }
+
+    /* Profile controls keep their meaning while using phone-width rows. */
+    .mobile-runtime .member-profile-tabbar {
+        scroll-snap-type: x proximity;
+    }
+
+    .mobile-runtime .member-profile-tabbar button {
+        max-width: 170px;
+        scroll-snap-align: center;
+        white-space: normal;
+        line-height: 15px;
+    }
+
+    .mobile-runtime .member-active-toolbar > label {
+        display: none;
+    }
+
+    .mobile-runtime .member-active-toolbar > input[type="date"],
+    .mobile-runtime .member-active-toolbar > select {
+        width: 100%;
+        min-height: 38px;
+    }
+
+    .mobile-runtime .member-active-toolbar > select,
+    .mobile-runtime .member-active-toolbar > .timeline-controls {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-runtime .member-active-toolbar > .member-schedule-report-tools {
+        display: block;
+        grid-column: 1 / -1;
+        min-width: 0;
+    }
+
+    .mobile-runtime .member-schedule-report-tools > summary {
+        display: flex;
+        min-height: 40px;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 5px 8px;
+        border: 2px outset #ffffff;
+        color: #000080;
+        font-weight: bold;
+        background: #c0c0c0;
+        cursor: pointer;
+        list-style: none;
+    }
+
+    .mobile-runtime .member-schedule-report-tools > summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .mobile-runtime .member-schedule-report-tools > summary::after {
+        content: 'Open';
+        margin-left: auto;
+        color: #404040;
+        font-size: 10px;
+        font-weight: normal;
+    }
+
+    .mobile-runtime .member-schedule-report-tools[open] > summary::after {
+        content: 'Close';
+    }
+
+    .mobile-runtime .member-schedule-report-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        padding-top: 5px;
+    }
+
+    .mobile-runtime .member-schedule-report-actions button {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+        padding: 4px;
+        font-size: 11px;
+    }
+
+    .mobile-runtime .member-active-toolbar > .timeline-controls {
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+        align-items: center;
+        padding: 0;
+        margin: 0;
+    }
+
+    .mobile-runtime .member-active-toolbar > .timeline-controls strong {
+        text-align: center;
+        font-size: 10px;
+    }
+
+    .mobile-runtime .member-med-timeline > * {
+        min-width: 500px;
+    }
+
+    .mobile-runtime .goal-card-grid {
+        gap: 7px;
+    }
+
+    .mobile-runtime .goal-card {
+        padding: 7px;
+    }
+
+    .mobile-runtime .goal-card-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .mobile-runtime .goal-card-header select {
+        width: 100%;
+        max-width: none;
+    }
+
+    .mobile-runtime .goal-range-row {
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+
+    .mobile-runtime .goal-range-row > strong {
+        grid-column: 1 / -1;
+        text-align: right;
+    }
+
+    .mobile-runtime .profile-diary-exportbar,
+    .mobile-runtime .profile-diary-filterbar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+    }
+
+    .mobile-runtime .profile-diary-exportbar > *,
+    .mobile-runtime .profile-diary-filterbar > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .mobile-runtime .profile-diary-layout,
+    .mobile-runtime .profile-diary-editor,
+    .mobile-runtime .profile-diary-list,
+    .mobile-runtime .profile-diary-entry,
+    .mobile-runtime .profile-diary-preview-content {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime .profile-diary-entry-heading,
+    .mobile-runtime .profile-diary-entry-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .mobile-runtime .profile-diary-entry-heading > *,
+    .mobile-runtime .profile-diary-entry p,
+    .mobile-runtime .profile-diary-entry small {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-runtime .profile-diary-entry-actions button {
+        min-height: 36px;
     }
 }
 

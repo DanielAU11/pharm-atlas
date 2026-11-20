@@ -1,7 +1,7 @@
 {
   "name": "pharm-atlas",
   "productName": "PharmAtlas",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "A retro desktop medication scheduler, inventory tracker, and vitals log.",
   "author": "Daniel Uribe",
   "main": "main.js",
@@ -22,6 +22,7 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "test:demo": "npm run mobile:build && electron tests/full-demo.cjs",
+    "test:mobile-layout": "npm run mobile:build && electron tests/mobile-layout.cjs",
     "test:sync": "node tests/sync-core.cjs",
     "test:connectivity": "electron tests/connectivity.cjs",
     "test:labels": "npm run mobile:build && electron tests/label-formulation.cjs",

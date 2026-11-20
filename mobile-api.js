@@ -23,7 +23,7 @@
     let lastMobileDatabase = null;
     let mobileSyncTimer = null;
     let mobileSyncInProgress = false;
-    let mobileSettings = { notificationsEnabled: false, pairing: null, lastSyncAt: '', lastSyncError: '' };
+    let mobileSettings = { notificationsEnabled: false, pairing: null, lastSyncAt: '', lastSyncError: '', pendingChangesAt: '' };
     let mobileSettingsReady = Promise.resolve();
 
     function openMobileDatabase() {
@@ -314,6 +314,7 @@
                 await writeMobileRecord(dbKey, JSON.stringify(merged));
                 mobileSettings.lastSyncAt = new Date().toISOString();
                 mobileSettings.lastSyncError = '';
+                mobileSettings.pendingChangesAt = '';
                 await saveMobileSettings();
                 await refreshNativeNotifications(merged);
                 if (typeof window.applyMobileSyncedDatabase === 'function') window.applyMobileSyncedDatabase(merged);
@@ -341,6 +342,7 @@
             await writeMobileRecord(dbKey, JSON.stringify(merged));
             mobileSettings.lastSyncAt = new Date().toISOString();
             mobileSettings.lastSyncError = '';
+            mobileSettings.pendingChangesAt = '';
             await saveMobileSettings();
             await refreshNativeNotifications(merged);
             if (typeof window.applyMobileSyncedDatabase === 'function') window.applyMobileSyncedDatabase(merged);
@@ -400,6 +402,8 @@
                 console.warn('Local mobile backup was skipped.', error);
             }
             lastMobileDatabase = prepared;
+            mobileSettings.pendingChangesAt = mobileSettings.pendingChangesAt || new Date().toISOString();
+            await saveMobileSettings();
             refreshNativeNotifications(prepared).catch(error => console.warn('Native reminders could not be refreshed.', error));
             queueDesktopSync(prepared);
             return true;
@@ -725,19 +729,31 @@
         const paired = mobileSettings.pairing;
         const remote = cloudPairingConfigured(paired);
         const lastSync = mobileSettings.lastSyncAt ? new Date(mobileSettings.lastSyncAt).toLocaleString() : 'Not synced yet';
+        const pending = Boolean(mobileSettings.pendingChangesAt);
+        const offline = navigator.onLine === false;
+        const syncState = !paired
+            ? { tone: 'local', title: 'Saved on this device', detail: 'Pair once to share changes with your desktop.' }
+            : pending && offline
+                ? { tone: 'waiting', title: 'Saved offline', detail: 'Changes will sync automatically when internet returns.' }
+                : pending
+                    ? { tone: 'waiting', title: 'Changes waiting to sync', detail: remote ? 'Automatic remote sync is on.' : 'Open the desktop app on the same network.' }
+                    : mobileSettings.lastSyncError
+                        ? { tone: 'waiting', title: 'Saved safely on this device', detail: remote ? 'Automatic sync will retry.' : 'Open the desktop app on the same network to sync.' }
+                        : { tone: 'ready', title: 'Up to date', detail: `Last sync: ${lastSync}` };
         host.innerHTML = `
-            <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>${deviceName} Reminders &amp; Sync</strong></div>
+            <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>${deviceName} Sync &amp; Reminders</strong></div>
+            <div class="mobile-sync-state ${syncState.tone}" role="status" aria-live="polite"><strong>${syncState.title}</strong><span>${syncState.detail}</span></div>
             <div class="mobile-companion-actions">
                 <button type="button" onclick="${mobileSettings.notificationsEnabled ? 'disableIphoneReminders()' : 'enableIphoneReminders()'}"><span class="win98-icon icon-calendar"></span>${mobileSettings.notificationsEnabled ? 'Reminders On' : 'Enable Reminders'}</button>
                 <button type="button" class="mobile-camera-pair" onclick="scanMobileDesktopQr()"><span class="win98-icon icon-view"></span>${paired ? 'Scan New QR' : 'Scan Desktop QR'}</button>
-                <button type="button" onclick="syncMobileWithDesktopNow()" ${paired ? '' : 'disabled'}><span class="win98-icon icon-view"></span>Sync Now</button>
+                <button type="button" onclick="syncMobileWithDesktopNow()" ${paired ? '' : 'disabled'}><span class="win98-icon icon-view"></span>${pending ? 'Sync Changes' : 'Sync Now'}</button>
                 ${paired ? '<button type="button" title="Disconnect desktop" onclick="unpairMobileDesktop()"><span class="win98-icon icon-clear"></span>Unpair</button>' : ''}
             </div>
             <details class="mobile-pairing-fallback">
                 <summary>Camera unavailable? Use pairing text</summary>
                 <div class="mobile-pairing-fallback-row"><input id="mobile-pairing-code" class="mobile-pairing-code" type="text" placeholder="Paste pairing text" aria-label="Desktop pairing text"><button type="button" onclick="pairMobileWithDesktop()"><span class="win98-icon icon-receive"></span>Pair</button></div>
             </details>
-            <div class="mobile-companion-status ${mobileSettings.lastSyncError ? 'error' : ''}">${paired ? `${remote ? 'Remote encrypted sync' : 'Direct local sync'} | ${paired.name} | Last sync: ${lastSync}` : 'Not paired with a desktop.'}${mobileSettings.lastSyncError ? ` | ${mobileSettings.lastSyncError}` : ''}</div>`;
+            <div class="mobile-companion-status ${mobileSettings.lastSyncError ? 'error' : ''}">${paired ? `${remote ? 'Encrypted remote sync' : 'Nearby desktop sync'} | ${paired.name}` : 'Not paired with a desktop.'}${mobileSettings.lastSyncError ? `<details><summary>Sync details</summary>${mobileSettings.lastSyncError}</details>` : ''}</div>`;
         host.querySelector('#mobile-pairing-code')?.addEventListener('keydown', event => {
             if (event.key !== 'Enter') return;
             event.preventDefault();
@@ -775,4 +791,9 @@
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && mobileSettings.pairing) syncWithDesktop(lastMobileDatabase, true);
     });
+    window.addEventListener('online', () => {
+        renderMobileCompanionPanel();
+        if (mobileSettings.pairing) syncWithDesktop(lastMobileDatabase, true);
+    });
+    window.addEventListener('offline', renderMobileCompanionPanel);
 })();
