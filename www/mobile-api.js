@@ -118,6 +118,21 @@
         return [med?.name || 'Medication', strength].filter(Boolean).join(' ');
     }
 
+    function manualHoldUntil(schedule) {
+        if (!schedule?.manualHold?.active || !schedule.manualHold.untilAt) return null;
+        const until = new Date(schedule.manualHold.untilAt);
+        return Number.isFinite(until.getTime()) ? until : null;
+    }
+
+    function medicationIsHeldAt(schedule, at) {
+        if (typeof window.medicationReminderIsHeld === 'function') {
+            return window.medicationReminderIsHeld(schedule, at);
+        }
+        if (!schedule?.manualHold?.active) return false;
+        const until = manualHoldUntil(schedule);
+        return !until || at < until;
+    }
+
     function notificationCandidates(data) {
         if (typeof window.getScheduleInstancesInRange !== 'function') return [];
         const now = new Date();
@@ -131,11 +146,23 @@
             const member = (data.family || []).find(item => item.id === schedule.memberId);
             if (!member || member.notificationPrefs?.medicationReminders === false || schedule.status === 'discontinued' || schedule.status === 'completed') return;
             const med = (data.inventory || []).find(item => item.id === schedule.medId);
+            const holdUntil = manualHoldUntil(schedule);
+            if (holdUntil && holdUntil > now && !medicationIsHeldAt(schedule, new Date(holdUntil.getTime() + 1000))) {
+                candidates.push({
+                    id: stableNotificationId(`hold-resumed|${schedule.id}|${holdUntil.toISOString()}`),
+                    title: 'Medication resumed',
+                    body: `${memberName(member)}: ${medName(med)} is no longer on hold. Future dose reminders are active.`,
+                    schedule: { at: holdUntil },
+                    sound: 'default',
+                    extra: { source: 'pharmatlas', kind: 'medication-resumed', scheduleId: schedule.id }
+                });
+            }
             (window.getScheduleInstancesInRange(schedule, today, end) || []).forEach(instance => {
                 const key = `${schedule.id}|${instance.date}|${instance.time}`;
                 if (historyKeys.has(key)) return;
                 const at = new Date(`${instance.date}T${instance.time}:00`);
                 if (!Number.isFinite(at.getTime()) || at <= now) return;
+                if (medicationIsHeldAt(schedule, at)) return;
                 candidates.push({
                     id: stableNotificationId(`med|${key}`),
                     title: 'Medication due',
@@ -167,6 +194,9 @@
     }
 
     async function refreshNativeNotifications(data, requestPermission = false) {
+        if (!window.__PHARMATLAS_NATIVE_TEST__ && window.Capacitor?.isNativePlatform?.() !== true) {
+            return { scheduled: 0, permission: 'unavailable' };
+        }
         const plugin = nativePlugin('LocalNotifications');
         if (!plugin || !mobileSettings.notificationsEnabled) return { scheduled: 0, permission: 'unavailable' };
         let permission = await plugin.checkPermissions();
@@ -459,7 +489,7 @@
             lastMobileDatabase = prepared;
             mobileSettings.pendingChangesAt = mobileSettings.pendingChangesAt || new Date().toISOString();
             await saveMobileSettings();
-            refreshNativeNotifications(prepared).catch(error => console.warn('Native reminders could not be refreshed.', error));
+            await refreshNativeNotifications(prepared).catch(error => console.warn('Native reminders could not be refreshed.', error));
             queueDesktopSync(prepared);
             return true;
         },
@@ -532,6 +562,7 @@
         },
 
         async notify(title, body) {
+            if (!window.__PHARMATLAS_NATIVE_TEST__ && window.Capacitor?.isNativePlatform?.() !== true) return false;
             const plugin = nativePlugin('LocalNotifications');
             if (plugin && mobileSettings.notificationsEnabled) {
                 const permission = await plugin.checkPermissions();

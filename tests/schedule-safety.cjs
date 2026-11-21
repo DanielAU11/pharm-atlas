@@ -22,6 +22,11 @@ app.whenReady().then(async () => {
             items: [{ medId:'x', doseQty:1, freq:'BID', times:['09:00','21:00'], startTime:'09:00', cycleStartDay:1 }]
         }, 'm', '2026-11-19', 3);
         const sizes = calculateClinicalBodySizes(70, 'in', 220, 'lb', 'Male');
+        const finiteHold = {
+            ...structuredClone(base),
+            manualHold: { active:true, untilAt:new Date(2026, 10, 19, 20, 0, 0, 0).toISOString() }
+        };
+        const indefiniteHold = { ...structuredClone(base), manualHold: { active:true, untilAt:'' } };
         return {
             remaining,
             includeNow,
@@ -31,6 +36,9 @@ app.whenReady().then(async () => {
             prnHidden,
             regimenDoseEnd,
             sizes,
+            finiteHoldBeforeEnd: medicationReminderIsHeld(finiteHold, new Date(2026, 10, 19, 19, 59, 0, 0)),
+            finiteHoldAfterEnd: medicationReminderIsHeld(finiteHold, new Date(2026, 10, 19, 20, 1, 0, 0)),
+            indefiniteHoldActive: medicationReminderIsHeld(indefiniteHold, new Date(2027, 0, 1, 0, 0, 0, 0)),
             remainingInstances: getBaseScheduleInstancesForDate(remaining, '2026-11-19').map(item => item.time)
         };
     })()`);
@@ -47,6 +55,9 @@ app.whenReady().then(async () => {
         || !result.onceHidden
         || !result.prnHidden
         || result.regimenDoseEnd !== '2026-11-20'
+        || !result.finiteHoldBeforeEnd
+        || result.finiteHoldAfterEnd
+        || !result.indefiniteHoldActive
         || !result.sizes.ibw || !result.sizes.adjustedWeight || !result.sizes.bsa;
     win.destroy();
     if (failed) process.exitCode = 1;

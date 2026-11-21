@@ -22153,11 +22153,14 @@ async function checkSchedules() {
     const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     pruneReminderLog(todayKey);
     let reminderLogChanged = false;
+    const expiredHoldResult = releaseExpiredManualMedicationHolds(now);
+    const holdStateChanged = expiredHoldResult.changed.length > 0;
 
     try {
         const dueMedicationReminders = new Map();
         for (const s of db.schedules) {
-            if (!isScheduleDueOnDate(s, todayKey) ||
+            if (medicationReminderIsHeld(s, now) ||
+                !isScheduleDueOnDate(s, todayKey) ||
                 !getScheduleTimesForDate(s, todayKey).includes(currentTime) ||
                 isScheduleInstanceDocumented(s.id, todayKey, currentTime)) continue;
 
@@ -22253,7 +22256,10 @@ async function checkSchedules() {
             }
         }
 
-        if (reminderLogChanged) await window.api.save(db);
+        if (reminderLogChanged || holdStateChanged) await window.api.save(db);
+        for (const schedule of expiredHoldResult.resumed) {
+            await notifyMedicationResumed(schedule, 'The scheduled hold ended. Future dose reminders are active.');
+        }
     } finally {
         checkSchedulesRunning = false;
     }
@@ -24643,6 +24649,54 @@ function activeMedicationHoldInfo(schedule) {
     };
 }
 
+function medicationReminderIsHeld(schedule, at = new Date()) {
+    if (manualHoldIsActive(schedule?.manualHold, at)) return true;
+    const autoHoldInfo = activeMedicationHoldInfo({ ...schedule, manualHold: null });
+    return !!autoHoldInfo?.active;
+}
+
+window.medicationReminderIsHeld = medicationReminderIsHeld;
+
+function releaseExpiredManualMedicationHolds(now = new Date()) {
+    const result = { changed: [], resumed: [] };
+    db.schedules.forEach(schedule => {
+        const hold = schedule?.manualHold;
+        const until = manualHoldUntilDate(hold);
+        if (!hold?.active || !until || until > now) return;
+        schedule.manualHold = {
+            ...hold,
+            active: false,
+            endedAt: now.toISOString(),
+            endedAutomatically: true
+        };
+        const med = db.inventory.find(item => item.id === schedule.medId);
+        const member = db.family.find(item => item.id === schedule.memberId);
+        addAudit('Medication hold ended', med?.name || 'Medication', `${memberDisplayName(member)} | Scheduled hold ended${hold.reason ? ` | ${hold.reason}` : ''}`, {
+            scheduleId: schedule.id,
+            medId: schedule.medId,
+            memberId: schedule.memberId,
+            automatic: true
+        });
+        result.changed.push(schedule);
+        if (!medicationReminderIsHeld(schedule, now)) result.resumed.push(schedule);
+    });
+    return result;
+}
+
+async function notifyMedicationResumed(schedule, detail = 'Future dose reminders are active.') {
+    if (!schedule) return false;
+    const med = db.inventory.find(item => item.id === schedule.medId);
+    const member = db.family.find(item => item.id === schedule.memberId);
+    const subject = med?.name || 'Medication';
+    const memberText = member ? `${memberDisplayName(member)}: ` : '';
+    try {
+        return await Promise.resolve(window.api?.notify?.('Medication resumed', `${memberText}${subject} is no longer on hold. ${detail}`));
+    } catch (error) {
+        console.warn('Medication resume notification could not be delivered.', error);
+        return false;
+    }
+}
+
 function holdIndicatorHtml(schedule) {
     const info = activeMedicationHoldInfo(schedule);
     if (!info || !info.active) return '';
@@ -24730,6 +24784,7 @@ window.toggleMedicationHold = async function(scheduleId) {
     if (!schedule) return;
     const med = db.inventory.find(item => item.id === schedule.medId);
     const activeHold = activeMedicationHoldInfo(schedule);
+    let holdRemoved = false;
     if (manualHoldIsActive(schedule.manualHold)) {
         if (!await appConfirm(`Remove hold for ${med?.name || 'this medication'}?`, 'Remove Hold')) return;
         schedule.manualHold = { active: false, endedAt: new Date().toISOString() };
@@ -24738,6 +24793,7 @@ window.toggleMedicationHold = async function(scheduleId) {
             medId: schedule.medId,
             memberId: schedule.memberId
         });
+        holdRemoved = true;
     } else if (activeHold?.active) {
         const result = await showActionModal('Remove Auto-Hold', `
             <div class="hold-warning-box">
@@ -24765,6 +24821,7 @@ window.toggleMedicationHold = async function(scheduleId) {
             medId: schedule.medId,
             memberId: schedule.memberId
         });
+        holdRemoved = true;
     } else {
         const hold = await promptManualHoldDetails(
             'Place Medication On Hold',
@@ -24781,6 +24838,7 @@ window.toggleMedicationHold = async function(scheduleId) {
         });
     }
     await sync();
+    if (holdRemoved && !medicationReminderIsHeld(schedule)) await notifyMedicationResumed(schedule);
     renderCalendar();
 };
 
@@ -24793,6 +24851,7 @@ window.toggleOrderSetHold = async function(orderSetId) {
         return;
     }
     const member = db.family.find(item => item.id === set.memberId);
+    let holdRemoved = false;
     if (anyHeld) {
         const result = await showActionModal('Remove Regimen Hold', `
             <div class="hold-warning-box">
@@ -24815,6 +24874,7 @@ window.toggleOrderSetHold = async function(orderSetId) {
             memberId: set.memberId,
             scheduleIds: schedules.map(schedule => schedule.id)
         });
+        holdRemoved = true;
     } else {
         const hold = await promptManualHoldDetails(
             'Place Regimen On Hold',
@@ -24833,6 +24893,13 @@ window.toggleOrderSetHold = async function(orderSetId) {
         });
     }
     await sync();
+    const resumedSchedules = holdRemoved ? schedules.filter(schedule => !medicationReminderIsHeld(schedule)) : [];
+    if (resumedSchedules.length) {
+        await Promise.resolve(window.api?.notify?.(
+            'Medications resumed',
+            `${memberDisplayName(member)}: ${set.name || 'Regimen'} resumed ${resumedSchedules.length} medication${resumedSchedules.length === 1 ? '' : 's'}. Future dose reminders are active.`
+        )).catch(error => console.warn('Regimen resume notification could not be delivered.', error));
+    }
     renderCalendar();
 };
 
