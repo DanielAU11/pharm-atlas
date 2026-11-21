@@ -1403,6 +1403,30 @@ button {
     background: linear-gradient(90deg, #dbeaff 0%, #ecf8ff 52%, #fff3cc 100%);
 }
 
+.profile-demographics-heading {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #8094aa;
+    color: #000080;
+}
+
+.profile-demographics-heading strong {
+    font-size: 12px;
+}
+
+.profile-demographics-heading span {
+    overflow: hidden;
+    color: #4a4a4a;
+    font-size: 10px;
+    font-weight: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .member-profile-body:not([data-active-tab="main"]) > .profile-demographics-strip {
     display: none;
 }
@@ -1429,6 +1453,62 @@ button {
     color: #000080;
     font-weight: bold;
     font-size: 11px;
+}
+
+.profile-calendar-color-field {
+    min-width: 104px;
+}
+
+.member-calendar-color-picker {
+    --member-calendar-color: #000080;
+    position: relative;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 28px;
+    padding: 3px 7px;
+    box-sizing: border-box;
+    border: 2px outset #ffffff;
+    background: #c0c0c0;
+    color: #000000;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.member-calendar-color-picker:active,
+.member-calendar-color-picker:focus-within {
+    border-style: inset;
+    padding: 4px 6px 2px 8px;
+}
+
+.member-calendar-color-swatch {
+    display: block;
+    width: 24px;
+    height: 16px;
+    border: 1px solid #000000;
+    box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.65);
+    background: var(--member-calendar-color);
+}
+
+.member-calendar-color-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: 0;
+}
+
+.member-calendar-color-picker input[type="color"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    cursor: pointer;
 }
 
 .profile-name-grid input,
@@ -13184,8 +13264,11 @@ button {
     .mobile-runtime #member-modal.member-profile-workspace-shell.order-dock-open .member-profile-window,
     .mobile-runtime #member-modal.member-profile-workspace-shell.note-dock-open.order-dock-open .member-profile-window {
         width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
         height: 100% !important;
         max-height: none !important;
+        box-sizing: border-box !important;
         display: grid !important;
         grid-template-columns: minmax(0, 1fr) !important;
         grid-template-rows: auto minmax(0, 1fr) !important;
@@ -13205,6 +13288,8 @@ button {
         height: 100% !important;
         max-height: none !important;
         min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
     }
 
     .mobile-runtime #member-modal.member-profile-workspace-shell.note-dock-open .member-profile-body {
@@ -13914,7 +13999,45 @@ button {
 
     .mobile-runtime .member-profile-body {
         padding: 6px 6px calc(86px + env(safe-area-inset-bottom)) !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
         overflow-x: hidden !important;
+        overflow-x: clip !important;
+        overscroll-behavior-inline: none;
+    }
+
+    .mobile-runtime .profile-demographics-heading {
+        display: grid;
+        gap: 1px;
+        padding: 2px 1px 6px;
+    }
+
+    .mobile-runtime .profile-demographics-heading strong {
+        font-size: 14px;
+    }
+
+    .mobile-runtime .member-profile-body > *,
+    .mobile-runtime .member-profile-body [data-member-section],
+    .mobile-runtime .member-profile-body [data-member-section] > * {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime .profile-calendar-color-field {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-runtime .member-calendar-color-picker {
+        min-height: 40px;
+        grid-template-columns: 36px minmax(0, 1fr);
+        font-weight: bold;
+    }
+
+    .mobile-runtime .member-calendar-color-swatch {
+        width: 32px;
+        height: 22px;
     }
 
     .mobile-runtime .member-profile-save-actions {

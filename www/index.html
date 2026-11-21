@@ -1276,7 +1276,19 @@
             </div>
         </div>
         <div class="window-body member-profile-body">
-            <div class="profile-demographics-strip">
+            <div class="member-profile-tabbar" role="tablist" aria-label="Member profile sections">
+                <button type="button" class="member-profile-tab active" role="tab" aria-selected="true" data-member-profile-tab="main" onclick="switchMemberProfileTab('main')">Main</button>
+                <button type="button" class="member-profile-tab" role="tab" aria-selected="false" data-member-profile-tab="orders" onclick="switchMemberProfileTab('orders')">Scheduled Medications</button>
+                <button type="button" class="member-profile-tab" role="tab" aria-selected="false" data-member-profile-tab="summary" onclick="switchMemberProfileTab('summary')">Current List / Summary</button>
+                <button type="button" class="member-profile-tab" role="tab" aria-selected="false" data-member-profile-tab="monitoring" onclick="switchMemberProfileTab('monitoring')">Monitoring</button>
+                <button type="button" class="member-profile-tab" role="tab" aria-selected="false" data-member-profile-tab="diary" onclick="switchMemberProfileTab('diary')">Progress Notes / Diary</button>
+            </div>
+
+            <div class="profile-demographics-strip" role="group" aria-labelledby="profile-demographics-heading">
+                <div class="profile-demographics-heading" id="profile-demographics-heading">
+                    <strong>Member details</strong>
+                    <span>Profile and body measurements</span>
+                </div>
                 <div class="profile-name-grid">
                     <label class="field-row-stacked">First Name<input id="m-first" type="text"></label>
                     <label class="field-row-stacked profile-middle-name">Middle<input id="m-middle" type="text"></label>
@@ -1298,16 +1310,14 @@
                     <label>IBW (kg)<input id="m-ibw" type="text" readonly></label>
                     <label>Adj BW (kg)<input id="m-adjusted-weight" type="text" readonly></label>
                     <label>BSA (m2)<input id="m-bsa" type="text" readonly></label>
-                    <label>Calendar color<input id="m-calendar-color" type="color" value="#000080" title="Color used for this member on the calendar"></label>
+                    <label class="profile-calendar-color-field">Calendar color
+                        <span class="member-calendar-color-picker" id="m-calendar-color-picker">
+                            <span class="member-calendar-color-swatch" aria-hidden="true"></span>
+                            <span class="member-calendar-color-label">Choose color</span>
+                            <input id="m-calendar-color" type="color" value="#000080" title="Choose the color used for this member on the calendar" aria-label="Calendar color" oninput="syncMemberCalendarColorPicker()" onchange="syncMemberCalendarColorPicker()">
+                        </span>
+                    </label>
                 </div>
-            </div>
-
-            <div class="member-profile-tabbar">
-                <button type="button" class="member-profile-tab active" data-member-profile-tab="main" onclick="switchMemberProfileTab('main')">Main</button>
-                <button type="button" class="member-profile-tab" data-member-profile-tab="orders" onclick="switchMemberProfileTab('orders')">Scheduled Medications</button>
-                <button type="button" class="member-profile-tab" data-member-profile-tab="summary" onclick="switchMemberProfileTab('summary')">Current List / Summary</button>
-                <button type="button" class="member-profile-tab" data-member-profile-tab="monitoring" onclick="switchMemberProfileTab('monitoring')">Monitoring</button>
-                <button type="button" class="member-profile-tab" data-member-profile-tab="diary" onclick="switchMemberProfileTab('diary')">Progress Notes / Diary</button>
             </div>
 
             <input id="m-current-med-list-data" type="hidden">

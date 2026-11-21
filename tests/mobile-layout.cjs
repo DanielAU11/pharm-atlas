@@ -61,6 +61,7 @@ app.whenReady().then(async () => {
         const medCard = modal.querySelector('.member-med-card');
         const medActions = medCard?.querySelector('.member-med-actions');
         const medCardRect = medCard?.getBoundingClientRect();
+        const profileWindowRect = modal.querySelector('.member-profile-window')?.getBoundingClientRect();
         return {
             mobileTitle: document.querySelector('.app-window > .title-bar .title-bar-text')?.textContent.trim(),
             viewMode: memberScheduleViewMode(),
@@ -77,7 +78,9 @@ app.whenReady().then(async () => {
             visibleProfileTabs: Array.from(modal.querySelectorAll('.member-profile-tab')).filter(button => getComputedStyle(button).display !== 'none').length,
             diaryTabHidden: getComputedStyle(modal.querySelector('[data-member-profile-tab="diary"]')).display === 'none',
             medicationCardFits: !!medCardRect && medCardRect.left >= 0 && medCardRect.right <= innerWidth + 1,
-            medicationActionsCompact: !!medActions && getComputedStyle(medActions).flexWrap === 'nowrap' && medActions.scrollWidth >= medActions.clientWidth
+            medicationActionsCompact: !!medActions && getComputedStyle(medActions).flexWrap === 'nowrap' && medActions.scrollWidth >= medActions.clientWidth,
+            profileLeft: Math.round(profileWindowRect?.left || 0),
+            windowScrollX: Math.round(scrollX)
         };
     })()`);
 
@@ -121,13 +124,17 @@ app.whenReady().then(async () => {
         const table = modal.querySelector('.medication-summary-table');
         const firstRow = table?.querySelector('tbody tr');
         const firstCell = firstRow?.querySelector('td');
+        const profileWindowRect = modal.querySelector('.member-profile-window')?.getBoundingClientRect();
         return {
             tableOverflow: table ? table.scrollWidth - table.clientWidth : 0,
             rowOverflow: firstRow ? firstRow.scrollWidth - firstRow.clientWidth : 0,
             cards: getComputedStyle(firstRow).display === 'block',
             labels: firstCell?.dataset.label === 'Medication',
             saveHidden: getComputedStyle(modal.querySelector('.member-profile-save-actions')).display === 'none',
-            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            profileLeft: Math.round(profileWindowRect?.left || 0),
+            windowScrollX: Math.round(scrollX),
+            demographicsHidden: getComputedStyle(modal.querySelector('.profile-demographics-strip')).display === 'none'
         };
     })()`);
 
@@ -135,13 +142,42 @@ app.whenReady().then(async () => {
     await pause(100);
     await capture(win, 'member-profile-main');
     const memberMain = await win.webContents.executeJavaScript(`(() => {
+        const modal = document.getElementById('member-modal');
         const actions = document.querySelector('#member-modal .member-profile-save-actions');
         const navRect = document.getElementById('mobile-bottom-nav').getBoundingClientRect();
         const rect = actions.getBoundingClientRect();
+        const picker = modal.querySelector('.member-calendar-color-picker');
+        const pickerRect = picker.getBoundingClientRect();
+        const tabs = modal.querySelector('.member-profile-tabbar');
+        const demographics = modal.querySelector('.profile-demographics-strip');
+        const profileWindowRect = modal.querySelector('.member-profile-window')?.getBoundingClientRect();
         return {
             saveVisible: getComputedStyle(actions).display !== 'none' && rect.top >= 0 && rect.bottom <= navRect.top + 1,
-            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+            pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            profileLeft: Math.round(profileWindowRect?.left || 0),
+            windowScrollX: Math.round(scrollX),
+            tabPositionStable: Math.abs(Math.round(profileWindowRect?.left || 0) - ${closed.profileLeft}) <= 1,
+            tabsBeforeDemographics: !!(tabs.compareDocumentPosition(demographics) & Node.DOCUMENT_POSITION_FOLLOWING),
+            colorPickerFits: pickerRect.left >= 0 && pickerRect.right <= innerWidth + 1,
+            colorPickerIsButton: getComputedStyle(picker).borderTopStyle === 'outset',
+            colorInputHidden: Number(getComputedStyle(document.getElementById('m-calendar-color')).opacity) === 0
         };
+    })()`);
+
+    const memberTabStability = await win.webContents.executeJavaScript(`(() => {
+        const modal = document.getElementById('member-modal');
+        return ['main', 'orders', 'summary', 'monitoring'].map(tab => {
+            switchMemberProfileTab(tab);
+            const rect = modal.querySelector('.member-profile-window').getBoundingClientRect();
+            const body = modal.querySelector('.member-profile-body');
+            return {
+                tab,
+                left: Math.round(rect.left),
+                right: Math.round(rect.right),
+                scrollX: Math.round(scrollX),
+                bodyOverflow: body.scrollWidth - body.clientWidth
+            };
+        });
     })()`);
 
     await win.webContents.executeJavaScript(`switchMemberProfileTab('orders'); true;`);
@@ -353,7 +389,7 @@ app.whenReady().then(async () => {
         return results;
     })()`);
 
-    const result = { closed, open, memberSummary, memberMain, doseSheet, moreSheet, scheduleSteps, todayDashboard, weekCalendar, monthCalendar, medicationSearch, regimenPlanner, regimenReview, bottomNavigation, consoleErrors: errors };
+    const result = { closed, open, memberSummary, memberMain, memberTabStability, doseSheet, moreSheet, scheduleSteps, todayDashboard, weekCalendar, monthCalendar, medicationSearch, regimenPlanner, regimenReview, bottomNavigation, consoleErrors: errors };
     const failed = closed.mobileTitle !== 'PharmAtlas Mobile' || closed.viewMode !== 'grid' || !closed.gridVisible || !closed.handleVisible || closed.handleCount !== '1' ||
         !closed.bodyVisible || !closed.reportsCollapsed || closed.reportActionCount !== 4 || !closed.hasCreatePrepack || closed.pageOverflow > 0 || !closed.medicationCardFits || !closed.medicationActionsCompact || !open.open || !open.bodyVisible || !open.dockVisible ||
         open.dockWidth >= open.viewportWidth || !open.fitsViewport || !open.footerVisible || !open.memberSaveHidden || !doseSheet.visible || !doseSheet.compact ||
@@ -361,7 +397,9 @@ app.whenReady().then(async () => {
         scheduleSteps.buttons !== 3 || scheduleSteps.selected !== 'timing' || scheduleSteps.activeGroups < 1 ||
         scheduleSteps.wrongGroups > 0 || scheduleSteps.pageOverflow > 0 || !closed.memberSaveHidden || closed.memberActionButtons !== 2 || closed.visibleProfileTabs !== 4 || !closed.diaryTabHidden ||
         memberSummary.tableOverflow > 0 || memberSummary.rowOverflow > 0 || !memberSummary.cards || !memberSummary.labels || !memberSummary.saveHidden || memberSummary.pageOverflow > 0 ||
-        !memberMain.saveVisible || memberMain.pageOverflow > 0 ||
+        !memberMain.saveVisible || memberMain.pageOverflow > 0 || !memberMain.tabPositionStable || !memberMain.tabsBeforeDemographics ||
+        !memberMain.colorPickerFits || !memberMain.colorPickerIsButton || !memberMain.colorInputHidden ||
+        memberTabStability.some(entry => entry.left !== closed.profileLeft || entry.scrollX !== 0 || entry.bodyOverflow > 0 || entry.right > 393) ||
         todayDashboard.buttons !== 6 || !todayDashboard.actualButtons || !todayDashboard.active || !todayDashboard.validAttentionRows || todayDashboard.pageOverflow > 0 ||
         !weekCalendar.agenda || weekCalendar.headers !== 0 || weekCalendar.days !== 7 || weekCalendar.dayHeadings !== 7 || weekCalendar.overflow > 0 ||
         !monthCalendar.month || monthCalendar.headers !== 7 || monthCalendar.days < 35 || monthCalendar.columns !== 7 || monthCalendar.overflow > 0 ||

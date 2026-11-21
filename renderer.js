@@ -6207,10 +6207,9 @@ window.switchMemberProfileTab = function(tab = 'main') {
     const profileBody = document.querySelector('.member-profile-body');
     if (profileBody) profileBody.dataset.activeTab = tab;
     document.querySelectorAll('.member-profile-tab').forEach(button => {
-        button.classList.toggle('active', button.dataset.memberProfileTab === tab);
-        if (button.dataset.memberProfileTab === tab && document.documentElement.classList.contains('mobile-runtime')) {
-            requestAnimationFrame(() => button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
-        }
+        const active = button.dataset.memberProfileTab === tab;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
     });
     document.querySelectorAll('[data-member-section]').forEach(section => {
         section.style.display = section.dataset.memberSection === tab ? '' : 'none';
@@ -6233,6 +6232,16 @@ window.switchMemberProfileTab = function(tab = 'main') {
     } else {
         setMemberMedicationWorkPanelOpen(false);
     }
+};
+
+window.syncMemberCalendarColorPicker = function() {
+    const input = document.getElementById('m-calendar-color');
+    const picker = document.getElementById('m-calendar-color-picker');
+    if (!input || !picker) return;
+    const color = /^#[0-9a-f]{6}$/i.test(input.value || '') ? input.value : '#000080';
+    picker.style.setProperty('--member-calendar-color', color);
+    const label = picker.querySelector('.member-calendar-color-label');
+    if (label) label.textContent = color.toUpperCase();
 };
 
 function latestMemberReading(memberId, types) {
@@ -10518,6 +10527,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
     const prnMedsContainer = document.getElementById('member-prn-meds-list');
     if (prnMedsContainer) prnMedsContainer.innerHTML = '';
     safeSet('m-calendar-color', '#000080');
+    window.syncMemberCalendarColorPicker();
     setMemberGoalFields(null);
 
     if (id) {
@@ -10544,6 +10554,7 @@ window.openMemberModal = async function(id = null, initialTab = null) {
             safeSet('m-email', m.email);
             safeSet('m-care-notes', m.careNotes);
             safeSet('m-calendar-color', m.calendarColor || (m.sex === 'Female' ? '#8b1558' : '#000080'));
+            window.syncMemberCalendarColorPicker();
             const notifications = m.notificationPrefs || {};
             if (notifyEnabled) notifyEnabled.checked = notifications.medicationReminders !== false;
             if (emailReminders) emailReminders.checked = notifications.emailReminders === true;
