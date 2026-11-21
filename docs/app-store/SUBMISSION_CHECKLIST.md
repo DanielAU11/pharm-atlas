@@ -22,5 +22,9 @@
 - [ ] Medication scheduling, retiming, administration, inventory, monitoring, reports, and sharing pass on iOS.
 - [ ] Desktop-only Prepack and Recipe Builder tabs are absent from iOS navigation.
 - [ ] App Review notes clearly state intended use and provide a review path.
+- [ ] App Review notes state that PharmAtlas organizes user-entered instructions and does not diagnose, prescribe, recommend doses, or replace a clinician or pharmacist.
+- [ ] Every reference range, target, and medication instruction is framed as user-entered tracking information rather than a treatment recommendation.
+- [ ] VoiceOver labels, Dynamic Type behavior, contrast, touch targets, and keyboard navigation have been checked on physical devices.
+- [ ] A seven-day Personal Team install is not used for release testing; the final candidate is distributed through TestFlight.
 - [ ] TestFlight acceptance pass is complete.
 - [ ] The processed build is selected and submitted for review.

@@ -878,7 +878,6 @@
     function renderMobileCompanionPanel() {
         const host = document.getElementById('mobile-companion-panel');
         if (!host) return;
-        const deviceName = window.innerWidth >= 700 ? 'iPad' : 'iPhone';
         const paired = mobileSettings.pairing;
         const remote = cloudPairingConfigured(paired);
         const lastSync = mobileSettings.lastSyncAt ? new Date(mobileSettings.lastSyncAt).toLocaleString() : 'Not synced yet';
@@ -894,7 +893,7 @@
                         ? { tone: 'waiting', title: 'Saved safely on this device', detail: remote ? 'Automatic sync will retry.' : 'Open the desktop app on the same network to sync.' }
                         : { tone: 'ready', title: 'Up to date', detail: `Last sync: ${lastSync}` };
         host.innerHTML = `
-            <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>${deviceName} Sync &amp; Reminders</strong></div>
+            <div class="mobile-companion-heading"><span class="win98-icon icon-calendar"></span><strong>Mobile Sync &amp; Reminders</strong></div>
             <div class="mobile-sync-state ${syncState.tone}" role="status" aria-live="polite"><strong>${syncState.title}</strong><span>${syncState.detail}</span></div>
             <div class="mobile-companion-actions">
                 <button type="button" onclick="${mobileSettings.notificationsEnabled ? 'disableIphoneReminders()' : 'enableIphoneReminders()'}"><span class="win98-icon icon-calendar"></span>${mobileSettings.notificationsEnabled ? 'Reminders On' : 'Enable Reminders'}</button>
@@ -924,8 +923,7 @@
             panel.className = 'mobile-companion-panel';
             dashboard.prepend(panel);
         }
-        const deviceName = window.innerWidth >= 700 ? 'iPad' : 'iPhone';
-        document.querySelector('.app-window > .title-bar .title-bar-text')?.replaceChildren(document.createTextNode(`PharmAtlas ${deviceName}`));
+        document.querySelector('.app-window > .title-bar .title-bar-text')?.replaceChildren(document.createTextNode('PharmAtlas Mobile'));
         installMobileNavigation();
         renderMobileCompanionPanel();
     }

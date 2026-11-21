@@ -634,6 +634,7 @@ button {
 }
 
 .today-summary-strip span,
+.today-summary-strip button,
 .maintenance-summary span {
     border: 2px inset #ffffff;
     background: linear-gradient(180deg, #ffffff, #e8f2ff);
@@ -642,6 +643,74 @@ button {
     color: #000080;
     font-weight: bold;
     box-shadow: 1px 1px 0 #808080;
+}
+
+.today-dashboard-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 0.55fr);
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 7px;
+    padding: 8px 10px;
+    border: 2px outset #ffffff;
+    background: linear-gradient(90deg, #e9f3ff, #fffde5);
+}
+
+.today-dashboard-head small,
+.today-dashboard-head strong {
+    display: block;
+}
+
+.today-dashboard-head small {
+    color: #404040;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.today-dashboard-head strong {
+    margin-top: 2px;
+    color: #000080;
+    font-size: 16px;
+}
+
+.today-dashboard-progress > span {
+    display: block;
+    margin-bottom: 4px;
+    text-align: right;
+    color: #204020;
+    font-size: 11px;
+}
+
+.today-dashboard-progress > div {
+    height: 12px;
+    border: 2px inset #ffffff;
+    background: #ffffff;
+}
+
+.today-dashboard-progress i {
+    display: block;
+    height: 100%;
+    background: #138a13;
+}
+
+.today-summary-strip button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.today-summary-strip button.active {
+    border-style: inset;
+    background: #dff6d8;
+    color: #004f00;
+}
+
+.today-filter-empty {
+    padding: 24px 12px;
+    color: #505050;
+    text-align: center;
 }
 
 .today-dose-list {
@@ -13521,10 +13590,21 @@ button {
         gap: 5px;
     }
 
-    .mobile-runtime .today-summary-strip span {
+    .mobile-runtime .today-summary-strip span,
+    .mobile-runtime .today-summary-strip button {
         min-width: 0;
         padding: 7px;
         text-align: center;
+    }
+
+    .mobile-runtime .today-dashboard-head {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 7px;
+        padding: 8px;
+    }
+
+    .mobile-runtime .today-dashboard-progress > span {
+        text-align: left;
     }
 
     .mobile-runtime .today-dose-list {
@@ -13818,11 +13898,18 @@ button {
         margin: 0;
         padding: 5px 2px;
         background: #c0c0c0;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: visible;
     }
 
     .mobile-runtime .member-profile-tabbar button {
+        width: 100%;
+        max-width: none;
+        min-width: 0;
         min-height: 42px;
-        padding: 5px 10px;
+        padding: 5px 4px;
+        white-space: normal;
     }
 
     .mobile-runtime .member-profile-body {
@@ -13852,8 +13939,139 @@ button {
         font-weight: bold;
     }
 
+    .mobile-runtime .member-profile-body:not([data-active-tab="main"]) .member-profile-save-actions {
+        display: none !important;
+    }
+
     .mobile-runtime #member-modal.order-dock-open .member-profile-save-actions {
         display: none !important;
+    }
+
+    .mobile-runtime .member-profile-tab[data-member-profile-tab="diary"],
+    .mobile-runtime [data-member-section="diary"],
+    .mobile-runtime #progress-note-side-panel,
+    .mobile-runtime .member-context-rail {
+        display: none !important;
+    }
+
+    .mobile-runtime #family-list {
+        height: auto !important;
+        min-height: 150px;
+        max-height: 280px;
+    }
+
+    .mobile-runtime [data-member-section="summary"] > .field-row {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px;
+        justify-content: stretch !important;
+    }
+
+    .mobile-runtime [data-member-section="summary"] > .field-row button {
+        width: 100%;
+        min-width: 0;
+        min-height: 42px;
+    }
+
+    .mobile-runtime [data-member-section="summary"] > .field-row button:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+    }
+
+    .mobile-runtime .current-med-list-table,
+    .mobile-runtime .medication-summary-table,
+    .mobile-runtime .current-med-list-table tbody,
+    .mobile-runtime .medication-summary-table tbody,
+    .mobile-runtime .current-med-list-table tr,
+    .mobile-runtime .medication-summary-table tr,
+    .mobile-runtime .current-med-list-table td {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime .medication-summary-table td {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .mobile-runtime .current-med-list-table thead,
+    .mobile-runtime .medication-summary-table thead {
+        display: none;
+    }
+
+    .mobile-runtime .current-med-list-table,
+    .mobile-runtime .medication-summary-table {
+        border: 0;
+        background: transparent;
+    }
+
+    .mobile-runtime .current-med-list-table tr,
+    .mobile-runtime .medication-summary-table tr {
+        margin-bottom: 7px;
+        border: 2px outset #ffffff;
+        background: #ffffff;
+        overflow: hidden;
+    }
+
+    .mobile-runtime .current-med-list-table td,
+    .mobile-runtime .medication-summary-table td {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 7px;
+        padding: 5px 7px;
+        border: 0;
+        border-bottom: 1px dotted #a0a0a0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        overflow: hidden;
+        white-space: normal !important;
+        font-size: 12px;
+        line-height: 16px;
+    }
+
+    .mobile-runtime .current-med-list-table td > *,
+    .mobile-runtime .medication-summary-table td > * {
+        min-width: 0;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .mobile-runtime .current-med-list-table td:last-child,
+    .mobile-runtime .medication-summary-table td:last-child {
+        border-bottom: 0;
+    }
+
+    .mobile-runtime .current-med-list-table td::before,
+    .mobile-runtime .medication-summary-table td::before {
+        content: attr(data-label);
+        color: #404040;
+        font-weight: bold;
+    }
+
+    .mobile-runtime .current-med-list-table td[data-label="Medication"],
+    .mobile-runtime .medication-summary-table td[data-label="Medication"] {
+        display: block;
+        padding: 7px;
+        background: #e9f3ff;
+        color: #000080;
+        font-size: 13px;
+    }
+
+    .mobile-runtime .current-med-list-table td[data-label="Medication"]::before,
+    .mobile-runtime .medication-summary-table td[data-label="Medication"]::before,
+    .mobile-runtime .current-med-list-table .current-med-list-empty td::before,
+    .mobile-runtime .medication-summary-table .medication-summary-empty td::before {
+        display: none;
+    }
+
+    .mobile-runtime .current-med-list-table .current-med-list-empty td,
+    .mobile-runtime .medication-summary-table .medication-summary-empty td {
+        display: block;
+        padding: 12px;
     }
 
     .mobile-runtime .member-active-toolbar,
@@ -14230,14 +14448,25 @@ button {
 
     /* Profile controls keep their meaning while using phone-width rows. */
     .mobile-runtime .member-profile-tabbar {
-        scroll-snap-type: x proximity;
+        scroll-snap-type: none;
     }
 
     .mobile-runtime .member-profile-tabbar button {
-        max-width: 170px;
-        scroll-snap-align: center;
+        max-width: none;
+        scroll-snap-align: none;
         white-space: normal;
         line-height: 15px;
+    }
+
+    .mobile-runtime #member-modal .member-profile-window > .title-bar .title-bar-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mobile-runtime #member-modal .member-profile-window > .title-bar .title-bar-controls button:not(:last-child) {
+        display: none;
     }
 
     .mobile-runtime .member-active-toolbar > label {

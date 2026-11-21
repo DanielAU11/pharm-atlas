@@ -6202,6 +6202,7 @@ function defaultCurrentMedicationListForMember(memberId) {
 }
 
 window.switchMemberProfileTab = function(tab = 'main') {
+    if (document.documentElement.classList.contains('mobile-runtime') && tab === 'diary') tab = 'main';
     captureMemberProfileState(currentEditingMemberId, { activeTab: tab });
     const profileBody = document.querySelector('.member-profile-body');
     if (profileBody) profileBody.dataset.activeTab = tab;
@@ -6380,13 +6381,13 @@ function renderMemberCurrentMedicationList() {
             const prescriber = item.prescriberName || (item.prescriberId ? prescriberNameById(item.prescriberId) : medicationSummaryPrescriberName(null, med));
             const pharmacy = item.pharmacyId ? pharmacyNameById(item.pharmacyId) : medicationSummaryPharmacyName(null, med);
             return `<tr>
-                <td><strong>${escapeHtml(medicationNameWithStrength(med))}</strong></td>
-                <td>${escapeHtml(doseQtyWithParentheses(item.doseQty || ''))}</td>
-                <td>${escapeHtml(item.indication || 'Not specified')}</td>
-                <td>${escapeHtml(prescriber || 'Not specified')}</td>
-                <td>${escapeHtml(pharmacy || 'Not specified')}</td>
-                <td>${escapeHtml(item.frequency || '')}</td>
-                <td>${escapeHtml(item.directions || '')}</td>
+                <td data-label="Medication"><strong>${escapeHtml(medicationNameWithStrength(med))}</strong></td>
+                <td data-label="Dose / Qty">${escapeHtml(doseQtyWithParentheses(item.doseQty || ''))}</td>
+                <td data-label="Used For">${escapeHtml(item.indication || 'Not specified')}</td>
+                <td data-label="Prescriber">${escapeHtml(prescriber || 'Not specified')}</td>
+                <td data-label="Pharmacy">${escapeHtml(pharmacy || 'Not specified')}</td>
+                <td data-label="Frequency">${escapeHtml(item.frequency || '')}</td>
+                <td data-label="Directions">${escapeHtml(item.directions || '')}</td>
             </tr>`;
         })
         .filter(Boolean)
@@ -6394,7 +6395,7 @@ function renderMemberCurrentMedicationList() {
     container.innerHTML = `
         <table class="win98-report-table current-med-list-table">
             <thead><tr><th>Medication</th><th>Dose / Qty</th><th>Used For</th><th>Prescriber</th><th>Pharmacy</th><th>Frequency</th><th>Directions / Comments</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="7">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
+            <tbody>${rows || '<tr class="current-med-list-empty"><td colspan="7">No current list saved. Use Create/Edit Current List to select inventory items.</td></tr>'}</tbody>
         </table>
         ${currentMemberDiscontinuedMedicationList().length ? `
             <div class="current-list-discontinued-block">
@@ -20434,6 +20435,21 @@ function todayStatusIcon(row) {
     return '&#8226;';
 }
 
+let todayDashboardFilter = 'all';
+
+function todayDashboardRowMatches(row, filter = todayDashboardFilter) {
+    if (filter === 'all') return true;
+    if (filter === 'attention') return ['overdue', 'soon', 'exception'].includes(row.status);
+    if (filter === 'checks') return row.type === 'care-reminder';
+    return row.status === filter;
+}
+
+window.setTodayDashboardFilter = function(filter = 'all') {
+    const allowed = new Set(['all', 'attention', 'later', 'given', 'PRN', 'checks']);
+    todayDashboardFilter = allowed.has(filter) ? filter : 'all';
+    renderTodayViewDashboard();
+};
+
 function renderTodayViewDashboard() {
     const container = document.getElementById('today-view-dashboard');
     if (!container) return;
@@ -20447,7 +20463,8 @@ function renderTodayViewDashboard() {
         acc[row.status] = (acc[row.status] || 0) + 1;
         return acc;
     }, {});
-    const rowHtml = rows.slice(0, 40).map(row => {
+    const filteredRows = rows.filter(row => todayDashboardRowMatches(row));
+    const rowHtml = filteredRows.slice(0, 40).map(row => {
         const statusClass = `today-status-${String(row.status).toLowerCase()}`;
         const time = row.instance.time || 'PRN';
         if (row.type === 'care-reminder') {
@@ -20502,17 +20519,29 @@ function renderTodayViewDashboard() {
             </div>
         </div>`;
     }).join('');
+    const actionableRows = rows.filter(row => row.status !== 'PRN');
+    const completedCount = actionableRows.filter(row => row.status === 'given').length;
+    const completionPercent = actionableRows.length ? Math.round((completedCount / actionableRows.length) * 100) : 100;
+    const dateLabel = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date());
+    const attentionCount = (counts.overdue || 0) + (counts.soon || 0) + (counts.exception || 0);
+    const filterButton = (filter, label, count) => `<button type="button" class="today-filter-button ${todayDashboardFilter === filter ? 'active' : ''}" aria-pressed="${todayDashboardFilter === filter}" onclick="setTodayDashboardFilter('${filter}')"><span>${escapeHtml(label)}</span><b>${count}</b></button>`;
     container.innerHTML = `
-        <div class="today-summary-strip">
-            <span>Overdue: <b>${counts.overdue || 0}</b></span>
-            <span>Due soon: <b>${counts.soon || 0}</b></span>
-            <span>Later: <b>${counts.later || 0}</b></span>
-            <span>Exceptions: <b>${counts.exception || 0}</b></span>
-            <span>Given: <b>${counts.given || 0}</b></span>
-            <span>PRN: <b>${counts.PRN || 0}</b></span>
-            <span>Checks: <b>${rows.filter(row => row.type === 'care-reminder').length}</b></span>
+        <div class="today-dashboard-head">
+            <div><small>Today</small><strong>${escapeHtml(dateLabel)}</strong></div>
+            <div class="today-dashboard-progress" aria-label="${completionPercent}% of scheduled work completed">
+                <span><b>${completedCount}</b> of ${actionableRows.length} completed</span>
+                <div><i style="width:${completionPercent}%"></i></div>
+            </div>
         </div>
-        <div class="today-dose-list">${rowHtml}${rows.length > 40 ? `<div class="form-help">Showing 40 of ${rows.length} today items.</div>` : ''}</div>`;
+        <div class="today-summary-strip">
+            ${filterButton('all', 'All', rows.length)}
+            ${filterButton('attention', 'Attention', attentionCount)}
+            ${filterButton('later', 'Later', counts.later || 0)}
+            ${filterButton('given', 'Completed', counts.given || 0)}
+            ${filterButton('PRN', 'PRN', counts.PRN || 0)}
+            ${filterButton('checks', 'Checks', rows.filter(row => row.type === 'care-reminder').length)}
+        </div>
+        <div class="today-dose-list">${rowHtml || '<div class="today-filter-empty">No items match this view.</div>'}${filteredRows.length > 40 ? `<div class="form-help">Showing 40 of ${filteredRows.length} matching items.</div>` : ''}</div>`;
     renderDashboardRightPanel(rows, counts);
 }
 
@@ -21531,13 +21560,13 @@ function memberMedicationReviewHtml(member, options = {}) {
         const values = medicationSummaryRowValues(schedule);
         if (!values) return '';
         return `<tr>
-            ${columns.map(column => `<td>${values[column.id]}</td>`).join('')}
+            ${columns.map(column => `<td data-label="${escapeHtml(column.label)}">${values[column.id]}</td>`).join('')}
         </tr>`;
     }).join('');
     return `
         <table class="win98-report-table medication-summary-table">
             <thead><tr>${columns.map(column => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
-            <tbody>${rows || `<tr><td colspan="${columns.length}">No active medications or supplements.</td></tr>`}</tbody>
+            <tbody>${rows || `<tr class="medication-summary-empty"><td colspan="${columns.length}">No active medications or supplements.</td></tr>`}</tbody>
         </table>`;
 }
 

@@ -41,7 +41,7 @@ In Xcode's package list, `capacitor-swift-pm` must show `8.5.3`. If another vers
 1. Select the **App** target in Xcode.
 2. In **Signing & Capabilities**, select the correct development team.
 3. Keep **Automatically manage signing** enabled.
-4. Confirm bundle identifier `com.pharmatlas.app`, version `1.3.7`, and build number `5` (or another number not previously uploaded).
+4. Confirm bundle identifier `com.pharmatlas.app`, version `1.3.11`, and build number `9` (or another number not previously uploaded).
 5. Confirm iPhone and iPad are both selected as supported destinations.
 
 ## 4. Test Before Archiving
@@ -63,7 +63,7 @@ The iOS Simulator and a physical iPhone can pair with PharmAtlas running on a Ma
 1. On the Mac, pull the latest repository and run `npm install`, `npm run cap:sync`, then `npm run cap:open:ios`.
 2. Start the desktop endpoint. For an all-Mac Simulator test, open a second Terminal in the repository and run `npm start`. For a Windows-to-iPhone test, leave the installed Windows PharmAtlas app open.
 3. In the desktop app, choose **Device Sync**. Allow Electron/PharmAtlas through the macOS or Windows firewall for private networks. Keep the pairing window open.
-4. In Xcode, select an iPhone Simulator and press **Run**. On the PharmAtlas Dashboard, locate **iPhone Companion**.
+4. In Xcode, select an iPhone Simulator and press **Run**. On the PharmAtlas Dashboard, locate **Mobile Sync & Reminders**.
 5. The Simulator normally cannot scan the desktop QR. Expand **Simulator / manual pairing** on the desktop, choose **Copy Pairing Text**, paste it into the Simulator's pairing field, and tap **Pair Desktop**.
 6. For a physical iPhone, connect it to the Mac, enable Developer Mode, select it as Xcode's destination, press **Run**, then use **Pair Desktop** to scan the QR. Approve Camera and Local Network access.
 7. Create a uniquely named medication or schedule on iOS and tap **Sync Now**. Confirm it appears live on desktop. Modify it on desktop, save, then sync on iOS and confirm the change returns.
@@ -71,6 +71,12 @@ The iOS Simulator and a physical iPhone can pair with PharmAtlas running on a Ma
 9. On desktop, verify a pre-sync backup appears in the configured data folder under `sync-backups` after incoming mobile changes.
 
 If pairing fails, verify the desktop pairing address is a private address (`10.x`, `172.16-31.x`, or `192.168.x`), both devices are on the same non-guest network, the displayed port is allowed by the firewall, and VPN/Private Relay is temporarily disabled for the test.
+
+### How Long A Test Install Lasts
+
+- An app installed with a free Apple Account / Personal Team expires after 7 days and must be rebuilt and reinstalled from Xcode.
+- A TestFlight build can be tested for up to 90 days. Upload a newer build before the current build expires.
+- An App Store release does not use the seven-day development limit. It remains installed like another purchased app, subject to normal device compatibility, account, and App Store availability rules.
 
 ## 5. Archive And Upload
 
